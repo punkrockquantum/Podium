@@ -1,9 +1,9 @@
 /**
  * Approval is the gate for scoring: a table's design counts (points and the race) only once a table
- * leader has approved it after a pitch. Pure: shared by the server, the host, the tables, the race
+ * Architect has approved it after a pitch. Pure: shared by the server, the host, the tables, the race
  * screen and demo mode.
  *
- * Per team × table: draft → locked (team locks in) → waiting (called the leader) → pitching →
+ * Per team × table: draft → locked (team locks in) → waiting (called the Architect) → pitching →
  * approved | sent back (the plan unlocks so the team can revise and lock in again).
  */
 
@@ -15,7 +15,7 @@ export const STATUS_LABEL = {
   none: "Not started",
   draft: "Draft",
   locked: "Locked in",
-  waiting: "Waiting for leader",
+  waiting: "Waiting for Architect",
   pitching: "Pitching",
   approved: "Approved",
   sentBack: "Sent back",
@@ -28,7 +28,7 @@ export function isApproved(team, stationId) {
   return team?.reviews?.[stationId]?.status === "approved"
 }
 
-/** Tables whose design a leader approved: the only ones that score and race. */
+/** Tables whose design an Architect approved: the only ones that score and race. */
 export function approvedStations(team, stationIds) {
   return stationIds.filter((id) => isApproved(team, id))
 }

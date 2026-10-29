@@ -1,147 +1,99 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as C from "../public/js/catalog.js"
-import { evaluate, cpuRates, resolveChoices, aeroGainFor, execution } from "../public/js/model.js"
-import { REFERENCE_BUILD } from "../public/js/sim.js"
+import { evaluate, effectiveTeam, choicesOf } from "../public/js/model.js"
+import { GOOD, IDS, approvedAt } from "./routes.js"
 
-const SMART = { ...REFERENCE_BUILD }
+const words = (text) => text.trim().split(/\s+/).length
 
-test("FIA billing: turbo is billed at max boost, a clock lock at its locked frequency", () => {
-  const cpu = C.byId(C.CPUS, "epyc9575f")
-  const turbo = cpuRates(cpu, C.byId(C.CLOCKS, "turbo"))
-  const lock = cpuRates(cpu, C.byId(C.CLOCKS, "lock70"))
-  assert.equal(turbo.billedGHz, cpu.boostGHz)
-  assert.ok(Math.abs(lock.billedGHz - cpu.baseGHz * 0.7) < 1e-9)
-  assert.ok(lock.efficiency > turbo.efficiency, "memory-bound CFD wastes billed FLOPs at high clocks")
-})
-
-test("defaults are valid, hidden decisions are fixed, and bad input resolves to the defaults", () => {
-  for (const d of C.DECISIONS) {
-    if (d.hidden) assert.equal(C.validChoice(d.id, d.def), false, `${d.id} is hidden and cannot be chosen`)
-    else assert.ok(C.validChoice(d.id, C.DEFAULT_CHOICES[d.id]), d.id)
-  }
-  assert.deepEqual(resolveChoices({ cpu: "not-a-cpu", nodes: 999 }), C.DEFAULT_CHOICES)
-})
-
-test("each table shows 4–6 decisions with 2–4 options (5 for OEM and accelerator), each with a one-line why", () => {
+test("four tables, exactly three decisions each, exactly three options each", () => {
+  assert.deepEqual(C.STATIONS.map((s) => s.id), ["network", "oem", "dc", "compute"])
+  assert.deepEqual(C.STATIONS.map((s) => s.name), ["Connectivity", "OEMs", "Datacenter & Power", "CFD Supercomputer"])
   for (const s of C.STATIONS) {
-    const visible = C.visibleDecisions(s.id)
-    assert.ok(visible.length >= 4 && visible.length <= 6, `${s.id} has ${visible.length} decisions`)
-    for (const d of visible) {
-      const count = d.options ? d.options.length : d.values.length
-      assert.ok(count >= 2 && count <= 5, `${d.id} has ${count} options`)
-      if (d.options) {
-        assert.ok(count >= 2 && count <= (["oem", "platform"].includes(d.id) ? 5 : 4), `${d.id} has ${count} cards`)
-        for (const o of d.options) assert.ok(typeof o.why === "string" && o.why.length > 10 && o.why.length < 160, `${d.id}.${o.id} why`)
+    const ds = C.decisionsFor(s.id)
+    assert.equal(ds.length, 3, `${s.id} has three decisions`)
+    assert.ok(s.brief.length >= 1 && s.brief.length <= 3, `${s.id} brief has at most three bullets`)
+    assert.ok(s.looking.length > 10 && s.architect.endsWith("Architect"))
+    for (const d of ds) {
+      assert.equal(d.options.length, 3, `${d.id} has three options`)
+      assert.ok(d.why.length > 10, `${d.id} says why it matters`)
+      assert.ok(d.options.some((o) => o.id === d.def), `${d.id} default is an option`)
+      for (const o of d.options) {
+        assert.ok(words(o.text) <= 12, `${d.id}/${o.id} sentence is at most 12 words: "${o.text}"`)
+        assert.ok(o.why.length > 10 && words(o.why) <= 14, `${d.id}/${o.id} has a one-line why`)
       }
     }
   }
+  assert.equal(C.DECISIONS.length, 12)
+  for (const old of ["ai", "storage", "governance"]) assert.ok(C.RETIRED_STATIONS[old], `${old} is listed as retired`)
 })
 
-test("every option is labelled: an FIA rule tag where a regulation drives it, est. for estimates", () => {
-  for (const d of C.DECISIONS) {
-    for (const o of d.options || []) {
-      assert.ok(["IND", "FIA", "PODIUM"].includes(o.src), `${d.id}.${o.id} src ${o.src}`)
-      const tag = C.optionTag(o)
-      if (o.fia) assert.deepEqual(tag, { kind: "fia", text: `FIA rule ${o.fia}` })
-      else if (o.est) assert.deepEqual(tag, { kind: "est", text: "est." })
-      else assert.equal(tag, null)
-    }
-  }
+test("tiers: Front-runner, Midfield, Challenger, each with a one-line explanation", () => {
+  assert.deepEqual(C.TIERS.map((t) => t.label), ["Front-runner (Tier 1)", "Midfield (Tier 2)", "Challenger (Tier 3)"])
+  for (const t of C.TIERS) assert.match(t.line, /CapEx headroom/)
+  assert.ok(C.TIERS[0].capex < C.TIERS[1].capex && C.TIERS[1].capex < C.TIERS[2].capex, "front-runners get the least headroom")
+  assert.ok(C.TIERS[0].compute < C.TIERS[1].compute && C.TIERS[1].compute < C.TIERS[2].compute, "and the least compute")
+  assert.equal(C.tierFor({ tier: 9 }).id, 2, "an unknown tier falls back to Midfield")
 })
 
-test("bundled options set their hidden decisions", () => {
-  assert.equal(resolveChoices({ trackside: "fia" }).tunnels, "redundant")
-  assert.equal(resolveChoices({ trackside: "wireless" }).garage, "wifidump")
-  assert.equal(resolveChoices({ audit: "full" }).curfew, "auto")
-  assert.equal(resolveChoices({ audit: "full", logs: "standard" }).logs, "worm", "a hidden decision cannot be set directly")
+test("ten distinct team colours and a 50-minute session by default", () => {
+  assert.equal(C.TEAM_COLORS.length, 10)
+  assert.equal(new Set(C.TEAM_COLORS).size, 10)
+  assert.equal(C.MAX_TEAMS, 10)
+  assert.equal(C.MIN_TEAMS, 1)
+  assert.equal(C.sessionTotal(), 50)
+  assert.equal(C.SESSION.briefMinutes, 5)
+  assert.equal(C.SESSION.playMinutes, 35)
 })
 
-test("a disciplined build beats the defaults on aero and strategy", () => {
-  const base = evaluate({ rank: 7, choices: {} })
-  const smart = evaluate({ rank: 7, choices: SMART })
-  assert.ok(smart.aero.index > base.aero.index * 3, `${smart.aero.index} vs ${base.aero.index}`)
-  assert.ok(smart.strategy > base.strategy)
-  assert.ok(smart.network.loopS < base.network.loopS)
-  assert.ok(smart.penalties.length < base.penalties.length)
+test("the ledger is four numbers: CapEx, yearly OpEx, power and FIA risk", () => {
+  const ev = evaluate({ tier: 2, choices: GOOD })
+  for (const key of ["capex", "opex", "facilityKW"]) assert.ok(Number.isFinite(ev.ledger[key]) && ev.ledger[key] > 0, key)
+  assert.ok(["Low", "Med", "High"].includes(ev.ledger.fia))
+  assert.equal(ev.ledger.fia, "Low", "the reference build is FIA-clean")
+  assert.equal(evaluate({ tier: 2, choices: {} }).ledger.fia, "High", "the defaults carry FIA risk")
 })
 
-test("NVL72 racks in an air hall throttle; a liquid hall does not", () => {
-  const air = evaluate({ rank: 5, choices: { ...SMART, platform: "gb300", racks: 1, hall: "A", tgp: "std" } })
-  const liquid = evaluate({ rank: 5, choices: { ...SMART, platform: "gb300", racks: 1, hall: "L", tgp: "std", block: 0.5 } })
-  assert.ok(air.cooling.thermal < 1, "air hall should throttle a 142 kW rack")
-  assert.equal(liquid.cooling.thermal, 1)
+test("invalid or missing choices fall back to the defaults", () => {
+  const ch = choicesOf({ choices: { link: "bogus", cooling: "liquid", ai: "old" } })
+  assert.equal(ch.link, "single")
+  assert.equal(ch.cooling, "liquid")
+  assert.equal(Object.keys(ch).length, 12)
 })
 
-test("illegal choices raise FIA penalties", () => {
-  const ev = evaluate({ rank: 5, choices: { ...SMART, trackside: "wireless", dataflow: "bidir", workforce: "immediate" } })
-  const ids = ev.penalties.map((p) => p.id)
-  for (const id of ["bidir", "workforce", "5g"]) assert.ok(ids.includes(id), `${id} in ${ids}`)
+test("buying stretches a Front-runner's CapEx; leasing moves it to OpEx; as-a-service needs Dell, HPE or Lenovo", () => {
+  const buy = { ...GOOD, payment: "buy", support: "4h" }
+  assert.ok(evaluate({ tier: 1, choices: buy }).ledger.capexOver > 0, "Front-runners cannot buy this cluster")
+  assert.equal(evaluate({ tier: 3, choices: buy }).ledger.capexOver, 0, "Challengers can")
+  assert.ok(evaluate({ tier: 1, choices: buy }).penalties.some((p) => p.id === "capex"))
+  const lease = evaluate({ tier: 1, choices: { ...GOOD, payment: "lease" } })
+  assert.ok(lease.ledger.capex < evaluate({ tier: 1, choices: buy }).ledger.capex)
+  assert.equal(evaluate({ choices: { ...GOOD, vendor: "dgx", payment: "aas" } }).payment, "lease", "DGX has no as-a-service: it falls back to a lease")
+  assert.equal(evaluate({ choices: GOOD }).payment, "aas")
 })
 
-test("OEM choice changes CapEx in the direction of its price multiplier", () => {
-  const sm = evaluate({ rank: 5, choices: { ...SMART, oem: "supermicro" } })
-  const nv = evaluate({ rank: 5, choices: { ...SMART, oem: "nvidia" } })
-  assert.ok(sm.ledger.capex < nv.ledger.capex)
-  for (const oem of C.OEMS) assert.ok(evaluate({ rank: 5, choices: { ...SMART, oem: oem.id } }).ledger.capex > 0)
+test("hot chips on air cooling throttle; liquid does not", () => {
+  assert.ok(evaluate({ choices: { ...GOOD, chips: "gpu", cooling: "air" } }).power.thermal < 1)
+  assert.equal(evaluate({ choices: { ...GOOD, chips: "gpu", cooling: "liquid", power: "boost" } }).power.thermal, 1)
+  assert.ok(evaluate({ choices: { ...GOOD, cooling: "liquid" } }).power.pue < evaluate({ choices: { ...GOOD, cooling: "air" } }).power.pue)
 })
 
-test("overspending the CapEx envelope is flagged", () => {
-  const ev = evaluate({ rank: 2, choices: { ...SMART, platform: "gb300", racks: 4, nodes: 16 } })
-  assert.ok(ev.ledger.capexOver > 0)
-  assert.ok(ev.checks.some((c) => c.state === "red"))
+test("illegal and risky choices carry FIA penalties at the right table", () => {
+  const ev = evaluate({ choices: { ...GOOD, garage: "wifi", link: "single", location: "factory", size: "large" } })
+  const at = Object.fromEntries(ev.penalties.map((p) => [p.id, p.station]))
+  assert.equal(at.wifi, "network")
+  assert.equal(at.tunnel, "network")
+  assert.equal(at.nplus1, "dc")
+  assert.equal(at.overrun, "compute")
+  assert.equal(ev.penalties.find((p) => p.id === "wifi").seconds, 5)
 })
 
-test("aero gain saturates and pitch execution stays in range", () => {
-  assert.equal(aeroGainFor(0), 0)
-  assert.ok(aeroGainFor(100) <= 0.9)
-  assert.equal(execution({}, "compute"), 0.97)
-  assert.ok(Math.abs(execution({ compute: C.PITCH_MAX }, "compute") - 1.04) < 1e-9)
-  assert.equal(execution({ compute: 0 }, "compute"), 0.94)
-})
-
-const AI = { ...SMART, platform: "b300", racks: 1, deploy: "own", tgp: "eco85", hall: "L", block: 0.5 }
-
-test("AI memory: weights + KV fit, or spill and offload", () => {
-  const fits = evaluate({ rank: 5, choices: { ...AI, modelSize: "70b", precision: "fp8", hbm: "hbm288" } })
-  assert.equal(fits.ai.memory.state, "fits")
-  const big = evaluate({ rank: 5, choices: { ...AI, modelSize: "400b", precision: "fp32", hbm: "hbm80", platform: "h100", kv: "off" } })
-  assert.equal(big.ai.memory.state, "offload")
-  assert.ok(big.ai.memory.eff < fits.ai.memory.eff)
-  assert.ok(big.ai.tokens < fits.ai.tokens / 10)
-})
-
-test("precision changes speed and accuracy but never the FIA compute bill", () => {
-  const runs = ["fp32", "bf16", "fp8", "int8"].map((precision) => evaluate({ rank: 5, choices: { ...AI, modelSize: "70b", hbm: "hbm288", precision } }))
-  for (const ev of runs) {
-    assert.equal(ev.atr.mauh, runs[0].atr.mauh)
-    assert.equal(ev.cfd.allowedCoreHours, runs[0].cfd.allowedCoreHours)
-  }
-  const [fp32, bf16, fp8, int8] = runs
-  assert.ok(fp8.ai.tokens > bf16.ai.tokens && bf16.ai.tokens > fp32.ai.tokens)
-  assert.ok(int8.ai.accuracy < fp8.ai.accuracy && fp8.ai.accuracy < bf16.ai.accuracy)
-})
-
-test("HBM tiers trade cost for bandwidth; unsupported tiers fall back", () => {
-  const h141 = evaluate({ rank: 5, choices: { ...AI, modelSize: "70b", precision: "fp8", hbm: "hbm141" } })
-  const h288 = evaluate({ rank: 5, choices: { ...AI, modelSize: "70b", precision: "fp8", hbm: "hbm288" } })
-  assert.ok(h288.ai.tokens >= h141.ai.tokens)
-  const clamped = evaluate({ rank: 5, choices: { ...AI, platform: "h100", hbm: "hbm288" } })
-  assert.ok(["hbm80", "hbm141"].includes(clamped.ai.memory.tier))
-  assert.ok(clamped.notes.some((n) => /HBM|memory/i.test(n)))
-})
-
-test("connectivity: the FIA trackside bundle is clean; basic and wireless are not", () => {
-  const ids = (trackside) => evaluate({ rank: 5, choices: { ...SMART, trackside } }).penalties.map((p) => p.id)
-  for (const id of ["tunnels", "umbilical", "5g"]) assert.ok(!ids("fia").includes(id), `${id} should be clean`)
-  assert.ok(ids("basic").includes("tunnels"))
-  assert.ok(ids("wireless").includes("umbilical"))
-  assert.ok(ids("wireless").includes("5g"))
-})
-
-test("a LEO backup is path-diverse and cuts blackout risk", () => {
-  const leo = evaluate({ rank: 5, choices: { ...SMART, wan: "fabric", wanBackup: "leo" } })
-  const none = evaluate({ rank: 5, choices: { ...SMART, wan: "fabric", wanBackup: "none" } })
-  assert.equal(leo.network.diverse, true)
-  assert.ok(leo.network.blackoutP < none.network.blackoutP)
+test("only approved tables keep their choices in the race", () => {
+  const team = { tier: 2, choices: GOOD, reviews: approvedAt(["network", "dc"]), plans: { oem: { id: "X" } } }
+  const raced = effectiveTeam(team, IDS)
+  assert.deepEqual(raced.approved.sort(), ["dc", "network"])
+  assert.deepEqual(raced.notApproved, ["oem"])
+  assert.deepEqual(raced.missed, ["compute"])
+  assert.equal(raced.choices.link, "redundant")
+  assert.equal(raced.choices.size, undefined, "an unapproved table races on its default")
 })

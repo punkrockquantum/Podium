@@ -2,7 +2,7 @@
  * Podium game server: serves the iPad app and keeps one shared game state.
  * No dependencies. `node server.mjs` (localhost) or `node server.mjs --lan` (every iPad on the Wi-Fi).
  *
- * Env: PORT (8080), HOST_PIN, LEADER_PIN, RACE_PIN, DATA_DIR (./data).
+ * Env: PORT (8080), HOST_PIN, LEADER_PIN (the Architect PIN), RACE_PIN, DATA_DIR (./data).
  */
 import { createServer } from "node:http"
 import { spawn } from "node:child_process"
@@ -12,13 +12,13 @@ import { join, normalize, extname, dirname, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { networkInterfaces } from "node:os"
 import { randomUUID, randomInt, timingSafeEqual, createHash } from "node:crypto"
-import { STATIONS, TEAM_COLORS, GAME_CLOCK, validChoice, decision, tablePoints } from "./public/js/catalog.js"
+import { STATIONS, TEAM_COLORS, SESSION, TIERS, MAX_TEAMS, MIN_TEAMS, validChoice, decision, tablePoints } from "./public/js/catalog.js"
 import { evaluate, effectiveTeam } from "./public/js/model.js"
 import { simulateStation } from "./public/js/sim.js"
 import { runRace, systemScore } from "./public/js/race.js"
-import { architectReport, sanitiseTuning } from "./public/js/architect.js"
 import { buildPlan } from "./public/js/plandata.js"
 import { PITCH_MS, SEND_BACK_REASON_MAX } from "./public/js/approval.js"
+import { phaseOf } from "./public/js/session.js"
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const PUBLIC = join(ROOT, "public")
@@ -49,15 +49,29 @@ const TYPES = {
   ".webmanifest": "application/manifest+json",
 }
 
+const PHASE_KEYS = ["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"]
+/** Whole or half minutes from 0.5 to the session maximum. */
+const clampMinutes = (value, fallback) => {
+  const n = Number(value)
+  return Math.min(SESSION.maxMinutes, Math.max(0.5, Math.round((Number.isFinite(n) && n > 0 ? n : fallback) * 2) / 2))
+}
+
+function sessionSettings(source = {}) {
+  return Object.fromEntries(PHASE_KEYS.map((key) => [key, clampMinutes(source[key], SESSION[key])]))
+}
+
 export function blankState() {
+  const settings = { ...sessionSettings(), stations: [...STATION_IDS] }
   return {
     id: randomUUID(),
     version: 1,
-    settings: { gameMinutes: GAME_CLOCK.minutes, visitMinutes: GAME_CLOCK.visitMinutes, races: 24, sprints: 6, stations: [...STATION_IDS] },
-    clock: { status: "lobby", totalMs: GAME_CLOCK.minutes * 60_000, endsAt: null, remainingMs: null, endedAt: null, endedBy: null },
+    settings,
+    brief: { status: "idle", endsAt: null },
+    clock: { status: "lobby", totalMs: settings.playMinutes * 60_000, endsAt: null, remainingMs: null, endedAt: null, endedBy: null },
+    readout: null,
     tables: {},
     queues: {},
-    leaders: {},
+    architects: {},
     pitches: {},
     teams: [],
     race: null,
@@ -66,27 +80,18 @@ export function blankState() {
 
 const PLAN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const planId = () => Array.from({ length: 5 }, () => PLAN_ALPHABET[randomInt(PLAN_ALPHABET.length)]).join("")
-const STEPS = ["brief", "decide", "sim", "pitch", "architect"]
+const STEPS = ["brief", "decide", "sim", "pitch"]
+const TEAM_KEYS = ["choices", "touched", "submitted", "scores", "pitch", "visits", "sims", "plans", "reviews"]
 
-/** What a table costs and draws, from the evaluation's ledger. */
-const clampMinutes = (value, fallback) => Math.min(GAME_CLOCK.maxMinutes, Math.max(1, Math.round(Number(value) || fallback)))
+const tierOf = (value) => (TIERS.some((t) => t.id === Number(value)) ? Number(value) : 2)
 
 function makeTeams(list) {
-  return list.slice(0, 10).map((item, i) => ({
+  return list.slice(0, MAX_TEAMS).map((item, i) => ({
     id: `t${i + 1}`,
-    name: String(item?.name || `Team ${i + 1}`).trim().slice(0, 32) || `Team ${i + 1}`,
+    name: oneLine(item?.name, 32) || `Team ${i + 1}`,
     color: TEAM_COLORS[i % TEAM_COLORS.length],
-    rank: Math.min(10, Math.max(1, Math.round(Number(item?.rank) || i + 1))),
-    choices: {},
-    touched: {},
-    submitted: {},
-    scores: {},
-    pitch: {},
-    visits: {},
-    sims: {},
-    plans: {},
-    reviews: {},
-    architect: { enabled: false, tuning: {}, gain: 1 },
+    tier: tierOf(item?.tier),
+    ...Object.fromEntries(TEAM_KEYS.map((key) => [key, {}])),
   }))
 }
 
@@ -97,12 +102,26 @@ function loadState(file) {
     const saved = JSON.parse(readFileSync(file, "utf8"))
     if (!saved || typeof saved !== "object" || !Array.isArray(saved.teams)) throw new Error("not a Podium state file")
     const base = blankState()
-    const loaded = { ...base, ...saved, settings: { ...base.settings, ...saved.settings }, clock: { ...base.clock, ...saved.clock }, tables: saved.tables || {}, queues: saved.queues || {}, leaders: saved.leaders || {}, pitches: saved.pitches || {} }
-    delete loaded.round
+    const stations = (saved.settings?.stations || []).filter((id) => STATION_IDS.includes(id))
+    const loaded = {
+      ...base,
+      ...saved,
+      settings: { ...sessionSettings(saved.settings), stations: stations.length ? stations : [...STATION_IDS] },
+      brief: saved.brief || base.brief,
+      clock: { ...base.clock, ...saved.clock },
+      readout: saved.readout || null,
+      tables: saved.tables || {},
+      queues: saved.queues || {},
+      architects: saved.architects || {},
+      pitches: saved.pitches || {},
+    }
+    delete loaded.leaders
     for (const team of loaded.teams) {
-      for (const key of ["choices", "touched", "submitted", "scores", "pitch", "visits", "sims", "plans", "reviews"]) team[key] = team[key] || {}
-      delete team.verdicts
-      team.architect = team.architect || { enabled: false, tuning: {}, gain: 1 }
+      for (const key of TEAM_KEYS) team[key] = team[key] || {}
+      team.tier = tierOf(team.tier)
+      for (const key of Object.keys(team.choices)) if (!decision(key)) delete team.choices[key]
+      delete team.architect
+      delete team.rank
     }
     return loaded
   } catch (err) {
@@ -117,7 +136,7 @@ function loadState(file) {
 
 export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
   const hostPin = String(pins.host || process.env.HOST_PIN || DEFAULT_PINS.host)
-  const leaderPin = String(pins.leader || process.env.LEADER_PIN || DEFAULT_PINS.leader)
+  const architectPin = String(pins.leader || process.env.LEADER_PIN || DEFAULT_PINS.leader)
   const racePin = String(pins.race || process.env.RACE_PIN || DEFAULT_PINS.race)
   const file = join(dataDir, "state.json")
   let state = loadState(file)
@@ -137,7 +156,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
   }
 
   const isHost = (req) => sameSecret(req.headers["x-pin"], hostPin)
-  const isLeader = (req) => sameSecret(req.headers["x-pin"], leaderPin) || isHost(req)
+  const isArchitect = (req) => sameSecret(req.headers["x-pin"], architectPin) || isHost(req)
   const racePasswordOk = (value) => sameSecret(value, racePin)
   const pinFailures = new Map()
   const clientIp = (req) => String(req.headers["cf-connecting-ip"] || req.socket.remoteAddress || "unknown").slice(0, 128)
@@ -158,7 +177,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     if (!entry || entry.resetAt <= now) pinFailures.set(ip, { count: 1, resetAt: now + PIN_FAILURE_WINDOW_MS })
     else entry.count += 1
   }
-  const protectedRoute = (key) => key === "POST /api/login" || key === "POST /api/race/run" || key.startsWith("POST /api/host/") || key.startsWith("POST /api/leader/")
+  const protectedRoute = (key) => key === "POST /api/login" || key === "POST /api/race/run" || key.startsWith("POST /api/host/") || key.startsWith("POST /api/architect/")
   const requireHost = (req, res) => {
     if (isHost(req)) {
       clearPinFailures(req)
@@ -169,42 +188,33 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     return true
   }
   /**
-   * Why this request may not act as the leader of `station`, or null. The host may act for any
-   * table; a table leader only for the table chosen at login (sent as the x-station header).
+   * Why this request may not act as the Architect of `station`, or null. The host may act for any
+   * table; an Architect only for the table chosen at login (sent as the x-station header).
    */
-  const leaderBlocked = (req, station) => {
+  const architectBlocked = (req, station) => {
     if (!STATION_IDS.includes(station)) return [400, "Unknown table"]
     if (isHost(req)) {
       clearPinFailures(req)
       return null
     }
-    if (!isLeader(req)) {
+    if (!isArchitect(req)) {
       failedPin(req)
-      return [403, "Leader PIN required"]
+      return [403, "Architect PIN required"]
     }
-    if (req.headers["x-station"] !== station) return [403, "You are signed in as the leader of another table"]
+    if (req.headers["x-station"] !== station) return [403, "You are signed in as the Architect of another table"]
     clearPinFailures(req)
     return null
   }
-  const leaderTitle = (station) => STATIONS.find((s) => s.id === station)?.leader || "Table leader"
+  const architectTitle = (station) => STATIONS.find((s) => s.id === station)?.architect || "Architect"
   const team = (id) => state.teams.find((t) => t.id === id)
-  const opts = () => ({ races: state.settings.races, sprints: state.settings.sprints })
 
   /** Heartbeats live in memory only: they change every few seconds and must not rewrite the save file. */
   const presence = {}
 
-  function publicState() {
-    return { ...state, now: Date.now() }
-  }
-
+  const publicState = () => ({ ...state, now: Date.now() })
   const queueOf = (station) => (state.queues[station] = state.queues[station] || [])
   const dropFromQueues = (teamId, station) => {
     for (const [id, list] of Object.entries(state.queues)) if (!station || id === station) state.queues[id] = list.filter((entry) => entry.team !== teamId)
-  }
-
-  /** Freeze a table's plan: the choices, the simulation and the money, with a short id for the screenshot. */
-  function snapshotPlan(t, station) {
-    return buildPlan(t, station, opts(), { id: planId(), at: Date.now() })
   }
 
   const routes = {
@@ -218,10 +228,10 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
         clearPinFailures(req)
         return send(res, 200, { role: "host" })
       }
-      if (sameSecret(pin, leaderPin)) {
-        if (!STATION_IDS.includes(body?.station)) return send(res, 400, { error: "Pick the table you lead" })
+      if (sameSecret(pin, architectPin)) {
+        if (!STATION_IDS.includes(body?.station)) return send(res, 400, { error: "Pick the table you are the Architect for" })
         clearPinFailures(req)
-        return send(res, 200, { role: "leader", station: body.station })
+        return send(res, 200, { role: "architect", station: body.station })
       }
       failedPin(req)
       return send(res, 403, { error: "Wrong PIN" })
@@ -229,35 +239,34 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     "POST /api/host/setup": (req, res, { body }) => {
       if (requireHost(req, res)) return
       const list = Array.isArray(body?.teams) ? body.teams : []
-      if (list.length < 2) return send(res, 400, { error: "At least two teams" })
-      const stations = Array.isArray(body?.stations) ? body.stations.filter((id) => STATION_IDS.includes(id)) : STATION_IDS
-      if (stations.length < 5) return send(res, 400, { error: "Use at least five tables" })
-      const gameMinutes = clampMinutes(body?.gameMinutes, GAME_CLOCK.minutes)
+      if (list.length < MIN_TEAMS || list.length > MAX_TEAMS) return send(res, 400, { error: `Use ${MIN_TEAMS} to ${MAX_TEAMS} teams` })
+      const stations = Array.isArray(body?.stations) ? STATION_IDS.filter((id) => body.stations.includes(id)) : [...STATION_IDS]
+      if (!stations.length) return send(res, 400, { error: "Use at least one table" })
       const base = blankState()
-      state = {
-        ...base,
-        settings: {
-          gameMinutes,
-          visitMinutes: Math.min(30, clampMinutes(body?.visitMinutes, GAME_CLOCK.visitMinutes)),
-          races: Math.min(30, Math.max(15, Math.round(Number(body?.races) || 24))),
-          sprints: Math.min(12, Math.max(0, Math.round(Number(body?.sprints) || 6))),
-          stations: STATION_IDS.filter((id) => stations.includes(id)),
-        },
-        clock: { ...base.clock, totalMs: gameMinutes * 60_000 },
-        teams: makeTeams(list),
-      }
+      const settings = { ...sessionSettings(body), stations }
+      state = { ...base, settings, clock: { ...base.clock, totalMs: settings.playMinutes * 60_000 }, teams: makeTeams(list) }
       for (const key of Object.keys(presence)) delete presence[key]
       bump()
       return send(res, 200, publicState())
     },
-    "POST /api/host/clock": (req, res, { body }) => {
+    "POST /api/host/phase": (req, res, { body }) => {
       if (requireHost(req, res)) return
-      if (state.race) return send(res, 409, { error: "The race has run. Take it back before changing the clock." })
-      const clock = state.clock
       const action = body?.action
       const now = Date.now()
-      if (action === "start" && clock.status === "lobby") {
+      const phase = phaseOf(state)
+      const clock = state.clock
+      if (action === "set") {
+        if (phase !== "lobby") return send(res, 409, { error: "Set the session plan before the brief starts" })
+        Object.assign(state.settings, sessionSettings({ ...state.settings, ...body }))
+        clock.totalMs = state.settings.playMinutes * 60_000
+      } else if (action === "brief") {
+        if (phase !== "lobby") return send(res, 409, { error: "The brief has already started" })
+        state.brief = { status: "running", startedAt: now, endsAt: now + state.settings.briefMinutes * 60_000 }
+      } else if (action === "play") {
+        if (!["lobby", "brief", "briefDone"].includes(phase)) return send(res, 409, { error: "Play has already started" })
+        state.brief = { ...state.brief, status: "done", endsAt: state.brief.endsAt || now }
         clock.status = "running"
+        clock.totalMs = state.settings.playMinutes * 60_000
         clock.endsAt = now + clock.totalMs
       } else if (action === "pause" && clock.status === "running") {
         clock.status = "paused"
@@ -270,38 +279,38 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
         clock.remainingMs = null
         for (const seat of Object.values(state.tables)) seat.since += now - (clock.pausedAt || now)
         clock.pausedAt = null
-      } else if (action === "set" && clock.status === "lobby") {
-        const minutes = clampMinutes(body?.minutes, state.settings.gameMinutes)
-        state.settings.gameMinutes = minutes
-        clock.totalMs = minutes * 60_000
       } else if (action === "add") {
         const minutes = Math.round(Number(body?.minutes))
-        if (!Number.isFinite(minutes) || minutes === 0 || Math.abs(minutes) > GAME_CLOCK.maxMinutes) return send(res, 400, { error: "Add or remove whole minutes" })
+        if (!Number.isFinite(minutes) || minutes === 0 || Math.abs(minutes) > SESSION.maxMinutes) return send(res, 400, { error: "Add or remove whole minutes" })
         const ms = minutes * 60_000
-        if (clock.status === "lobby") {
-          clock.totalMs = Math.min(GAME_CLOCK.maxMinutes, Math.max(1, clock.totalMs / 60_000 + minutes)) * 60_000
-          state.settings.gameMinutes = clock.totalMs / 60_000
-        } else if (clock.status === "running") {
+        if (phase === "lobby") {
+          state.settings.playMinutes = clampMinutes(state.settings.playMinutes + minutes, SESSION.playMinutes)
+          clock.totalMs = state.settings.playMinutes * 60_000
+        } else if (phase === "brief") {
+          state.brief.endsAt = Math.max(now, state.brief.endsAt + ms)
+        } else if (phase === "play" && clock.status === "running") {
           clock.endsAt += ms
           clock.totalMs += ms
-          if (clock.endsAt <= now) endClock("host")
-        } else if (clock.status === "paused") {
+          if (clock.endsAt <= now) endPlay("host")
+        } else if (phase === "play") {
           clock.remainingMs += ms
           clock.totalMs += ms
-          if (clock.remainingMs <= 0) endClock("host")
-        } else if (clock.status === "ended" && minutes > 0) {
-          clock.status = "running"
-          clock.endsAt = now + ms
-          clock.totalMs += ms
-          clock.endedAt = null
-          clock.endedBy = null
+          if (clock.remainingMs <= 0) endPlay("host")
+        } else if (phase === "ended" && minutes > 0) {
+          Object.assign(clock, { status: "running", endsAt: now + ms, totalMs: clock.totalMs + ms, endedAt: null, endedBy: null })
+        } else if (phase === "readout") {
+          state.readout.endsAt = Math.max(now, state.readout.endsAt + ms)
         } else {
-          return send(res, 409, { error: "The clock has ended" })
+          return send(res, 409, { error: "Nothing to add time to right now" })
         }
-      } else if (action === "end" && clock.status !== "ended") {
-        endClock("host")
+      } else if (action === "end") {
+        if (phase !== "play") return send(res, 409, { error: "Play is not running" })
+        endPlay("host")
+      } else if (action === "readout") {
+        if (!state.race) return send(res, 409, { error: "Run the race before the readouts" })
+        state.readout = { startedAt: now, endsAt: now + state.settings.readoutMinutes * 60_000 }
       } else {
-        return send(res, 400, { error: `Cannot ${String(action || "do that")} while the clock is ${clock.status}` })
+        return send(res, 400, { error: `Cannot ${String(action || "do that")} in the ${phase} phase` })
       }
       bump()
       return send(res, 200, publicState())
@@ -327,6 +336,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     "POST /api/host/unrace": (req, res) => {
       if (requireHost(req, res)) return
       state.race = null
+      state.readout = null
       bump()
       return send(res, 200, publicState())
     },
@@ -339,105 +349,78 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const action = body?.action
       if (action === "clear") state.queues[station] = []
       else if (at < 0) return send(res, 404, { error: "That team is not in this queue" })
-      else if (action === "confirm") list[at].confirmed = !list[at].confirmed
       else if (action === "up" && at > 0) list.splice(at - 1, 0, ...list.splice(at, 1))
       else if (action === "down" && at < list.length - 1) list.splice(at + 1, 0, ...list.splice(at, 1))
       else if (action === "remove") list.splice(at, 1)
-      else if (action === "slot") {
-        const slot = String(body?.slot || "").trim()
-        if (slot && !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot)) return send(res, 400, { error: "Slot time as HH:MM" })
-        list[at].slot = slot || null
-      } else if (!["up", "down"].includes(action)) return send(res, 400, { error: "Unknown queue action" })
+      else if (!["up", "down"].includes(action)) return send(res, 400, { error: "Unknown queue action" })
       bump()
       return send(res, 200, publicState())
     },
-    "POST /api/host/architect": (req, res, { body }) => {
-      if (requireHost(req, res)) return
-      const t = team(body?.team)
-      if (!t) return send(res, 404, { error: "No such team" })
-      setArchitect(t, Boolean(body?.enabled), "Host")
-      bump()
-      return send(res, 200, publicState())
-    },
-    "POST /api/leader/availability": (req, res, { body }) => {
+    "POST /api/architect/availability": (req, res, { body }) => {
       const station = body?.station
-      const blocked = leaderBlocked(req, station)
+      const blocked = architectBlocked(req, station)
       if (blocked) return send(res, blocked[0], { error: blocked[1] })
       const available = Boolean(body?.available)
       if (available && state.pitches[station]) return send(res, 409, { error: "A pitch is running: approve it or send it back first" })
-      state.leaders[station] = { available, since: Date.now() }
+      state.architects[station] = { available, since: Date.now() }
       bump()
-      return send(res, 200, { ok: true, leader: state.leaders[station] })
+      return send(res, 200, { ok: true, architect: state.architects[station] })
     },
-    "POST /api/leader/architect": (req, res, { body }) => {
+    "POST /api/architect/pitch": (req, res, { body }) => {
       const station = body?.station
-      const blocked = leaderBlocked(req, station)
-      if (blocked) return send(res, blocked[0], { error: blocked[1] })
-      const t = team(body?.team)
-      if (!t) return send(res, 404, { error: "No such team" })
-      if (state.race) return send(res, 409, { error: "The race has run: decisions are locked" })
-      setArchitect(t, Boolean(body?.enabled), oneLine(body?.by, 40) || leaderTitle(station), station)
-      bump()
-      return send(res, 200, publicState())
-    },
-    "POST /api/leader/pitch": (req, res, { body }) => {
-      const station = body?.station
-      const blocked = leaderBlocked(req, station)
+      const blocked = architectBlocked(req, station)
       if (blocked) return send(res, blocked[0], { error: blocked[1] })
       const now = Date.now()
       const live = state.pitches[station]
       if (body?.action === "cancel") {
         if (!live) return send(res, 409, { error: "No pitch is running at this table" })
         delete state.pitches[station]
-        state.leaders[station] = { available: true, since: now }
+        state.architects[station] = { available: true, since: now }
         bump()
         return send(res, 200, publicState())
       }
       if (body?.action !== "start") return send(res, 400, { error: "Start or cancel a pitch" })
       const t = team(body?.team)
       if (!t) return send(res, 404, { error: "No such team" })
-      if (!state.leaders[station]?.available) return send(res, 409, { error: "Set yourself Available before starting a pitch" })
+      if (!state.architects[station]?.available) return send(res, 409, { error: "Set yourself Available before starting a pitch" })
       if (live) return send(res, 409, { error: "A pitch is already running at this table" })
       if (!t.plans[station]) return send(res, 409, { error: "This team has not locked in a plan here" })
       if (t.reviews[station]?.status === "approved") return send(res, 409, { error: "This design is already approved" })
       const lockout = reviewBlocked(t, station)
       if (lockout) return send(res, 409, { error: lockout })
-      state.pitches[station] = { team: t.id, startedAt: now, endsAt: now + PITCH_MS, by: oneLine(body?.by, 40) || leaderTitle(station) }
-      state.leaders[station] = { available: false, since: now, busyWith: t.id }
+      state.pitches[station] = { team: t.id, startedAt: now, endsAt: now + PITCH_MS, by: oneLine(body?.by, 40) || architectTitle(station) }
+      state.architects[station] = { available: false, since: now, busyWith: t.id }
       bump()
       return send(res, 200, publicState())
     },
-    "POST /api/leader/decide": (req, res, { body }) => {
+    "POST /api/architect/decide": (req, res, { body }) => {
       const station = body?.station
-      const blocked = leaderBlocked(req, station)
+      const blocked = architectBlocked(req, station)
       if (blocked) return send(res, blocked[0], { error: blocked[1] })
       const t = team(body?.team)
       if (!t) return send(res, 404, { error: "No such team" })
       const live = state.pitches[station]
       if (!live || live.team !== t.id) return send(res, 409, { error: "Start this team's pitch before deciding" })
-      const decisionId = body?.decision
-      if (!["approve", "sendBack"].includes(decisionId)) return send(res, 400, { error: "Approve or send back" })
+      const verdict = body?.decision
+      if (!["approve", "sendBack"].includes(verdict)) return send(res, 400, { error: "Approve or send back" })
       const plan = t.plans[station]
       if (!plan) return send(res, 409, { error: "This team has not locked in a plan here" })
       const lockout = reviewBlocked(t, station)
       if (lockout) return send(res, 409, { error: lockout })
       const now = Date.now()
-      const record = { by: oneLine(body?.by, 40) || live.by || leaderTitle(station), at: now, startedAt: live.startedAt, durationMs: now - live.startedAt, planId: plan.id, score: plan.score }
-      if (decisionId === "approve") {
+      const record = { by: oneLine(body?.by, 40) || live.by || architectTitle(station), at: now, startedAt: live.startedAt, durationMs: now - live.startedAt, planId: plan.id, score: plan.score }
+      if (verdict === "approve") {
         const points = tablePoints(plan.score, true)
         t.reviews[station] = { status: "approved", ...record, points }
         t.scores[station] = { total: points, at: now }
         t.pitch[station] = points
       } else {
         t.reviews[station] = { status: "sentBack", ...record, reason: oneLine(body?.reason, SEND_BACK_REASON_MAX) }
-        delete t.plans[station]
-        delete t.submitted[station]
-        delete t.scores[station]
-        delete t.pitch[station]
+        for (const key of ["plans", "submitted", "scores", "pitch"]) delete t[key][station]
       }
       delete state.pitches[station]
       dropFromQueues(t.id, station)
-      state.leaders[station] = { available: true, since: now }
+      state.architects[station] = { available: true, since: now }
       bump()
       return send(res, 200, publicState())
     },
@@ -454,71 +437,66 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     },
   }
 
-  function endClock(by) {
-    const clock = state.clock
-    clock.status = "ended"
-    clock.endsAt = null
-    clock.remainingMs = 0
-    clock.endedAt = Date.now()
-    clock.endedBy = by
+  function endPlay(by) {
+    Object.assign(state.clock, { status: "ended", endsAt: null, remainingMs: 0, endedAt: Date.now(), endedBy: by })
     state.tables = {}
-  }
-
-  function setArchitect(t, enabled, by, station = null) {
-    const now = Date.now()
-    t.architect = enabled
-      ? { ...t.architect, enabled, grantedAt: now, grantedBy: by, grantedStation: station, revokedBy: null }
-      : { ...t.architect, enabled, revokedAt: now, revokedBy: by }
   }
 
   /** The race uses approved tables only: everything else races on its defaults and scores 0. */
   function startRace(res, body, by) {
-    if (state.teams.length < 2) return send(res, 400, { error: "Set up teams first" })
-    if (["running", "paused"].includes(state.clock.status)) {
-      if (!body?.endClock) return send(res, 409, { error: "The game clock is still running. End it first, then run the race." })
-      endClock(by)
+    if (!state.teams.length) return send(res, 400, { error: "Set up teams first" })
+    const phase = phaseOf(state)
+    if (phase === "play") {
+      if (!body?.endClock) return send(res, 409, { error: "Play is still running. End it first, then run the race." })
+      endPlay(by)
+    } else if (phase !== "ended") {
+      return send(res, 409, { error: "Run the race after play" })
     }
     const seed = oneLine(body?.seed, 64) || `${state.id}-${Date.now()}`
     const stations = state.settings.stations
     state.pitches = {}
     const entries = state.teams.map((t) => {
       const raced = effectiveTeam(t, stations)
-      const evaluation = evaluate(raced, opts())
+      const evaluation = evaluate(raced)
       const pitch = Object.fromEntries(raced.approved.map((id) => [id, t.pitch[id] || 0]))
-      return { id: t.id, name: t.name, color: t.color, pitch, missed: raced.missed, notApproved: raced.notApproved, architect: Boolean(t.architect?.enabled), visited: visitedCount(t), system: systemScore(evaluation, stations), evaluation }
+      return { id: t.id, name: t.name, color: t.color, pitch, missed: raced.missed, notApproved: raced.notApproved, system: systemScore(evaluation, stations), evaluation }
     })
-    const result = runRace(entries, seed, stations)
-    for (const row of result.results) row.visited = entries.find((e) => e.id === row.id).visited
-    state.race = { seed, ranAt: Date.now(), ranBy: by, result }
+    state.race = { seed, ranAt: Date.now(), ranBy: by, result: runRace(entries, seed, stations) }
+    state.readout = null
     bump()
     return send(res, 200, publicState())
   }
 
-  /** Pitching and approval are allowed after time if the plan was locked in before the clock ran out. */
+  /** Pitching and approval are allowed after time if the plan was locked in before play ended. */
   function reviewBlocked(t, station) {
     const lockedInBeforeTime = state.clock.status === "ended" && !state.race && t.plans[station] && t.plans[station].at <= state.clock.endedAt
     const reason = lockReason(t, station)
-    if (reason && !lockedInBeforeTime) return state.clock.status === "ended" ? "Time is up: this table was not locked in before the clock ran out" : reason
+    if (reason && !lockedInBeforeTime) return state.clock.status === "ended" ? "Time is up: this table was not locked in before play ended" : reason
     return null
   }
 
-  /** Expire the clock lazily so a restart or a sleeping Mac still ends the game on time. */
+  /** Expire the brief and the play clock lazily so a restart or a sleeping Mac still keeps time. */
   function tick() {
-    if (state.clock.status === "running" && Date.now() >= state.clock.endsAt) {
-      endClock("time")
+    const now = Date.now()
+    if (state.brief?.status === "running" && now >= state.brief.endsAt) {
+      state.brief.status = "done"
+      bump()
+    }
+    if (state.clock.status === "running" && now >= state.clock.endsAt) {
+      endPlay("time")
       bump()
     }
   }
   const timer = setInterval(tick, 1000)
   timer.unref?.()
 
-  const visitedCount = (t) => state.settings.stations.filter((id) => t.visits?.[id] || t.touched?.[id] || t.submitted?.[id] || t.plans?.[id]).length
-
   /** Why a team cannot change this table right now, or null. */
   function lockReason(t, station) {
+    const phase = phaseOf(state)
     if (state.race) return "The race has run: decisions are locked"
-    if (state.clock.status === "lobby") return "Wait for the host to start the game clock"
-    if (state.clock.status === "ended") return "Time is up: this table is locked"
+    if (phase === "brief" || phase === "briefDone") return "Listen to the brief: choices open when play starts"
+    if (phase === "lobby") return "Wait for the host to start the session"
+    if (phase === "ended") return "Time is up: this table is locked"
     if (station && !state.settings.stations.includes(station)) return "That table is not in play"
     return null
   }
@@ -543,15 +521,8 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     sim: (req, res, t, body) => {
       const station = body?.station
       if (!STATION_IDS.includes(station)) return send(res, 400, { error: "Unknown table" })
-      const visit = t.visits[station]?.count || 0
-      const runs = t.sims[station] || { total: 0, visit: 0, visitNo: visit }
-      t.sims[station] = runs.visitNo === visit ? { ...runs, total: runs.total + 1, visit: runs.visit + 1 } : { total: runs.total + 1, visit: 1, visitNo: visit }
-      try {
-        t.sims[station].lastScore = simulateStation(t, opts(), station).score
-        t.sims[station].lastAt = Date.now()
-      } catch (err) {
-        console.error(`[podium] sim score for ${t.id} at ${station} failed`, err)
-      }
+      const runs = t.sims[station] || { total: 0 }
+      t.sims[station] = { total: runs.total + 1, lastScore: simulateStation(t, station).score, lastAt: Date.now() }
       bump()
       return send(res, 200, { ok: true, runs: t.sims[station] })
     },
@@ -559,7 +530,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const station = body?.station
       const reason = lockReason(t, station)
       if (reason) return send(res, 409, { error: reason })
-      if (station && t.plans[station]) return send(res, 409, { error: "This plan is locked in: ask the leader to unlock it to change it" })
+      if (station && t.plans[station]) return send(res, 409, { error: "This plan is locked in: wait for the Architect's decision" })
       const changes = body?.choices && typeof body.choices === "object" ? body.choices : {}
       const rejected = []
       for (const [key, value] of Object.entries(changes)) {
@@ -568,7 +539,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
           rejected.push(key)
           continue
         }
-        t.choices[key] = d.values ? Number(value) : value
+        t.choices[key] = value
         t.touched[d.station] = Date.now()
       }
       bump()
@@ -580,52 +551,23 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const reason = lockReason(t, station)
       if (reason) return send(res, 409, { error: reason })
       if (t.plans[station]) return send(res, 200, { ok: true, team: t, plan: t.plans[station] })
-      const plan = snapshotPlan(t, station)
+      const plan = buildPlan(t, station, { id: planId(), at: Date.now() })
       t.plans[station] = plan
       t.submitted[station] = plan.at
       bump()
       return send(res, 200, { ok: true, team: t, plan })
     },
-    unlock: (req, res, t, body) => {
-      const station = body?.station
-      const blocked = leaderBlocked(req, station)
-      if (blocked) return send(res, blocked[0], { error: blocked[1] })
-      const reason = lockReason(t, station)
-      if (reason) return send(res, 409, { error: reason })
-      delete t.plans[station]
-      delete t.submitted[station]
-      delete t.reviews[station]
-      delete t.scores[station]
-      delete t.pitch[station]
-      if (state.pitches[station]?.team === t.id) {
-        delete state.pitches[station]
-        state.leaders[station] = { available: true, since: Date.now() }
-      }
-      dropFromQueues(t.id, station)
-      bump()
-      return send(res, 200, { ok: true, team: t })
-    },
     call: (req, res, t, body) => {
       const station = body?.station
       if (!STATION_IDS.includes(station)) return send(res, 400, { error: "Unknown table" })
-      if (!t.plans[station]) return send(res, 409, { error: "Lock in your plan before calling the leader" })
-      if (t.reviews[station]?.status === "approved") return send(res, 409, { error: "The leader has already approved this design" })
+      if (!t.plans[station]) return send(res, 409, { error: "Lock in your plan before calling the Architect" })
+      if (t.reviews[station]?.status === "approved") return send(res, 409, { error: "The Architect has already approved this design" })
       const blocked = reviewBlocked(t, station)
       if (blocked) return send(res, 409, { error: blocked })
       const list = queueOf(station)
-      if (!list.some((entry) => entry.team === t.id)) list.push({ team: t.id, at: Date.now(), confirmed: false, slot: null })
+      if (!list.some((entry) => entry.team === t.id)) list.push({ team: t.id, at: Date.now() })
       bump()
-      return send(res, 200, { ok: true, position: list.findIndex((entry) => entry.team === t.id) + 1, leader: state.leaders[station] || { available: false } })
-    },
-    architect: (req, res, t, body) => {
-      if (!t.architect?.enabled) return send(res, 403, { error: "The host has not granted Architect mode to this team" })
-      const reason = lockReason(t, null)
-      if (reason) return send(res, 409, { error: reason })
-      const tuning = sanitiseTuning(body?.tuning)
-      const report = architectReport(t, tuning)
-      t.architect = { ...t.architect, tuning, gain: report.gain, at: Date.now() }
-      bump()
-      return send(res, 200, { ok: true, report, team: t })
+      return send(res, 200, { ok: true, position: list.findIndex((entry) => entry.team === t.id) + 1, architect: state.architects[station] || { available: false } })
     },
     presence: (req, res, t, body) => {
       const station = STATION_IDS.includes(body?.station) ? body.station : null
@@ -659,13 +601,13 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
           return send(res, 429, { error: "Too many failed PIN attempts. Try again in five minutes." })
         }
         if (routes[key]) return routes[key](req, res, { body, query })
-        const match = url.pathname.match(/^\/api\/teams\/([a-z0-9]{1,8})\/(checkin|sim|choices|submit|unlock|call|architect|presence|checkout)$/)
+        const match = url.pathname.match(/^\/api\/teams\/([a-z0-9]{1,8})\/(checkin|sim|choices|submit|call|presence|checkout)$/)
         if (match && req.method === "POST") {
           const t = team(match[1])
           if (!t) return send(res, 404, { error: "No such team" })
           return teamRoutes[match[2]](req, res, t, body)
         }
-        if (key === "GET /api/health") return send(res, 200, { ok: true, app: "podium", version: state.version, teams: state.teams.length, pid: process.pid })
+        if (key === "GET /api/health") return send(res, 200, { ok: true, app: "podium", version: state.version, teams: state.teams.length, phase: phaseOf(state), pid: process.pid })
         return send(res, 404, { error: "Not found" })
       }
       return serveStatic(url.pathname, res)
@@ -801,7 +743,7 @@ if (isDirectRun()) {
     console.log(`[podium] ${new Date().toISOString()} Podium 2027 is running on this Mac (pid ${process.pid}).`)
     console.log(`[podium] Landing     ${base}/`)
     console.log(`[podium] Host console ${base}/host.html`)
-    console.log(`[podium] Projector   ${base}/race.html`)
+    console.log(`[podium] Projector    ${base}/race.html`)
     for (const station of STATIONS) console.log(`[podium] ${station.name.padEnd(28)} ${base}/station.html?station=${station.id}`)
     if (lan) {
       const ips = lanAddresses()
@@ -816,7 +758,7 @@ if (isDirectRun()) {
     }
     const defaults = ["HOST_PIN", "LEADER_PIN", "RACE_PIN"].filter((name) => !process.env[name])
     if (defaults.length) {
-      console.log(`[podium] Rehearsal defaults in use for ${defaults.join(", ")} (host ${DEFAULT_PINS.host}, leader ${DEFAULT_PINS.leader}, race ${DEFAULT_PINS.race}). Set them before a real event.`)
+      console.log(`[podium] Rehearsal defaults in use for ${defaults.join(", ")} (host ${DEFAULT_PINS.host}, Architect ${DEFAULT_PINS.leader}, race ${DEFAULT_PINS.race}). Set them before a real event.`)
     }
   })
 }

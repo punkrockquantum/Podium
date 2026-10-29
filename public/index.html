@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <link rel="icon" href="data:," />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -14,20 +15,19 @@
   <main class="home">
     <section>
       <h1>Build the infrastructure that wins the finale.</h1>
-      <p class="muted">Race against the game clock: teams move freely between the tables; on each table's iPad, choose your team first. Every table works the same way (about 10 minutes each): 1 Brief, then Start designing; 2 Decide, four to six decisions; 3 Simulate, Run simulation; 4 Pitch, Lock in (take a screenshot), then Call the leader and pitch. At zero every table locks, and any table you did not lock in races on its default options. The finale is the Austin, Texas 2027 Grand Prix at the Circuit of the Americas.</p>
-      <div class="row"><button class="btn" data-role="team">Teams: how to play</button><button class="btn" data-role="leader">Table leaders</button><button class="btn" data-role="host">Session host</button><button class="btn" data-role="projector">Race screen</button></div>
-      <p class="muted small">On this Mac, open the <a href="/host.html">host console</a>, the <a href="/race.html">projector</a>, or a table below. The host PIN is the one printed in the terminal (2027 unless you set HOST_PIN).</p>
+      <p class="muted">Four tables, three decisions each. A 50-minute session: a 5-minute brief, 35 minutes of play, a 30-second race and the readouts. At every table: Brief, Decide, Simulate, then Lock in and pitch to the table's Architect. Only approved tables count; everything else races on its defaults at the Austin, Texas 2027 Grand Prix.</p>
+      <div class="row"><button class="btn" data-role="team">Teams</button><button class="btn" data-role="architect">Architects</button><button class="btn" data-role="host">Session host</button><button class="btn" data-role="projector">Projector</button></div>
     </section>
     <section>
-      <h2>Table iPads</h2>
-      <p class="muted small">Open one of these on the iPad at each table, then Share → Add to Home Screen for full screen.</p>
+      <h2>The four tables</h2>
+      <p class="muted small">Open one on the iPad at each table, then Share → Add to Home Screen for full screen.</p>
       <div class="tiles" id="stations"></div>
     </section>
     <section>
       <h2>Run the room</h2>
       <div class="tiles">
-        <a class="tile" href="/host.html" style="--c:#ffffff"><b>Host console</b><span class="muted">Teams, the game clock, live feed, pitch queues, Architect, demo mode, the race (host PIN).</span></a>
-        <a class="tile" href="/race.html" style="--c:#ffd700"><b>Race screen</b><span class="muted">For the projector: live standings, then the finale and debriefs.</span></a>
+        <a class="tile" href="/host.html" style="--c:#ffffff"><b>Host and Architects</b><span class="muted">Session plan, teams, approvals, the race and readouts (host PIN). Architects sign in here with the Architect PIN.</span></a>
+        <a class="tile" href="/race.html" style="--c:#ffd700"><b>Projector</b><span class="muted">The phase, its countdown and live standings, then the race and the readouts.</span></a>
       </div>
     </section>
   </main>
@@ -40,7 +40,7 @@
     installErrorLogging("home")
     for (const b of document.querySelectorAll("[data-role]")) b.addEventListener("click", () => openInstructions(b.dataset.role))
     const box = document.getElementById("stations")
-    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}` }, el("b", {}, s.name), el("span", { class: "muted" }, s.leader)))
+    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}`, "data-station": s.id }, el("b", {}, s.name), el("span", { class: "muted" }, `${s.architect} · ${s.looking}`)))
   </script>
 </body>
 </html>

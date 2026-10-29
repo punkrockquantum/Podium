@@ -3,13 +3,10 @@
  * simulated lap by lap from each team's APPROVED design (unapproved tables race on their defaults).
  * Seeded, so the server, the race screen and every iPad replay the same race.
  *
- * Pace = resources (rank) + aero (CFD) + the system score of the approved design. Incidents come
- * from specific choices (a single WAN link, an air-cooled hall, public internet, banned wireless,
- * cloud burst, KV cache, Architect, missing retention) and every ticker line says who, why and what
- * it cost. Randomness is bounded: lap noise, incident odds and the Safety Car lap.
+ * Pace = tier + aero (CFD) + the system score of the approved design. Incidents come from specific
+ * choices at the four tables, and every ticker line says who, why and what it cost.
  */
 import { PITCH_MAX, STATIONS, FINALE } from "./catalog.js"
-import { aeroGainFor } from "./model.js"
 import { simulateStation } from "./sim.js"
 
 export const LAPS = FINALE.laps
@@ -26,7 +23,7 @@ const DEG_PER_LAP = 0.065
 const LAP_NOISE = 0.18
 const NOISE_CAP = 0.45
 /** Seconds a lap per unit of system score above or below 0.6 (an average design). */
-const SYSTEM_PACE = 1.2
+const SYSTEM_PACE = 1.6
 const DRS_WINDOW = 1.0
 const DRS_GAIN = 0.25
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
@@ -54,7 +51,7 @@ export function rng(seed) {
   return { next, normal, int: (lo, hi) => lo + Math.floor(next() * (hi - lo + 1)) }
 }
 
-/** Table points (approved tables only) for one team across the active stations. */
+/** Table points (approved tables only) for one team across the tables in play. */
 export function pitchTotal(pitch = {}, stationIds = STATIONS.map((s) => s.id)) {
   return stationIds.reduce((total, id) => total + (Number.isFinite(pitch[id]) ? pitch[id] : 0), 0)
 }
@@ -62,53 +59,70 @@ export function pitchTotal(pitch = {}, stationIds = STATIONS.map((s) => s.id)) {
 /** Mean simulation score (0–1) of the design the race sees, across the tables in play. */
 export function systemScore(ev, stationIds = STATIONS.map((s) => s.id)) {
   if (!stationIds.length) return 0.5
-  return stationIds.reduce((total, id) => total + simulateStation(null, {}, id, ev).score, 0) / stationIds.length / 100
+  return stationIds.reduce((total, id) => total + simulateStation(null, id, ev).score, 0) / stationIds.length / 100
 }
+
+export const pitchMax = (stationIds = STATIONS.map((s) => s.id)) => stationIds.length * PITCH_MAX
 
 const clampNoise = (value) => Math.max(-NOISE_CAP, Math.min(NOISE_CAP, value))
 const placesText = (n) => `${n} place${n === 1 ? "" : "s"}`
 
 /**
- * Incidents one car can suffer, from its design. Each: lap, seconds lost (negative = gained),
+ * Incidents one car can suffer from its own design. Each: lap, seconds lost (negative = gained),
  * a plain-English cause, the lesson, and the table whose choice caused it.
  */
-function carIncidents(ev, entry, r) {
+function carIncidents(ev, r) {
   const ch = ev.choices
   const out = []
-  const add = (inc) => out.push({ lap: r.int(6, LAPS - 6), ...inc })
-  for (const risk of ev.risks) {
-    if (risk.id === "asicSlip") continue
-    if (r.next() >= risk.p) continue
-    const cause = {
-      wan: ev.network.redundancy > 0 && ch.wanBackup !== "none"
-        ? `their primary WAN dropped and the ${ch.wanBackup === "leo" ? "LEO satellite" : "backup"} link took over`
-        : "their only WAN link dropped for 40 s: no telemetry, no strategy calls",
-      thermal: ev.cooling.thermal < 1 ? "their air-cooled hall overheated and throttled the strategy GPUs" : "max-boost GPUs hit a hot spot and throttled",
-      power: "a breaker tripped at their data centre and the strategy cluster rebooted",
-      immersion: "a tank pump fault took their immersion-cooled nodes offline",
-      cpo: "an early-life co-packaged optics switch faulted and jobs re-routed",
-    }[risk.id] || risk.text
-    const station = { wan: "network", thermal: "dc", power: "dc", immersion: "dc", cpo: "network" }[risk.id] || "dc"
-    add({ id: risk.id, loss: Math.min(5, risk.loss), cause, lesson: risk.lesson, station })
+  const add = (p, inc) => {
+    if (r.next() < p) out.push({ lap: r.int(6, LAPS - 6), ...inc })
   }
-  const jittery = ch.wan === "public" || ch.hqLink === "public"
-  if (jittery && r.next() < 0.55) {
-    out.push({ id: "jitter", lap: null, undercut: true, loss: 2.4, cause: "public-internet jitter delayed the undercut call by a lap", lesson: "Private interconnection (no jitter) keeps the pit wall's timing honest.", station: "network" })
-  }
-  if (ch.deploy === "burst" && ev.ai.gpus > 0 && r.next() < 0.4) {
-    add({ id: "burst", loss: 3.0, cause: "cloud burst capacity was unavailable when rain threatened, so they guessed the wrong wing level", lesson: "Race-weekend burst is cheap until everyone wants the same GPUs at once.", station: "ai" })
-  }
-  if (ch.kv === "on" && ev.ai.gpus > 0) {
-    add({ id: "kv", loss: -1.2, cause: "their KV cache answered repeat what-ifs instantly, so they called the stop a lap earlier", lesson: "Skipping prefill on repeat questions turns into faster decisions.", station: "storage" })
-  }
-  if (ev.ai.architectGain > 1) {
-    add({ id: "architect", loss: -1.4, cause: "their Architect-tuned AI stack modelled the tyre drop-off a lap sooner", lesson: "Tuning the same hardware is the cheapest pace there is.", station: "ai" })
+  if (ch.link === "single") add(0.35, { id: "tunnel", loss: 4.0, station: "network", cause: "their single tunnel dropped for 40 s: no telemetry, no strategy calls", lesson: "FIA 5.3 asks for two tunnels on separate paths for a reason." })
+  if (ch.path === "public" && r.next() < 0.55) out.push({ id: "jitter", lap: null, undercut: true, loss: 2.4, station: "network", cause: "public-internet jitter delayed the undercut call by a lap", lesson: "A private path keeps the pit wall's timing honest." })
+  if (ch.garage === "edge") add(0.5, { id: "edge", loss: -1.0, station: "network", cause: "their garage edge cache kept telemetry flowing through a link blip", lesson: "Data close to the car keeps engineers working when the link wobbles." })
+  if (ch.power === "boost" && ch.cooling !== "liquid") add(0.5, { id: "boost", loss: 2.5, station: "dc", cause: "max boost overheated a rack and the strategy jobs restarted", lesson: "Boost needs the cooling to match it." })
+  if (ev.power.roomFit < 1) add(0.5, { id: "roomPower", loss: 2.0, station: "dc", cause: "their server room hit its power limit and throttled the cluster", lesson: "Check the site can supply what the cluster draws." })
+  if (ch.location === "cheap") add(0.5, { id: "distance", loss: 1.5, station: "dc", cause: "their far-away data centre added 40 ms to every strategy call, so the stop came late", lesson: "Cheap power is not cheap if the answers arrive late." })
+  if (ch.size === "small") add(0.6, { id: "smallModel", loss: 2.0, station: "compute", cause: "too few nodes to re-run the tyre model, so they stayed out too long", lesson: "Size the cluster to the allowance, not below it." })
+  if (ch.storage === "basic") add(0.5, { id: "slowStorage", loss: 1.6, station: "compute", cause: "slow storage delivered the overnight CFD and strategy data late", lesson: "Fast storage keeps expensive nodes busy." })
+  if (ch.storage === "cache") add(0.6, { id: "cache", loss: -1.2, station: "compute", cause: "their flash cache answered repeat what-ifs instantly, so they called the stop a lap earlier", lesson: "Caching repeat questions turns into faster decisions." })
+  if (r.next() < 0.4) {
+    const node = {
+      "4h": { loss: 0, good: true, cause: "a node failed on Saturday, but 4-hour support had it back before the race", lesson: "The support contract decides how long a failure lasts." },
+      nbd: { loss: 1.5, cause: "a node failed on Saturday and next-business-day support meant racing without it", lesson: "Next business day is Monday: after the race." },
+      basic: { loss: 3.0, cause: "a node failed and basic support left it down all weekend", lesson: "Parts by post do not arrive on a Sunday." },
+    }[ch.support]
+    out.push({ id: "node", lap: r.int(3, 10), station: "oem", ...node })
   }
   return out
 }
 
+/** The race-wide fibre cut and heat spike, and how each design copes. */
+function fibreIncident(ev) {
+  if (ev.network.satellite) return { id: "fibreSafe", loss: 0, good: true, station: "network", cause: "their satellite backup kept them online through the fibre cut", lesson: "A path that shares no ground route turns a cut into a non-event." }
+  if (ev.network.redundant) return { id: "fibreCut", loss: 0.8, station: "network", cause: "the fibre cut forced a fail-over to their second tunnel", lesson: "Redundant tunnels (FIA 5.3) cost seconds, not the race." }
+  return { id: "fibreCut", loss: 4.0, station: "network", cause: "the fibre cut took out their only tunnel for 40 s", lesson: "One tunnel is one cut away from a blind pit wall." }
+}
+
+function heatIncident(ev) {
+  const ch = ev.choices
+  if (ch.power === "boost") {
+    return ch.cooling === "liquid"
+      ? { id: "heat", loss: 0.6, station: "dc", cause: "max boost ran hot in the heat even on liquid cooling", lesson: "A power cap buys stability on the hottest day." }
+      : { id: "heat", loss: 2.8, station: "dc", cause: "max boost overheated in the heat spike and the chips throttled hard", lesson: "Boost plus weak cooling fails first on a hot day." }
+  }
+  if (ch.cooling === "air") {
+    return ev.power.heat > 0.85
+      ? { id: "heat", loss: 1.8, station: "dc", cause: "their air cooling throttled the hot chips in the heat", lesson: "Air cooling runs out of headroom first on a hot day." }
+      : { id: "heat", loss: 0.8, station: "dc", cause: "their air-cooled room ran warm and slowed the strategy runs", lesson: "Even CPUs feel the heat on air." }
+  }
+  if (ch.power === "cap85") return { id: "heatSafe", loss: 0, good: true, station: "dc", cause: `${ch.cooling === "liquid" ? "liquid" : "rear-door"} cooling plus an 85% power cap kept them stable in the heat`, lesson: "Headroom is what you have left on the hottest day." }
+  if (ev.power.thermal < 1) return { id: "heat", loss: 1.2, station: "dc", cause: "their cooling could not keep up with the chips in the heat", lesson: "Match the cooling to the hottest chips." }
+  return null
+}
+
 /**
- * entries: [{ id, name, color, pitch, evaluation, system?, missed?, notApproved?, architect? }]
+ * entries: [{ id, name, color, tier?, pitch, evaluation, system?, missed?, notApproved? }]
  * Returns the classification, per-car cumulative times for the animation, and a ticker of events.
  */
 export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) => s.id)) {
@@ -122,45 +136,31 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     const ev = entry.evaluation
     const caught = {}
     let points = 0
-    let grid = 0
     let seconds = 0
-    let dsq = false
     for (const pen of ev.penalties) {
       if (r.next() >= pen.p) continue
       caught[pen.id] = pen
       points += pen.points || 0
-      grid += pen.grid || 0
       seconds += pen.seconds || 0
-      if (pen.id === "umbilical") seconds += 5
-      if (pen.dsq) dsq = true
     }
-    let index = ev.aero.index
-    if (caught.bidir && caught.workforce) index = ev.aero.indexIfCaught.both
-    else if (caught.bidir) index = ev.aero.indexIfCaught.bidir
-    else if (caught.workforce) index = ev.aero.indexIfCaught.workforce
-    const aeroGain = Math.max(0, aeroGainFor(index) - ev.aero.capCut)
-
-    let strategy = ev.strategy
-    const slip = ev.risks.find((risk) => risk.id === "asicSlip")
-    const slipped = slip && r.next() < slip.p
-    if (slipped) strategy = ev.strategyNoAsic
-    const incidents = carIncidents(ev, entry, r)
+    const aeroGain = ev.aero.gain
+    const strategy = ev.strategy
+    const incidents = carIncidents(ev, r)
     const system = Number.isFinite(entry.system) ? entry.system : systemScore(ev, stationIds)
-    const pace = BASE_LAP + (ev.rank - 5.5) * 0.07 - aeroGain - SYSTEM_PACE * (system - 0.6)
+    const pace = BASE_LAP + ev.tier.pace - aeroGain - SYSTEM_PACE * (system - 0.6)
     const planned = Math.max(16, Math.min(42, Math.round(28 + r.normal() * (1.1 - Math.min(1, strategy)) * 13)))
     for (const inc of incidents) if (inc.undercut) inc.lap = Math.max(2, planned - 1)
     return {
       id: entry.id,
       name: entry.name,
       color: entry.color,
-      rank: ev.rank,
+      tier: ev.tier.id,
       ev,
       pace,
       system,
       aeroGain,
-      aeroIndex: index,
+      aeroIndex: ev.aero.index,
       strategy,
-      slipped,
       planned,
       pitted: false,
       pitLap: null,
@@ -169,9 +169,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
       incidents,
       caught,
       penaltyPoints: points,
-      gridDrop: grid,
       timePenalty: seconds,
-      dsq,
       total: 0,
       cum: [],
       lapTimes: [],
@@ -179,27 +177,15 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
       pitch: pitchTotal(entry.pitch, stationIds),
       missed: entry.missed || [],
       notApproved: entry.notApproved || [],
-      architect: Boolean(entry.architect),
     }
   })
 
-  /* Qualifying, then grid penalties. */
   const order = [...cars].sort((a, b) => a.quali - b.quali)
-  for (const car of cars) {
-    if (!car.gridDrop) continue
-    const from = order.indexOf(car)
-    order.splice(from, 1)
-    order.splice(Math.min(order.length, from + car.gridDrop), 0, car)
-    events.push({ lap: 0, team: car.id, kind: "penalty", text: `${car.name} drop ${car.gridDrop} grid places: ${Object.values(car.caught).filter((p) => p.grid).map((p) => p.text).join(" ")}` })
-  }
   order.forEach((car, i) => {
     car.grid = i + 1
     car.start = i * 0.3
     car.total = car.start
   })
-  for (const car of cars.filter((c) => c.slipped)) {
-    events.push({ lap: 0, team: car.id, kind: "bad", text: `${car.name}: their custom AI chip slipped and missed the race, so strategy runs without it.`, lesson: "Custom silicon is a multi-year bet; schedule risk is the price of perf per watt." })
-  }
   if (!sc) events.push({ lap: 0, team: null, kind: "info", text: "Green-flag race forecast: strategy is all about the planned stop." })
 
   const rankOf = (car, totals) => 1 + cars.filter((other) => other !== car && totals.get(other) < totals.get(car)).length
@@ -210,7 +196,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     const ahead = [...cars].sort((a, b) => a.total - b.total)
     const deltas = new Map(cars.map((car) => [car, []]))
     if (sc && lap === sc.lap) events.push({ lap, team: null, kind: "sc", text: `Safety Car! Lap ${lap}: the field bunches up. Who has the data to call a cheap stop?` })
-    if (fibreCut === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: a contractor cut a fibre trunk near Austin. Every team's circuit link is tested.` })
+    if (fibreCut === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: a contractor cut a fibre trunk near Austin. Every team's link is tested.` })
     if (heat === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: track and data-centre temperatures spike. Who stays cool?` })
 
     for (const car of cars) {
@@ -232,33 +218,14 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
         t += inc.loss
         deltas.get(car).push(inc)
       }
-      if (fibreCut === lap) {
-        const diverse = car.ev.network.diverse
-        const backup = car.ev.choices.wanBackup !== "none"
-        const inc = diverse
-          ? { id: "fibreSafe", loss: 0, cause: "redundant tunnels plus a diverse backup kept them online through the fibre cut", lesson: "Diverse paths (FIA 5.3) turn a cut into a non-event.", station: "network", good: true }
-          : backup
-            ? { id: "fibreCut", loss: 1.5, cause: "the fibre cut hit both of their WAN paths, which share the same ground route", lesson: "Two links in the same trench are one link.", station: "network" }
-            : { id: "fibreCut", loss: 4.0, cause: "the fibre cut took out their only WAN link for 40 s", lesson: "FIA 5.3 asks for redundant tunnels for a reason.", station: "network" }
-        t += inc.loss
-        deltas.get(car).push(inc)
-        car.incidents.push({ ...inc, lap })
-      }
-      if (heat === lap && car.ev.ai.inHall) {
-        const ch = car.ev.choices
-        const liquid = ["L", "X"].includes(ch.hall)
-        const capped = ["eco85", "eco70"].includes(ch.tgp)
-        const inc = liquid && capped
-          ? { id: "heatSafe", loss: 0, cause: `liquid cooling plus a ${ch.tgp === "eco85" ? "85%" : "70%"} power cap kept their strategy GPUs stable in the heat`, lesson: "Headroom is what you have left on the hottest day.", station: "dc", good: true }
-          : liquid
-            ? { id: "heat", loss: 0.6, cause: "liquid cooling held, but uncapped GPUs ran hot and slowed a little", lesson: "A power cap buys stability for a few percent of tokens.", station: "ai" }
-            : { id: "heat", loss: ch.tgp === "boost" ? 2.8 : 1.8, cause: "their air-cooled hall throttled in the heat and the strategy sims fell behind", lesson: "Air cooling runs out of headroom first on a hot day.", station: "dc" }
+      const shared = [fibreCut === lap ? fibreIncident(car.ev) : null, heat === lap ? heatIncident(car.ev) : null].filter(Boolean)
+      for (const inc of shared) {
         t += inc.loss
         deltas.get(car).push(inc)
         car.incidents.push({ ...inc, lap })
       }
       if (!car.pitted && sc && lap === sc.lap) {
-        const blind = car.incidents.some((inc) => ["wan", "power", "fibreCut"].includes(inc.id) && Math.abs(inc.lap - lap) <= 2)
+        const blind = car.incidents.some((inc) => ["tunnel", "fibreCut"].includes(inc.id) && inc.loss >= 4 && Math.abs(inc.lap - lap) <= 2)
         const react = blind ? 0.05 : Math.min(0.97, Math.max(0.05, car.strategy ** 2))
         if (r.next() < react) {
           car.pitted = true
@@ -266,7 +233,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
           car.underSC = true
           car.pitLoss = SC_PIT_LOSS + car.timePenalty
           t += car.pitLoss
-          events.push({ lap, team: car.id, kind: "good", text: `${car.name} react to the Safety Car and pit for ${SC_PIT_LOSS} s instead of ${PIT_LOSS} s.`, lesson: "Fast, well-fed strategy models plus a low-latency path to the pit wall win the split-second call." })
+          events.push({ lap, team: car.id, kind: "good", text: `${car.name} react to the Safety Car and pit for ${SC_PIT_LOSS} s instead of ${PIT_LOSS} s.`, lesson: "A strong strategy model plus a fast path to the pit wall wins the split-second call." })
         } else if (blind) {
           events.push({ lap, team: car.id, kind: "bad", text: `${car.name} miss the Safety Car window: their pit wall is blind.`, lesson: "An outage at the wrong moment costs more than its seconds." })
         }
@@ -278,15 +245,14 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
         t += car.pitLoss
       }
       if (car.pitLap === lap && car.timePenalty) {
-        const why = Object.values(car.caught).filter((p) => p.seconds || p.id === "umbilical").map((p) => (p.id === "5g" ? "a private 5G cell on track (FIA 5.2)" : p.id === "umbilical" ? "car data dumped over Wi-Fi instead of the umbilical (FIA 5.2)" : p.text)).join(" and ")
-        events.push({ lap, team: car.id, kind: "penalty", text: `${car.name} serve a ${car.timePenalty} s FIA time penalty at their stop: ${why}.`, lesson: "FIA 5.2 bans team wireless on track; car dumps go over the wired umbilical." })
+        const why = Object.values(car.caught).filter((p) => p.seconds).map((p) => p.text.replace(/\.$/, "")).join(" and ")
+        events.push({ lap, team: car.id, kind: "penalty", incident: "timePenalty", station: "network", text: `${car.name} serve a ${car.timePenalty} s FIA time penalty at their stop: ${why}.`, lesson: "FIA 5.2: car data goes over the wired umbilical." })
       }
       car.lapTimes.push(t)
       car.total += t
       car.cum.push(car.total)
     }
 
-    /* Ticker: every incident on this lap, with the places it cost or gained. */
     const after = new Map(cars.map((car) => [car, car.total]))
     for (const car of cars) {
       for (const inc of deltas.get(car)) {
@@ -305,7 +271,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     if (!scLap) {
       const prev = [...cars].sort((a, b) => before.get(a) - before.get(b))
       const now = [...cars].sort((a, b) => a.total - b.total)
-      const passer = now.find((car, i) => i < prev.indexOf(car) && !deltas.get(car).length && !(car.pitLap === lap) && i < 6)
+      const passer = now.find((car, i) => i < prev.indexOf(car) && !deltas.get(car).length && car.pitLap !== lap && i < 6)
       if (passer && lap > 1 && r.next() < 0.35) {
         const passed = prev[now.indexOf(passer)]
         if (passed && passed !== passer && passed.pitLap !== lap) events.push({ lap, team: passer.id, kind: "move", text: `${passer.name} pass ${passed.name} with DRS on the back straight for P${now.indexOf(passer) + 1}.` })
@@ -318,30 +284,26 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
 
   for (const car of cars) {
     for (const pen of Object.values(car.caught)) {
-      if (!pen.points) continue
-      const audit = ["archive", "f6", "segaudit", "logs", "pfs", "manualflow"].includes(pen.id)
-      events.push({ lap: LAPS, team: car.id, kind: "penalty", incident: pen.id, text: `${car.name}: ${audit ? "FIA audit penalty. " : ""}${pen.text}` })
+      if (pen.points) events.push({ lap: LAPS, team: car.id, kind: "penalty", incident: pen.id, station: pen.station, text: `${car.name}: FIA penalty, −${pen.points} points. ${pen.text}` })
     }
-    if (car.dsq) events.push({ lap: LAPS, team: car.id, kind: "penalty", text: `${car.name}: ${car.caught.fpga?.text || "disqualified."}` })
   }
 
-  const classified = [...cars].sort((a, b) => (a.dsq - b.dsq) || a.total - b.total)
+  const classified = [...cars].sort((a, b) => a.total - b.total)
   const winner = classified[0]
   const results = classified.map((car, i) => {
-    const pos = car.dsq ? null : i + 1
-    const racePoints = pos && pos <= POINTS.length ? POINTS[pos - 1] : 0
-    const best = Math.min(...car.lapTimes)
+    const pos = i + 1
+    const racePoints = pos <= POINTS.length ? POINTS[pos - 1] : 0
     return {
       id: car.id,
       name: car.name,
       color: car.color,
+      tier: car.tier,
       position: pos,
       grid: car.grid,
-      dsq: car.dsq,
       start: car.start,
       total: car.total,
-      gap: car.dsq ? null : car.total - winner.total,
-      bestLap: best,
+      gap: car.total - winner.total,
+      bestLap: Math.min(...car.lapTimes),
       cum: car.cum,
       pitLap: car.pitLap,
       pitLoss: car.pitLoss,
@@ -356,17 +318,12 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
       timePenalty: car.timePenalty,
       score: car.pitch + racePoints * RACE_POINT_MULT - car.penaltyPoints,
       caught: Object.keys(car.caught),
-      incidents: car.incidents.filter((inc) => inc.effect).map((inc) => ({ id: inc.id, lap: inc.lap, loss: inc.loss, places: inc.places, effect: inc.effect, cause: inc.cause, station: inc.station })),
+      incidents: car.incidents.filter((inc) => inc.effect).map((inc) => ({ id: inc.id, lap: inc.lap, loss: inc.loss, places: inc.places, effect: inc.effect, cause: inc.cause, station: inc.station, good: Boolean(inc.good) || inc.loss < 0 })),
       missed: car.missed,
       notApproved: car.notApproved,
-      architect: car.architect,
     }
   })
-  const fastest = results.filter((res) => !res.dsq).sort((a, b) => a.bestLap - b.bestLap)[0]
-  const standings = [...results].sort((a, b) => b.score - a.score)
+  const fastest = [...results].sort((a, b) => a.bestLap - b.bestLap)[0]
+  const standings = [...results].sort((a, b) => b.score - a.score || a.position - b.position)
   return { seed, laps: LAPS, seconds: RACE_SECONDS, sc, fibreCut, heat, lapOrder: laps, results, standings, fastestLap: fastest?.id || null, events: events.sort((a, b) => a.lap - b.lap) }
-}
-
-export function pitchMax(stationIds = STATIONS.map((s) => s.id)) {
-  return stationIds.length * PITCH_MAX
 }

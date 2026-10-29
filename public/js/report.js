@@ -1,15 +1,13 @@
 /**
- * The race report: the podium and, per team, 1–3 things they could have done differently. Pure:
- * the race screen renders it and the tests check it.
+ * The per-team readout after the race: the result, what went well, what to do differently (each
+ * naming the better option and why) and the race incidents that touched the team. Pure: the race
+ * screen, the host and the tests share it.
  */
 import * as C from "./catalog.js"
 import { evaluate, effectiveTeam, pickedOption } from "./model.js"
-import { simulateStation, PENALTY_STATION } from "./sim.js"
+import { simulateStation } from "./sim.js"
 
-const MAX_SUGGESTIONS = 3
-const MIN_GAIN = 3
-
-const stationName = (id) => C.STATIONS.find((s) => s.id === id)?.name || id
+const stationName = (id) => C.byId(C.STATIONS, id)?.name || id
 
 /** The top three of the championship, in podium order: 2nd (left), 1st (centre), 3rd (right). */
 export function podium(race) {
@@ -17,63 +15,104 @@ export function podium(race) {
   return [top[1], top[0], top[2]].filter(Boolean)
 }
 
-/** The single change at the team's approved tables that would raise one table's simulation most. */
-export function bestAlternative(team, stationIds, opts = {}) {
-  const eff = effectiveTeam(team, stationIds)
-  const ev = evaluate(eff, opts)
-  let best = null
-  for (const stationId of eff.approved) {
-    const base = simulateStation(eff, opts, stationId, ev).score
-    for (const d of C.visibleDecisions(stationId)) {
-      const current = ev.choices[d.id]
-      const candidates = d.options ? d.options.map((o) => o.id) : d.values
-      for (const value of candidates) {
-        if (value === current) continue
-        const trial = { ...eff, choices: { ...eff.choices, [d.id]: value } }
-        const gain = simulateStation(trial, opts, stationId).score - base
-        if (gain >= MIN_GAIN && (!best || gain > best.gain)) best = { stationId, decision: d, value, current, gain }
+/** Every single-option change on the raced design, best first, scored by the table it improves. */
+function betterOptions(raced, stationIds) {
+  const ev = evaluate(raced)
+  const base = Object.fromEntries(stationIds.map((id) => [id, simulateStation(raced, id, ev).score]))
+  const out = []
+  for (const id of stationIds) {
+    for (const d of C.decisionsFor(id)) {
+      const current = pickedOption(d.id, ev.choices)
+      for (const option of d.options) {
+        if (option.id === current.id) continue
+        const alt = { ...raced, choices: { ...ev.choices, [d.id]: option.id } }
+        const altEv = evaluate(alt)
+        const gain = stationIds.reduce((sum, s) => sum + simulateStation(alt, s, altEv).score - base[s], 0)
+        if (gain >= 2) out.push({ station: id, decision: d, current, option, gain })
       }
     }
   }
-  if (!best) return null
-  const pick = (value) => (best.decision.options ? best.decision.options.find((o) => o.id === value) : null)
-  const better = pick(best.value)
-  const now = pick(best.current) || pickedOption(best.decision.id, ev.choices)
-  const unit = best.decision.unit ? ` ${best.decision.unit}` : ""
-  const betterName = better ? better.name : `${best.value}${unit}`
-  const nowName = now ? now.name : `${best.current}${unit}`
-  return {
-    ...best,
-    text: `${stationName(best.stationId)}: ${betterName} instead of ${nowName} (${best.decision.name.toLowerCase()}) would have scored ${best.gain} more on the simulation.${better?.why ? ` ${better.why}` : ""}`,
-  }
+  return out.sort((a, b) => b.gain - a.gain)
 }
 
-/**
- * 1–3 suggestions for one team: tables not approved or missed, FIA penalties, incidents that cost
- * places, then the best single choice to change. `team` is the team as stored in the game state.
- */
-export function suggestionsFor(team, result, stationIds = C.STATIONS.map((s) => s.id), opts = {}) {
+/** 2–3 suggestions, at most one per decision and preferring different tables. */
+export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id)) {
+  const raced = effectiveTeam(team, stationIds)
+  const candidates = betterOptions(raced, stationIds)
+  const picked = []
+  const used = new Set()
+  for (const pass of [true, false]) {
+    for (const c of candidates) {
+      if (picked.length >= 3) break
+      if (picked.some((p) => p.decision.id === c.decision.id)) continue
+      if (pass && used.has(c.station)) continue
+      picked.push(c)
+      used.add(c.station)
+    }
+  }
+  const unapproved = new Set([...raced.missed, ...raced.notApproved])
+  const tips = picked.map((c) => ({
+    station: c.station,
+    decision: c.decision.id,
+    better: c.option.id,
+    gain: c.gain,
+    text: `${stationName(c.station)}, ${c.decision.name}: ${c.option.name} instead of ${c.current.name}. ${c.option.why}${unapproved.has(c.station) ? " This table was not approved, so it raced on its defaults." : ""}`,
+  }))
+  for (const id of unapproved) {
+    if (tips.length >= 2) break
+    if (tips.some((t) => t.station === id)) continue
+    tips.push({ station: id, decision: null, better: null, gain: 0, text: `${stationName(id)}: get the design approved. Unapproved tables score 0 and race on their defaults.` })
+  }
+  if (tips.length < 2) tips.push({ station: null, decision: null, better: null, gain: 0, text: "Pitch earlier: an approved design with time to spare leaves room to revise if you are sent back." })
+  return tips.slice(0, 3)
+}
+
+const GOOD_INCIDENT = {
+  fibreSafe: "The satellite backup kept you online through the fibre cut.",
+  heatSafe: "Your cooling and 85% power cap kept you stable in the heat spike.",
+  cache: "Your flash cache answered what-ifs instantly and brought the stop forward.",
+  edge: "Your garage edge cache kept telemetry flowing through a link blip.",
+  node: "4-hour support had a failed node back before the race.",
+}
+
+/** 2–3 specific positives. */
+export function positivesFor(team, row, race, stationIds) {
   const out = []
-  const eff = effectiveTeam(team, stationIds)
-  const notApproved = result?.notApproved?.length ? result.notApproved : eff.notApproved
-  const missed = result?.missed?.length ? result.missed : eff.missed
-  if (notApproved.length) {
-    out.push({ kind: "approval", text: `Get ${notApproved.map(stationName).join(", ")} approved: ${notApproved.length === 1 ? "that table" : "those tables"} scored 0 and raced on the default build. Pitch earlier, so there is time to revise if you are sent back.` })
+  const raced = effectiveTeam(team, stationIds)
+  const ev = evaluate(raced)
+  const scores = stationIds.map((id) => ({ id, score: simulateStation(raced, id, ev).score })).sort((a, b) => b.score - a.score)
+  const approved = scores.filter((s) => raced.approved.includes(s.id))
+  const best = approved[0]
+  if (best && best.score >= 80) out.push(`${stationName(best.id)} was approved at ${best.score}%: Optimised.`)
+  else if (approved.length) out.push(`${approved.length} of ${stationIds.length} tables approved by their Architects.`)
+  for (const inc of row?.incidents || []) {
+    if (out.length >= 3) break
+    const text = inc.good ? GOOD_INCIDENT[inc.id] : null
+    if (text && !out.includes(text)) out.push(text)
   }
-  if (missed.length) {
-    out.push({ kind: "missed", text: `You never locked in ${missed.map(stationName).join(", ")}: up to ${missed.length * C.PITCH_MAX} table points left on the table, and the race used the default build there.` })
+  if (out.length < 3 && row?.underSC) out.push("Your strategy model reacted to the Safety Car and pitted cheaply.")
+  if (out.length < 3 && row && !row.caught.length) out.push("A clean FIA audit: no penalty points.")
+  if (out.length < 3 && row?.position && row.position < row.grid) out.push(`Gained ${row.grid - row.position} place${row.grid - row.position === 1 ? "" : "s"} from the grid.`)
+  if (out.length < 2 && approved[1]) out.push(`${stationName(approved[1].id)} was approved at ${approved[1].score}%.`)
+  if (out.length < 2 && row) out.push(`Finished the race in P${row.position} of ${race.results.length}.`)
+  if (out.length < 2) out.push(`Strongest table: ${stationName(scores[0].id)} at ${scores[0].score}%.`)
+  return out.slice(0, 3)
+}
+
+/** The race incidents and FIA penalties that touched this team, in lap order. */
+export function incidentsFor(teamId, race) {
+  return (race?.events || []).filter((e) => e.team === teamId && ["bad", "good", "penalty"].includes(e.kind)).map((e) => ({ lap: e.lap, kind: e.kind, text: e.text, lesson: e.lesson || null }))
+}
+
+/** The full readout for one team. */
+export function readoutFor(team, race, stationIds = C.STATIONS.map((s) => s.id)) {
+  const row = race.results.find((r) => r.id === team.id)
+  const champ = race.standings.findIndex((s) => s.id === team.id) + 1
+  return {
+    team: { id: team.id, name: team.name, color: team.color, tier: C.tierFor(team).label },
+    result: { position: row?.position ?? null, of: race.results.length, championship: champ || null, points: row?.score ?? 0, racePoints: row?.racePoints ?? 0, tablePoints: row?.pitch ?? 0, penaltyPoints: row?.penaltyPoints ?? 0 },
+    wentWell: positivesFor(team, row, race, stationIds),
+    couldDo: suggestionsFor(team, stationIds),
+    incidents: incidentsFor(team.id, race),
   }
-  const caught = (result?.caught || []).map((id) => evaluate(eff, opts).penalties.find((p) => p.id === id)).filter(Boolean)
-  if (caught.length) {
-    const pen = caught.sort((a, b) => (b.points || 0) + (b.seconds || 0) - ((a.points || 0) + (a.seconds || 0)))[0]
-    out.push({ kind: "penalty", text: `Avoid the FIA penalty at ${stationName(PENALTY_STATION[pen.id] || "governance")}: ${pen.text}` })
-  }
-  const costly = (result?.incidents || []).filter((inc) => inc.loss > 0 && inc.places < 0).sort((a, b) => a.places - b.places)[0]
-  if (costly) out.push({ kind: "incident", text: `${costly.effect} on lap ${costly.lap}: ${costly.cause}. Fix it at ${stationName(costly.station)}.` })
-  if (out.length < MAX_SUGGESTIONS) {
-    const alt = bestAlternative(team, stationIds, opts)
-    if (alt) out.push({ kind: "choice", text: alt.text })
-  }
-  if (!out.length) out.push({ kind: "clean", text: "A clean weekend: every table approved, no penalties and no costly incidents. Keep this design and look for more pace per dollar." })
-  return out.slice(0, MAX_SUGGESTIONS)
 }

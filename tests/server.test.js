@@ -5,8 +5,10 @@ import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createApp } from "../server.mjs"
+import { REFERENCE_BUILD } from "../public/js/sim.js"
+import { TEAM_COLORS } from "../public/js/catalog.js"
 
-const PINS = { host: "host-test", leader: "lead-test", race: "race-test" }
+const PINS = { host: "host-test", leader: "arch-test", race: "race-test" }
 let server
 let base
 let dir
@@ -26,206 +28,190 @@ after(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-async function call(path, body, pin, station) {
+async function call(path, body, pin, station, ip) {
   const res = await fetch(base + path, {
     method: body ? "POST" : "GET",
-    headers: { "content-type": "application/json", ...(pin ? { "x-pin": pin } : {}), ...(station ? { "x-station": station } : {}) },
+    headers: { "content-type": "application/json", ...(pin ? { "x-pin": pin } : {}), ...(station ? { "x-station": station } : {}), ...(ip ? { "cf-connecting-ip": ip } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
   return { status: res.status, json: await res.json().catch(() => null) }
 }
+const host = (path, body) => call(path, body, PINS.host)
+const pick = (station) => Object.fromEntries(Object.entries(REFERENCE_BUILD).filter(([k]) => ({ link: "network", path: "network", garage: "network", vendor: "oem", payment: "oem", support: "oem", location: "dc", cooling: "dc", power: "dc", size: "compute", chips: "compute", storage: "compute" })[k] === station))
 
-test("full game flow over the API", async () => {
-  assert.equal((await call("/api/health")).status, 200)
-  assert.equal((await call("/api/host/setup", { teams: [{ name: "A", rank: 1 }, { name: "B", rank: 9 }] }, "wrong")).status, 403)
-  assert.equal((await call("/api/host/setup", { teams: [{ name: "A", rank: 1 }] }, PINS.host)).status, 400)
-  assert.equal((await call("/api/host/setup", { teams: [{ name: "A" }, { name: "B" }], stations: ["compute", "ai"] }, PINS.host)).status, 400)
+test("setup: 1–10 teams, each with a name, a colour and a tier", async () => {
+  assert.equal((await host("/api/host/setup", { teams: [] })).status, 400)
+  assert.equal((await host("/api/host/setup", { teams: Array.from({ length: 11 }, () => ({ name: "X" })) })).status, 400)
+  assert.equal((await call("/api/host/setup", { teams: [{ name: "A" }] }, "wrong")).status, 403)
+  const one = await host("/api/host/setup", { teams: [{ name: "Solo", tier: 3 }] })
+  assert.equal(one.status, 200, "a single team is allowed")
+  const ten = await host("/api/host/setup", { teams: Array.from({ length: 10 }, (_, i) => ({ name: `Team ${i + 1}`, tier: (i % 3) + 1 })) })
+  assert.equal(ten.status, 200)
+  assert.equal(ten.json.teams.length, 10)
+  assert.deepEqual(ten.json.teams.map((t) => t.color), TEAM_COLORS)
+  assert.deepEqual(ten.json.teams.slice(0, 3).map((t) => t.tier), [1, 2, 3])
+  assert.deepEqual(ten.json.settings.stations, ["network", "oem", "dc", "compute"])
+  const s = ten.json.settings
+  assert.equal(s.briefMinutes + s.playMinutes + s.raceMinutes + s.readoutMinutes, 50)
+  const weird = await host("/api/host/setup", { teams: [{ name: "<b>Bad</b>\u0000", tier: 99 }] })
+  assert.equal(weird.json.teams[0].tier, 2, "an invalid tier becomes Midfield")
+  assert.ok(!weird.json.teams[0].name.includes("\u0000"))
+})
 
-  const setup = await call("/api/host/setup", { teams: [{ name: "Alpha", rank: 2 }, { name: "<b>Beta</b>", rank: 8 }], gameMinutes: 30 }, PINS.host)
-  assert.equal(setup.status, 200)
+test("phases: the brief blocks choices, play allows them, ending play locks every table", async () => {
+  const setup = await host("/api/host/setup", { teams: [{ name: "A", tier: 2 }, { name: "B", tier: 1 }] })
+  const [a] = setup.json.teams
+  const tryChoice = () => call(`/api/teams/${a.id}/choices`, { station: "network", choices: { link: "redundant" } })
+  assert.equal((await tryChoice()).status, 409, "no choices in the lobby")
+  assert.equal((await host("/api/host/phase", { action: "set", briefMinutes: 4, playMinutes: 30, raceMinutes: 1, readoutMinutes: 15 })).json.settings.playMinutes, 30, "the plan is editable")
+  const brief = await host("/api/host/phase", { action: "brief" })
+  assert.equal(brief.json.brief.status, "running")
+  const blocked = await tryChoice()
+  assert.equal(blocked.status, 409)
+  assert.match(blocked.json.error, /Listen to the brief/)
+  assert.equal((await host("/api/host/phase", { action: "brief" })).status, 409, "the brief starts once")
+  assert.ok((await host("/api/host/phase", { action: "add", minutes: 1 })).json.brief.endsAt > brief.json.brief.endsAt, "+1 min extends the brief")
+  const play = await host("/api/host/phase", { action: "play" })
+  assert.equal(play.json.clock.status, "running")
+  assert.equal(play.json.brief.status, "done")
+  assert.equal(play.json.clock.totalMs, 30 * 60_000)
+  assert.equal((await tryChoice()).status, 200, "play allows choices")
+  assert.equal((await host("/api/host/phase", { action: "readout" })).status, 409, "no readouts before the race")
+  assert.equal((await host("/api/host/phase", { action: "end" })).json.clock.status, "ended")
+  const locked = await tryChoice()
+  assert.equal(locked.status, 409)
+  assert.match(locked.json.error, /Time is up/)
+  assert.equal((await host("/api/host/phase", { action: "add", minutes: 2 })).json.clock.status, "running", "the host can re-open play")
+})
+
+test("the brief ends on time and offers play", async () => {
+  await host("/api/host/setup", { teams: [{ name: "A" }] })
+  await host("/api/host/phase", { action: "set", briefMinutes: 0.5 })
+  const started = await host("/api/host/phase", { action: "brief" })
+  app.getState().brief.endsAt = Date.now() - 1
+  const after = await call("/api/state")
+  assert.equal(after.json.brief.status, "done")
+  assert.ok(started.json.brief.endsAt > 0)
+  assert.equal((await host("/api/host/phase", { action: "play" })).json.clock.status, "running")
+})
+
+test("pitch and approval: the Architect is scoped to one table, and only approved tables count", async () => {
+  const setup = await host("/api/host/setup", { teams: [{ name: "Alpha", tier: 2 }, { name: "Beta", tier: 2 }] })
   const [a, b] = setup.json.teams
-  assert.equal(setup.json.settings.stations.length, 6)
-  assert.equal(setup.json.clock.status, "lobby")
-  assert.equal(setup.json.clock.totalMs, 30 * 60_000)
-
-  assert.equal((await call(`/api/teams/${a.id}/choices`, { station: "compute", choices: { cpu: "grace" } })).status, 409, "no choices before the clock starts")
-  assert.equal((await call("/api/host/clock", { action: "start" })).status, 403)
-  assert.equal((await call("/api/host/clock", { action: "start" }, PINS.host)).json.clock.status, "running")
-
-  const partial = await call(`/api/teams/${a.id}/choices`, { station: "compute", choices: { cpu: "grace", nodes: 8, platform: "b300", clock: "bogus" } })
-  assert.equal(partial.status, 207)
-  assert.deepEqual(partial.json.rejected.sort(), ["clock", "platform"])
-  assert.equal(partial.json.team.choices.cpu, "grace")
-
-  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "compute" })).status, 409, "lock in before calling the leader")
-  const locked = await call(`/api/teams/${a.id}/submit`, { station: "compute" })
+  await host("/api/host/phase", { action: "play" })
+  for (const station of ["network", "oem", "dc", "compute"]) {
+    assert.equal((await call(`/api/teams/${a.id}/choices`, { station, choices: pick(station) })).status, 200)
+  }
+  assert.equal((await call(`/api/teams/${a.id}/choices`, { station: "network", choices: { link: "bogus", size: "medium" } })).status, 207, "invalid or other-table choices are rejected")
+  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).status, 409, "lock in before calling the Architect")
+  const locked = await call(`/api/teams/${a.id}/submit`, { station: "network" })
   assert.equal(locked.status, 200)
-  const plan = locked.json.plan
-  assert.match(plan.id, /^[A-Z2-9]{5}$/)
-  assert.ok(plan.score > 0 && plan.decisions.length === 6 && plan.table.capex > 0)
-  assert.equal(locked.json.team.pitch.compute, undefined, "locking in banks nothing: only approval scores")
-  assert.equal((await call(`/api/teams/${a.id}/submit`, { station: "compute" })).json.plan.id, plan.id, "lock-in is idempotent")
-  assert.equal((await call(`/api/teams/${a.id}/choices`, { station: "compute", choices: { nodes: 4 } })).status, 409, "a locked plan cannot change")
+  assert.equal(locked.json.plan.decisions.length, 3)
+  assert.equal(locked.json.plan.band, "Optimised")
+  assert.ok(["Low", "Med", "High"].includes(locked.json.plan.ledger.fia))
+  assert.equal((await call(`/api/teams/${a.id}/choices`, { station: "network", choices: { link: "single" } })).status, 409, "a locked plan is frozen")
+  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).json.position, 1)
 
-  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "compute" })).json.position, 1)
-  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "compute" })).json.position, 1, "calling twice keeps one place")
-  assert.equal((await call("/api/leader/availability", { station: "compute", available: true })).status, 403)
-  assert.equal((await call("/api/leader/availability", { station: "compute", available: true }, PINS.leader, "ai")).status, 403, "a leader only acts for the table chosen at login")
-  const free = await call("/api/leader/availability", { station: "compute", available: true }, PINS.leader, "compute")
-  assert.equal(free.json.leader.available, true)
-  assert.equal((await call("/api/host/queue", { station: "compute", action: "slot", team: a.id, slot: "25:99" }, PINS.host)).status, 400)
-  const slotted = await call("/api/host/queue", { station: "compute", action: "slot", team: a.id, slot: "10:45" }, PINS.host)
-  assert.equal(slotted.json.queues.compute[0].slot, "10:45")
-  assert.equal((await call("/api/host/queue", { station: "compute", action: "confirm", team: a.id }, PINS.host)).json.queues.compute[0].confirmed, true)
+  const login = await call("/api/login", { pin: PINS.leader, station: "network" })
+  assert.deepEqual(login.json, { role: "architect", station: "network" })
+  assert.equal((await call("/api/login", { pin: PINS.leader })).status, 400, "an Architect must pick a table")
+  const arch = (path, body, station = "network") => call(path, { station: "network", ...body }, PINS.leader, station)
+  assert.equal((await arch("/api/architect/availability", { available: true }, "dc")).status, 403, "an Architect only acts for their own table")
+  assert.equal((await call("/api/architect/availability", { station: "network", available: true }, "nope", "network")).status, 403)
+  assert.equal((await arch("/api/architect/pitch", { action: "start", team: a.id })).status, 409, "Available first")
+  assert.equal((await arch("/api/architect/availability", { available: true })).status, 200)
+  const pitch = await arch("/api/architect/pitch", { action: "start", team: a.id, by: "Sam" })
+  assert.equal(pitch.status, 200)
+  assert.equal(pitch.json.pitches.network.endsAt - pitch.json.pitches.network.startedAt, 30_000)
+  assert.equal(pitch.json.architects.network.available, false, "busy while pitching")
 
-  assert.equal((await call(`/api/teams/${a.id}/verdict`, { station: "compute", verdict: "convinced" }, PINS.leader, "compute")).status, 404, "the verdict route is retired")
-  const lead = (path, body) => call(path, { station: "compute", ...body }, PINS.leader, "compute")
-  assert.equal((await lead("/api/leader/decide", { team: a.id, decision: "approve" })).status, 409, "no decision without a pitch")
-  const started = await lead("/api/leader/pitch", { action: "start", team: a.id })
-  assert.equal(started.status, 200)
-  assert.equal(started.json.pitches.compute.team, a.id)
-  assert.equal(started.json.leaders.compute.available, false, "starting a pitch makes the leader Busy")
-  const approvedRes = await lead("/api/leader/decide", { team: a.id, decision: "approve", by: "Ada" })
-  assert.equal(approvedRes.status, 200)
-  const alphaNow = approvedRes.json.teams.find((t) => t.id === a.id)
-  assert.equal(alphaNow.pitch.compute, Math.round((plan.score * 1.1) / 4), "approval scores the system score plus 10%")
-  assert.equal(alphaNow.reviews.compute.status, "approved")
-  assert.equal(alphaNow.reviews.compute.by, "Ada")
-  assert.equal(approvedRes.json.leaders.compute.available, true, "deciding returns the leader to Available")
-  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "compute" })).status, 409, "an approved team cannot queue again")
-  assert.deepEqual(app.getState().queues.compute, [], "an approved team leaves the queue")
+  const back = await arch("/api/architect/decide", { team: a.id, decision: "sendBack", reason: "Explain the fail-over" })
+  assert.equal(back.status, 200)
+  const ta = back.json.teams.find((t) => t.id === a.id)
+  assert.equal(ta.reviews.network.status, "sentBack")
+  assert.equal(ta.reviews.network.reason, "Explain the fail-over")
+  assert.equal(ta.plans.network, undefined, "sent back unlocks the plan")
 
-  assert.equal((await call(`/api/teams/${b.id}/architect`, { tuning: { precision: "fp8" } })).status, 403, "Architect needs the host's grant")
-  await call("/api/host/architect", { team: b.id, enabled: true }, PINS.host)
-  const tuned = await call(`/api/teams/${b.id}/architect`, { tuning: { precision: "fp8", continuousBatching: true, bogus: 1 } })
-  assert.equal(tuned.status, 200)
-  assert.deepEqual(tuned.json.team.architect.tuning, { precision: "fp8", continuousBatching: true })
-  assert.equal(tuned.json.team.architect.gain, tuned.json.report.gain)
+  await call(`/api/teams/${a.id}/submit`, { station: "network" })
+  await call(`/api/teams/${a.id}/call`, { station: "network" })
+  await arch("/api/architect/pitch", { action: "start", team: a.id })
+  const ok = await arch("/api/architect/decide", { team: a.id, decision: "approve" })
+  const approved = ok.json.teams.find((t) => t.id === a.id)
+  assert.equal(approved.reviews.network.status, "approved")
+  assert.ok(approved.pitch.network > 0)
+  assert.equal(ok.json.architects.network.available, true)
 
-  await call(`/api/teams/${b.id}/checkin`, { station: "ai" })
-  await call(`/api/teams/${b.id}/presence`, { station: "ai", step: "decide" })
-  assert.equal((await call("/api/presence")).json.presence[b.id].step, "decide")
-  await call(`/api/teams/${b.id}/checkout`, { station: "ai" })
-  assert.equal(app.getState().tables.ai, undefined, "Return to home frees the table")
-  assert.equal((await call("/api/presence")).json.presence[b.id], undefined)
-
-  assert.equal((await call("/api/host/race", { seed: "test", endClock: true }, PINS.host)).status, 403, "the host also needs the race password")
-  assert.equal((await call("/api/host/race", { seed: "test", racePassword: PINS.race }, PINS.host)).status, 409, "no race while the clock runs")
-  const race = await call("/api/host/race", { seed: "test", endClock: true, racePassword: PINS.race }, PINS.host)
+  await call(`/api/teams/${a.id}/submit`, { station: "dc" })
+  assert.equal((await call("/api/host/race", { racePassword: PINS.race }, PINS.host)).status, 409, "the race needs play to end first")
+  assert.equal((await call("/api/host/race", { racePassword: "nope", endClock: true }, PINS.host)).status, 403)
+  const race = await call("/api/host/race", { racePassword: PINS.race, endClock: true, seed: "gate" }, PINS.host)
   assert.equal(race.status, 200)
-  assert.equal(race.json.clock.status, "ended")
-  assert.equal(race.json.race.result.results.length, 2)
-  const alpha = race.json.race.result.results.find((r) => r.id === a.id)
-  assert.ok(!alpha.missed.includes("compute"))
-  assert.equal(alpha.missed.length, 5)
-  assert.equal((await call(`/api/teams/${b.id}/choices`, { choices: { cpu: "grace" } })).status, 409)
+  const rows = Object.fromEntries(race.json.race.result.results.map((r) => [r.id, r]))
+  assert.equal(rows[a.id].pitch, approved.pitch.network, "only the approved table scores")
+  assert.deepEqual(rows[a.id].notApproved, ["dc"], "locked in but not approved")
+  assert.equal(rows[b.id].missed.length, 4)
+  assert.equal(rows[b.id].pitch, 0)
+  const readout = await host("/api/host/phase", { action: "readout" })
+  assert.ok(readout.json.readout.endsAt > Date.now())
+  assert.equal((await call("/api/health")).json.phase, "readout")
+  await host("/api/host/unrace", {})
+  assert.equal(app.getState().readout, null)
+})
 
-  const state = await call(`/api/state?since=${race.json.version}&game=${race.json.id}`)
-  assert.equal(state.json.unchanged, true)
-  assert.notEqual((await call(`/api/state?since=${race.json.version}&game=other`)).json.unchanged, true, "a different game id forces a full resync")
+test("removed Architect-mode routes and retired tables are gone", async () => {
+  await host("/api/host/setup", { teams: [{ name: "A" }] })
+  for (const path of ["/api/host/architect", "/api/leader/architect", "/api/teams/t1/architect", "/api/host/clock"]) {
+    assert.equal((await call(path, {}, PINS.host)).status, 404, path)
+  }
+  await host("/api/host/phase", { action: "play" })
+  for (const old of ["ai", "storage", "governance"]) assert.equal((await call("/api/teams/t1/submit", { station: old })).status, 400, `${old} is not a table`)
+  assert.equal((await call("/api/login", { pin: PINS.leader, station: "ai" })).status, 400)
 })
 
 test("PIN-protected routes rate limit repeated failed attempts per client IP", async () => {
-  const headers = { "content-type": "application/json", "cf-connecting-ip": "203.0.113.77" }
-  for (let i = 0; i < 10; i++) {
-    const res = await fetch(base + "/api/login", { method: "POST", headers, body: JSON.stringify({ pin: "wrong" }) })
-    assert.equal(res.status, 403)
-  }
-  const blocked = await fetch(base + "/api/login", { method: "POST", headers, body: JSON.stringify({ pin: PINS.host }) })
-  assert.equal(blocked.status, 429)
-  assert.match(blocked.headers.get("retry-after") || "", /^\d+$/)
-})
-
-test("the game clock: pause, add/remove minutes, expiry locks tables and unfinished tables race on defaults", async () => {
-  const setup = await call("/api/host/setup", { teams: [{ name: "Done", rank: 5 }, { name: "Late", rank: 5 }], gameMinutes: 10, visitMinutes: 8 }, PINS.host)
-  const [done, late] = setup.json.teams
-  assert.equal(setup.json.settings.visitMinutes, 8)
-  assert.equal((await call("/api/host/clock", { action: "add", minutes: 5 }, PINS.host)).json.clock.totalMs, 15 * 60_000)
-  assert.equal((await call("/api/host/clock", { action: "set", minutes: 2 }, PINS.host)).json.clock.totalMs, 2 * 60_000)
-  assert.equal((await call("/api/host/clock", { action: "pause" }, PINS.host)).status, 400)
-  await call("/api/host/clock", { action: "start" }, PINS.host)
-
-  const checkin = await call(`/api/teams/${done.id}/checkin`, { station: "network" })
-  assert.equal(checkin.status, 200)
-  assert.equal(checkin.json.team.visits.network.count, 1)
-  await call(`/api/teams/${done.id}/checkin`, { station: "ai" })
-  const moved = app.getState()
-  assert.equal(moved.tables.ai.team, done.id)
-  assert.equal(moved.tables.network, undefined, "checking in elsewhere frees the previous table")
-
-  const sims = [1, 2, 3].map(() => call(`/api/teams/${done.id}/sim`, { station: "ai" }))
-  const last = (await Promise.all(sims)).at(-1)
-  assert.equal(last.status, 200, "simulation runs are counted, never blocked")
-  assert.equal(app.getState().teams[0].sims.ai.visit, 3)
-  await call(`/api/teams/${done.id}/checkin`, { station: "compute" })
-  await call(`/api/teams/${done.id}/checkin`, { station: "ai" })
-  assert.equal((await call(`/api/teams/${done.id}/sim`, { station: "ai" })).json.runs.visit, 1, "a new visit restarts the per-visit count")
-
-  const ai = { platform: "b300", racks: 1, modelSize: "70b", precision: "fp8", hbm: "hbm288" }
-  await call(`/api/teams/${done.id}/choices`, { station: "ai", choices: ai })
-  await call(`/api/teams/${done.id}/submit`, { station: "ai" })
-  await call(`/api/teams/${late.id}/choices`, { station: "ai", choices: ai })
-
-  const paused = await call("/api/host/clock", { action: "pause" }, PINS.host)
-  assert.equal(paused.json.clock.status, "paused")
-  assert.ok(paused.json.clock.remainingMs > 0)
-  assert.equal((await call("/api/host/clock", { action: "add", minutes: 1 }, PINS.host)).json.clock.remainingMs > 60_000, true)
-  await call("/api/host/clock", { action: "resume" }, PINS.host)
-  assert.equal((await call("/api/host/race", { racePassword: PINS.race }, PINS.host)).status, 409)
-
-  app.getState().clock.endsAt = Date.now() - 1
-  const after = await call("/api/state")
-  assert.equal(after.json.clock.status, "ended")
-  assert.equal(after.json.clock.endedBy, "time")
-  assert.deepEqual(after.json.tables, {})
-  assert.equal((await call(`/api/teams/${late.id}/choices`, { station: "ai", choices: { tgp: "eco85" } })).status, 409)
-  assert.equal((await call(`/api/teams/${late.id}/submit`, { station: "ai" })).status, 409)
-  assert.equal((await call(`/api/teams/${late.id}/checkin`, { station: "dc" })).status, 409)
-  const lead = (path, body) => call(path, { station: "ai", ...body }, PINS.leader, "ai")
-  await lead("/api/leader/availability", { available: true })
-  assert.equal((await lead("/api/leader/pitch", { action: "start", team: late.id })).status, 409, "no pitch for a table not locked in before time")
-  assert.equal((await lead("/api/leader/pitch", { action: "start", team: done.id })).status, 200, "a plan locked in before time can still be pitched")
-  assert.equal((await lead("/api/leader/decide", { team: done.id, decision: "approve" })).status, 200, "and approved")
-
-  const race = await call("/api/host/race", { seed: "clock", racePassword: PINS.race }, PINS.host)
-  assert.equal(race.status, 200)
-  const rows = Object.fromEntries(race.json.race.result.results.map((r) => [r.id, r]))
-  assert.ok(!rows[done.id].missed.includes("ai"))
-  assert.ok(rows[late.id].missed.includes("ai"), "chosen but never locked in: the AI table is missed")
-  assert.equal(rows[late.id].missed.length, 6)
-  assert.ok(rows[done.id].visited >= 3)
-  assert.ok(rows[done.id].strategy > rows[late.id].strategy, "the same AI choices count only for the team that locked them in")
-
-  assert.equal((await call("/api/host/clock", { action: "add", minutes: 5 }, PINS.host)).status, 409, "the clock cannot reopen after the race")
-  await call("/api/host/unrace", {}, PINS.host)
-  const reopened = await call("/api/host/clock", { action: "add", minutes: 5 }, PINS.host)
-  assert.equal(reopened.json.clock.status, "running", "the host can re-open an ended clock with extra minutes")
-  const ended = await call("/api/host/clock", { action: "end" }, PINS.host)
-  assert.equal(ended.json.clock.endedBy, "host")
+  const ip = "203.0.113.77"
+  for (let i = 0; i < 10; i++) assert.equal((await call("/api/login", { pin: `bad-${i}` }, null, null, ip)).status, 403)
+  const limited = await call("/api/login", { pin: PINS.host }, null, null, ip)
+  assert.equal(limited.status, 429)
+  assert.equal((await call("/api/login", { pin: PINS.host }, null, null, "203.0.113.78")).status, 200, "other clients are unaffected")
 })
 
 test("state survives a server restart", async () => {
-  const setup = await call("/api/host/setup", { teams: [{ name: "Keep A", rank: 3 }, { name: "Keep B", rank: 7 }] }, PINS.host)
-  await call("/api/host/clock", { action: "start" }, PINS.host)
+  const setup = await host("/api/host/setup", { teams: [{ name: "Keep A", tier: 3 }, { name: "Keep B", tier: 1 }] })
+  await host("/api/host/phase", { action: "play" })
   const [a] = setup.json.teams
   await call(`/api/teams/${a.id}/checkin`, { station: "dc" })
-  await call(`/api/teams/${a.id}/choices`, { station: "dc", choices: { location: "fra", hall: "L" } })
+  await call(`/api/teams/${a.id}/choices`, { station: "dc", choices: { location: "colo", cooling: "liquid" } })
   await call(`/api/teams/${a.id}/submit`, { station: "dc" })
   const before = app.getState()
-
   const restarted = createApp({ dataDir: dir, pins: PINS })
   try {
     const again = restarted.getState()
     assert.equal(again.id, before.id)
-    assert.equal(again.version, before.version)
-    assert.deepEqual(again.teams[0].choices, { location: "fra", hall: "L" })
-    assert.ok(again.teams[0].submitted.dc)
-    assert.deepEqual(again.teams[0].plans.dc, before.teams[0].plans.dc, "the plan output survives a restart")
+    assert.deepEqual(again.teams[0].choices, { location: "colo", cooling: "liquid" })
+    assert.deepEqual(again.teams[0].plans.dc, before.teams[0].plans.dc)
+    assert.equal(again.teams[0].tier, 3)
     assert.equal(again.tables.dc.team, a.id)
-    assert.equal(again.clock.status, "running")
-    assert.equal(again.clock.endsAt, before.clock.endsAt, "the clock keeps its absolute end time across a restart")
+    assert.equal(again.clock.endsAt, before.clock.endsAt)
   } finally {
     restarted.close()
+  }
+})
+
+test("an old six-table save loads into the four-table game", async () => {
+  const other = await mkdtemp(join(tmpdir(), "podium-old-"))
+  try {
+    await writeFile(join(other, "state.json"), JSON.stringify({ id: "old", version: 9, settings: { stations: ["compute", "ai", "storage"], gameMinutes: 90 }, clock: { status: "lobby" }, teams: [{ id: "t1", name: "Old", rank: 3, choices: { cpu: "grace", link: "redundant" }, architect: { enabled: true } }] }))
+    const old = createApp({ dataDir: other, pins: PINS })
+    old.close()
+    const s = old.getState()
+    assert.deepEqual(s.settings.stations, ["compute"])
+    assert.equal(s.settings.playMinutes, 35)
+    assert.deepEqual(s.teams[0].choices, { link: "redundant" })
+    assert.equal(s.teams[0].architect, undefined)
+    assert.equal(s.teams[0].tier, 2)
+  } finally {
+    await rm(other, { recursive: true, force: true })
   }
 })
 
@@ -242,7 +228,11 @@ test("a damaged state file is kept aside and a blank game starts", async () => {
   }
 })
 
-test("static files are served and traversal is refused", async () => {
+test("reset returns to an empty game; static files are served; traversal is refused", async () => {
+  assert.equal((await call("/api/host/reset", {}, "nope")).status, 403)
+  const reset = await host("/api/host/reset", {})
+  assert.equal(reset.json.teams.length, 0)
+  assert.equal(reset.json.clock.status, "lobby")
   const res = await fetch(`${base}/station.html`)
   assert.equal(res.status, 200)
   assert.equal(res.headers.get("x-content-type-options"), "nosniff")

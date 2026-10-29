@@ -43,23 +43,23 @@ export const pct = (value) => `${Math.round(value * 100)}%`
 let pin = sessionStorage.getItem("podium-pin") || ""
 let role = sessionStorage.getItem("podium-role") || ""
 let station = sessionStorage.getItem("podium-station") || ""
-let leaderName = sessionStorage.getItem("podium-leader-name") || ""
+let architectName = sessionStorage.getItem("podium-architect-name") || ""
 
-/** The signed-in role; a table leader also has the one table they lead (and an optional name). */
+/** The signed-in role; an Architect also has the one table they review (and an optional name). */
 export function session() {
-  return { pin, role, station, name: leaderName }
+  return { pin, role, station, name: architectName }
 }
 
 export async function login(value, table = "", name = "") {
   const res = await post("/api/login", { pin: value, station: table || undefined }, false)
   pin = value
   role = res.role
-  station = res.role === "leader" ? res.station : ""
-  leaderName = res.role === "leader" ? String(name || "").trim().slice(0, 40) : ""
+  station = res.role === "architect" ? res.station : ""
+  architectName = res.role === "architect" ? String(name || "").trim().slice(0, 40) : ""
   sessionStorage.setItem("podium-pin", pin)
   sessionStorage.setItem("podium-role", role)
   sessionStorage.setItem("podium-station", station)
-  sessionStorage.setItem("podium-leader-name", leaderName)
+  sessionStorage.setItem("podium-architect-name", architectName)
   return role
 }
 
@@ -67,8 +67,8 @@ export function logout() {
   pin = ""
   role = ""
   station = ""
-  leaderName = ""
-  for (const key of ["podium-pin", "podium-role", "podium-station", "podium-leader-name"]) sessionStorage.removeItem(key)
+  architectName = ""
+  for (const key of ["podium-pin", "podium-role", "podium-station", "podium-architect-name"]) sessionStorage.removeItem(key)
 }
 
 export async function post(url, body, withPin = true) {
@@ -152,12 +152,10 @@ export function gameClock(state) {
   return c && typeof c.status === "string" ? c : null
 }
 
-/** "FIA rule 5.3" or "est." on an option card; nothing for plain industry figures. */
+/** "FIA rule 5.3" on an option card that a regulation drives. */
 export function tagFor(option) {
-  if (!option) return null
-  if (option.fia) return el("span", { class: "opt-tag tag-fia", title: "A 2027 FIA Infrastructure Specification rule drives this option" }, `FIA rule ${option.fia}`)
-  if (option.est) return el("span", { class: "opt-tag tag-est", title: "Teaching estimate, not a quote" }, "est.")
-  return null
+  if (!option?.fia) return null
+  return el("span", { class: `opt-tag tag-fia${option.illegal ? " tag-illegal" : ""}`, title: "A 2027 FIA Infrastructure Specification rule applies to this option" }, option.illegal ? `Breaks FIA ${option.fia}` : `FIA rule ${option.fia}`)
 }
 
 /** Log any uncaught error with context and show a visible notice instead of a silent blank page. */
@@ -174,45 +172,41 @@ export function installErrorLogging(screen) {
 
 const INSTRUCTIONS = {
   team: {
-    title: "How to play (teams)",
+    title: "Teams",
     steps: [
-      "Choose your team: tap your team on this table's iPad. Every table works the same way; move between tables freely. Every table locks when the game clock hits zero.",
-      "1 Brief: the mission, your constraints and what the leader is scoring. Tap Start designing.",
-      "2 Decide: tap one card per decision. Each decision says why it matters to the customer; each card shows what it does to CapEx, OpEx and power. \"FIA rule\" marks a regulation; \"est.\" marks an estimate. The running ledger is on the right.",
-      "3 Simulate: Run simulation for your table's score (80%+ is Optimised) and up to three hints. About three runs per visit is plenty.",
-      "4 Pitch: Lock in freezes the plan and shows a one-page plan. Take a screenshot of it.",
-      "Call the leader: you join this table's queue. The Pitch tab shows where you stand: Waiting for leader, Pitching (a 30-second countdown), Approved, or Sent back with the leader's reason.",
-      "Only approved tables count: an approved design scores its simulation plus 10%; anything else scores 0 and races on the default build. If you are sent back, revise, lock in and call the leader again while the clock allows.",
-      "Switch team hands the iPad to another team; Return to home when you leave the table. When time is up the Austin Grand Prix decides the championship; the race report shows what you could do differently.",
+      "Tap your team on the table's iPad. Move between the four tables freely.",
+      "Brief: listen while the host runs the brief. Choices open when play starts.",
+      "Decide: pick one card for each of the three decisions.",
+      "Simulate: one score, one sentence, one hint. 80% or more is Optimised.",
+      "Pitch: Lock in, take a screenshot of the plan, then Call the Architect.",
+      "Only approved tables count. Sent back? Revise, lock in and call again.",
+      "After the race, open your readout: what went well and what to do differently.",
     ],
   },
-  leader: {
-    title: "Table leader",
+  architect: {
+    title: "Architects",
     steps: [
-      "Open the host screen and choose Table leader: enter the leader PIN, pick your table and (optionally) your name. You only see your table.",
-      "Set yourself Available. The pitch queue lists teams in order with how long they have waited; tap a team to read its design in plain English with the consequences and the simulation score.",
-      "Grant Architect (or revoke it) for a team before you meet it, for example while it is queued.",
-      "Start pitch: a 30-second countdown on your screen and the team's iPad; you become Busy. At zero, decide.",
-      "Approve (the table scores and races as designed) or Send back with a one-line reason the team will see. Either returns you to Available.",
+      "On the host screen choose Architect, enter the Architect PIN and pick your table.",
+      "Set yourself Available. Tap a team in the queue to read its three choices in plain English.",
+      "Start pitch: 30 seconds on your screen and the team's iPad.",
+      "Approve, or Send back with a short reason the team will see.",
     ],
   },
   host: {
     title: "Session host",
     steps: [
-      "Set up: team names and 2026 finishing positions (they set CapEx tier and CFD allowance), tables in play and the game clock.",
-      "Start the clock. Watch the live feed (where each team is, step, score, Architect) and the approvals grid: every team × table as draft, locked, waiting, pitching, approved or sent back.",
-      "Table leaders approve designs from their own login; you can also act for any table. Queues: confirm, reorder, give slot times or clear.",
-      "Architect: you or the table leader can grant it to unlock the Token Efficiency Calculator.",
-      "Demo mode: a narrated walkthrough with a pretend team. It never touches the real game.",
-      "End clock & run race needs the race password; the race can also be started on the race screen. Restart the experience wipes everything (PIN and confirmation).",
+      "Set up 1–10 teams: name, colour and tier (Front-runner, Midfield or Challenger).",
+      "Start brief (5 min). Start play when it ends (35 min). Use +/− to adjust the clock.",
+      "Watch the approvals grid. End play, then Run race with the race password (30 s).",
+      "Show readouts: the projector cycles through every team's readout (about 9 min).",
     ],
   },
   projector: {
-    title: "Race screen",
+    title: "Projector",
     steps: [
-      "Before the race: live standings (tables approved, system score, Architect) and the game clock.",
-      "Run race: enter the race password. The Austin, Texas 2027 Grand Prix at the Circuit of the Americas plays in 30 seconds: 56 laps, pit stops, a Safety Car and incidents on the ticker.",
-      "Then the race report: the podium, what each team could do differently, the classification and the debrief. Tables open their own report at race.html?team=<id>.",
+      "Shows the phase, its countdown and the live standings.",
+      "The race plays in 30 seconds, then the podium.",
+      "Readouts cycle through every team; tap a team to hold it on screen.",
     ],
   },
 }
@@ -224,7 +218,7 @@ export function instructionsButton(role) {
 
 export function openInstructions(role) {
   document.getElementById("drawer")?.remove()
-  const roles = role === "team" ? ["team", "leader"] : [role]
+  const roles = role === "team" ? ["team", "architect"] : [role]
   const close = () => document.getElementById("drawer")?.remove()
   const drawer = el("div", { id: "drawer", class: "drawer-back", onclick: (e) => e.target.id === "drawer" && close() },
     el("div", { class: "drawer", role: "dialog", "aria-modal": "true" },
@@ -255,23 +249,22 @@ export const WORDS = {
   switchTeam: "Switch team",
   startDesigning: "Start designing",
   runSimulation: "Run simulation",
-  wholeTeam: "Whole-team view",
   lockIn: "Lock in",
-  callLeader: "Call the leader",
-  leaderFree: "Leader is free: go and pitch now",
-  queuePosition: (n) => `Queue position ${n}: see the session host to book your slot`,
+  callArchitect: "Call the Architect",
+  architectFree: "Your Architect is free: go and pitch now",
+  queuePosition: (n) => `Queue position ${n}: your Architect will call you`,
   returnHome: "Return to home",
   instructions: "Instructions",
   startPitch: "Start pitch",
   approve: "Approve",
   sendBack: "Send back",
-  waitingForLeader: "Waiting for leader",
+  waitingForArchitect: "Waiting for Architect",
   pitching: "Pitching",
   approved: "Approved",
-  grantArchitect: "Grant Architect",
-  revokeArchitect: "Revoke Architect",
   runRace: "Run race",
   racePassword: "Race password",
+  listen: "Listen to the brief",
+  screenshot: "Take a screenshot now",
 }
 
 /** Primary (one per screen), secondary (default), go (positive) or danger buttons, all the same size. */
@@ -298,12 +291,8 @@ export function meter(label, value, max, text, tone = "") {
   return el("div", { class: "meter" }, el("div", { class: "label" }, el("span", {}, label), el("b", {}, text)), el("div", { class: `bar ${tone}` }, el("i", { style: `width:${Math.round(fill * 100)}%` })))
 }
 
-export function architectBadge() {
-  return el("span", { class: "badge-arch" }, "ARCHITECT")
-}
-
 export function teamChip(team) {
-  return el("span", { class: "team-chip" }, el("i", { style: `background:${team.color}` }), team.name, team.architect?.enabled ? architectBadge() : null)
+  return el("span", { class: "team-chip" }, el("i", { style: `background:${team.color}` }), team.name)
 }
 
 /** The fixed four-step tab bar used on every table. */
