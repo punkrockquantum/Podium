@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Podium · Table</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="topbar station-head">
+    <div class="brand"><b>PODIUM</b></div>
+    <div class="station-title"><h1 id="stationName">Table</h1><span id="leaderName"></span></div>
+    <div class="spacer"></div>
+    <div class="tools" id="tools"></div>
+    <div class="clock-box"><div class="round-tag" id="roundTag">Game clock</div><div class="timer" id="timer">--:--</div></div>
+  </header>
+  <div class="team-strip hidden" id="teamStrip"></div>
+  <div id="app"></div>
+  <script>
+    if (location.protocol === "file:") document.body.innerHTML = '<div style="font:18px/1.5 -apple-system,sans-serif;max-width:640px;margin:12vh auto;padding:24px;color:#eee;background:#15171c;border-radius:12px"><h1 style="margin-top:0">Podium needs its server</h1><p>This page was opened as a file, so the game cannot load.</p><p>In Finder, double-click <b>start.command</b> in the Podium folder (or run <code>npm start</code> in Terminal), then open <a style="color:#4cc9f0" href="http://localhost:8080/">http://localhost:8080/</a>.</p></div>'
+  </script>
+  <script type="module" src="/js/station.js"></script>
+</body>
+</html>

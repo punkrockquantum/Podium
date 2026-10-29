@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Podium · Austin Grand Prix</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><b>PODIUM</b> 2027</div>
+    <div class="station-title"><h1 id="title">Austin, Texas 2027 Grand Prix · Circuit of the Americas</h1><span id="sub">Waiting for the host</span></div>
+    <div class="spacer"></div>
+    <div class="tools" id="tools"></div>
+    <div class="timer" id="lap">LAP –</div>
+  </header>
+  <div id="app"></div>
+  <script>
+    if (location.protocol === "file:") document.body.innerHTML = '<div style="font:18px/1.5 -apple-system,sans-serif;max-width:640px;margin:12vh auto;padding:24px;color:#eee;background:#15171c;border-radius:12px"><h1 style="margin-top:0">Podium needs its server</h1><p>This page was opened as a file, so the game cannot load.</p><p>In Finder, double-click <b>start.command</b> in the Podium folder (or run <code>npm start</code> in Terminal), then open <a style="color:#4cc9f0" href="http://localhost:8080/">http://localhost:8080/</a>.</p></div>'
+  </script>
+  <script type="module" src="/js/raceview.js"></script>
+</body>
+</html>

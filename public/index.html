@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Podium · F1 Infrastructure Strategy</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="topbar"><div class="brand"><b>PODIUM</b> 2027</div><div class="station-title"><h1>F1 Infrastructure Strategy</h1><span>FIA 2027 Infrastructure Specification · Issue 01</span></div></header>
+  <main class="home">
+    <section>
+      <h1>Build the infrastructure that wins the finale.</h1>
+      <p class="muted">Race against the game clock: teams move freely between the tables; on each table's iPad, choose your team first. Every table works the same way (about 10 minutes each): 1 Brief, then Start designing; 2 Decide, four to six decisions; 3 Simulate, Run simulation; 4 Pitch, Lock in (take a screenshot), then Call the leader and pitch. At zero every table locks, and any table you did not lock in races on its default options. The finale is the Austin, Texas 2027 Grand Prix at the Circuit of the Americas.</p>
+      <div class="row"><button class="btn" data-role="team">Teams: how to play</button><button class="btn" data-role="leader">Table leaders</button><button class="btn" data-role="host">Session host</button><button class="btn" data-role="projector">Race screen</button></div>
+      <p class="muted small">On this Mac, open the <a href="/host.html">host console</a>, the <a href="/race.html">projector</a>, or a table below. The host PIN is the one printed in the terminal (2027 unless you set HOST_PIN).</p>
+    </section>
+    <section>
+      <h2>Table iPads</h2>
+      <p class="muted small">Open one of these on the iPad at each table, then Share → Add to Home Screen for full screen.</p>
+      <div class="tiles" id="stations"></div>
+    </section>
+    <section>
+      <h2>Run the room</h2>
+      <div class="tiles">
+        <a class="tile" href="/host.html" style="--c:#ffffff"><b>Host console</b><span class="muted">Teams, the game clock, live feed, pitch queues, Architect, demo mode, the race (host PIN).</span></a>
+        <a class="tile" href="/race.html" style="--c:#ffd700"><b>Race screen</b><span class="muted">For the projector: live standings, then the finale and debriefs.</span></a>
+      </div>
+    </section>
+  </main>
+  <script>
+    if (location.protocol === "file:") document.body.innerHTML = '<div style="font:18px/1.5 -apple-system,sans-serif;max-width:640px;margin:12vh auto;padding:24px;color:#eee;background:#15171c;border-radius:12px"><h1 style="margin-top:0">Podium needs its server</h1><p>This page was opened as a file, so the game cannot load.</p><p>In Finder, double-click <b>start.command</b> in the Podium folder (or run <code>npm start</code> in Terminal), then open <a style="color:#4cc9f0" href="http://localhost:8080/">http://localhost:8080/</a>.</p></div>'
+  </script>
+  <script type="module">
+    import { STATIONS } from "/js/catalog.js"
+    import { el, openInstructions, installErrorLogging } from "/js/ui.js"
+    installErrorLogging("home")
+    for (const b of document.querySelectorAll("[data-role]")) b.addEventListener("click", () => openInstructions(b.dataset.role))
+    const box = document.getElementById("stations")
+    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}` }, el("b", {}, s.name), el("span", { class: "muted" }, s.leader)))
+  </script>
+</body>
+</html>
