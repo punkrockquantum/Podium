@@ -1,13 +1,13 @@
 /**
- * The per-team readout after the race: the result, what went well, what to do differently (each
- * naming the better option and why) and the race incidents that touched the team. Pure: the race
- * screen, the host and the tests share it.
+ * The per-team readout after the race: the result, the lessons the team achieved, what to do
+ * differently (naming the dial, the better setting, why, and the provider's role), the race
+ * incidents and a thumbnail of every board the race used. Pure: the race screen, the host and the
+ * tests share it.
  */
 import * as C from "./catalog.js"
-import { evaluate, effectiveTeam, pickedOption } from "./model.js"
-import { simulateStation } from "./sim.js"
+import { boardFor, choicesOf, pickedOption } from "./model.js"
 
-const stationName = (id) => C.byId(C.STATIONS, id)?.name || id
+const stationOf = (id) => C.byId(C.STATIONS, id)
 
 /** The top three of the championship, in podium order: 2nd (left), 1st (centre), 3rd (right). */
 export function podium(race) {
@@ -15,56 +15,53 @@ export function podium(race) {
   return [top[1], top[0], top[2]].filter(Boolean)
 }
 
-/** Every single-option change on the raced design, best first, scored by the table it improves. */
-function betterOptions(raced, stationIds) {
-  const ev = evaluate(raced)
-  const base = Object.fromEntries(stationIds.map((id) => [id, simulateStation(raced, id, ev).score]))
-  const out = []
-  for (const id of stationIds) {
-    for (const d of C.decisionsFor(id)) {
-      const current = pickedOption(d.id, ev.choices)
-      for (const option of d.options) {
-        if (option.id === current.id) continue
-        const alt = { ...raced, choices: { ...ev.choices, [d.id]: option.id } }
-        const altEv = evaluate(alt)
-        const gain = stationIds.reduce((sum, s) => sum + simulateStation(alt, s, altEv).score - base[s], 0)
-        if (gain >= 2) out.push({ station: id, decision: d, current, option, gain })
-      }
+const isApproved = (team, id) => team?.reviews?.[id]?.status === "approved"
+
+/** The best single-dial change on one board: in the zone first, then the highest FIT. */
+function bestChange(stationId, choices, budget) {
+  const now = boardFor(stationId, choices, budget)
+  let best = null
+  for (const d of C.decisionsFor(stationId)) {
+    const current = pickedOption(d.id, choices)
+    for (const option of d.options) {
+      if (option.id === current.id) continue
+      const alt = boardFor(stationId, { ...choices, [d.id]: option.id }, budget)
+      const rank = (alt.inZone ? 1000 : 0) + alt.fit
+      if (alt.fit > now.fit && (!best || rank > best.rank)) best = { decision: d, current, option, board: alt, rank }
     }
   }
-  return out.sort((a, b) => b.gain - a.gain)
+  return best ? { ...best, gain: best.board.fit - now.fit } : null
 }
 
-/** 2–3 suggestions, at most one per decision and preferring different tables. */
-export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id)) {
-  const raced = effectiveTeam(team, stationIds)
-  const candidates = betterOptions(raced, stationIds)
-  const picked = []
-  const used = new Set()
-  for (const pass of [true, false]) {
-    for (const c of candidates) {
-      if (picked.length >= 3) break
-      if (picked.some((p) => p.decision.id === c.decision.id)) continue
-      if (pass && used.has(c.station)) continue
-      picked.push(c)
-      used.add(c.station)
+/** 2–3 suggestions: each names the dial, the better setting and why, and quotes the provider's role. */
+export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id), budget = C.DEFAULT_BUDGET) {
+  const choices = choicesOf(team)
+  const tips = []
+  for (const id of stationIds) {
+    const station = stationOf(id)
+    const own = boardFor(id, choices, budget)
+    const approved = isApproved(team, id)
+    if (!approved && own.inZone) {
+      tips.push({ station: id, decision: null, better: null, gain: 100, text: `${station.name}: your board was in the zone (FIT ${own.fit}) but not approved, so it raced on the customer's existing setup. Lock in and pitch earlier.` })
+      continue
     }
+    const change = bestChange(id, choices, budget)
+    if (!change) continue
+    if (own.inZone && change.gain < 3) continue
+    const prefix = approved ? "" : "Not approved, so it raced on the customer's existing setup. "
+    tips.push({
+      station: id,
+      decision: change.decision.id,
+      better: change.option.id,
+      gain: change.gain + (approved ? 0 : 20) + (own.inZone ? 0 : 30),
+      text: `${station.name} · ${change.decision.name}: ${change.option.name} instead of ${change.current.name} (FIT ${own.fit} → ${change.board.fit}). ${prefix}${change.decision.why} How a provider helps: ${change.decision.how}`,
+    })
   }
-  const unapproved = new Set([...raced.missed, ...raced.notApproved])
-  const tips = picked.map((c) => ({
-    station: c.station,
-    decision: c.decision.id,
-    better: c.option.id,
-    gain: c.gain,
-    text: `${stationName(c.station)}, ${c.decision.name}: ${c.option.name} instead of ${c.current.name}. ${c.option.why}${unapproved.has(c.station) ? " This table was not approved, so it raced on its defaults." : ""}`,
-  }))
-  for (const id of unapproved) {
-    if (tips.length >= 2) break
-    if (tips.some((t) => t.station === id)) continue
-    tips.push({ station: id, decision: null, better: null, gain: 0, text: `${stationName(id)}: get the design approved. Unapproved tables score 0 and race on their defaults.` })
-  }
-  if (tips.length < 2) tips.push({ station: null, decision: null, better: null, gain: 0, text: "Pitch earlier: an approved design with time to spare leaves room to revise if you are sent back." })
-  return tips.slice(0, 3)
+  tips.sort((a, b) => b.gain - a.gain)
+  const out = tips.slice(0, 3)
+  if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Pitch earlier: an approved board with time to spare leaves room to tune further if you are sent back." })
+  if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Every board was in the zone: next time, look for the setting that leaves the most budget spare." })
+  return out
 }
 
 const GOOD_INCIDENT = {
@@ -75,44 +72,52 @@ const GOOD_INCIDENT = {
   node: "4-hour support had a failed node back before the race.",
 }
 
-/** 2–3 specific positives. */
-export function positivesFor(team, row, race, stationIds) {
+/** The lessons achieved: every approved board in the zone, then good moments from the race. */
+export function positivesFor(team, row, race, stationIds = C.STATIONS.map((s) => s.id), budget = C.DEFAULT_BUDGET) {
+  const choices = choicesOf(team)
   const out = []
-  const raced = effectiveTeam(team, stationIds)
-  const ev = evaluate(raced)
-  const scores = stationIds.map((id) => ({ id, score: simulateStation(raced, id, ev).score })).sort((a, b) => b.score - a.score)
-  const approved = scores.filter((s) => raced.approved.includes(s.id))
-  const best = approved[0]
-  if (best && best.score >= 80) out.push(`${stationName(best.id)} was approved at ${best.score}%: Optimised.`)
-  else if (approved.length) out.push(`${approved.length} of ${stationIds.length} tables approved by their Architects.`)
+  const lessons = stationIds.map((id) => ({ id, board: boardFor(id, choices, budget) })).filter((x) => isApproved(team, x.id) && x.board.inZone).sort((a, b) => b.board.fit - a.board.fit)
+  for (const { id, board } of lessons.slice(0, 3)) out.push(`${stationOf(id).name} in the zone (FIT ${board.fit}): ${stationOf(id).lesson.why}`)
   for (const inc of row?.incidents || []) {
     if (out.length >= 3) break
     const text = inc.good ? GOOD_INCIDENT[inc.id] : null
     if (text && !out.includes(text)) out.push(text)
   }
-  if (out.length < 3 && row?.underSC) out.push("Your strategy model reacted to the Safety Car and pitted cheaply.")
+  const approved = stationIds.filter((id) => isApproved(team, id))
+  if (out.length < 2 && approved.length) out.push(`${approved.length} of ${stationIds.length} boards approved by their Architects.`)
+  if (out.length < 3 && row?.underSC) out.push("Your pit wall reacted to the Safety Car and pitted cheaply.")
   if (out.length < 3 && row && !row.caught.length) out.push("A clean FIA audit: no penalty points.")
-  if (out.length < 3 && row?.position && row.position < row.grid) out.push(`Gained ${row.grid - row.position} place${row.grid - row.position === 1 ? "" : "s"} from the grid.`)
-  if (out.length < 2 && approved[1]) out.push(`${stationName(approved[1].id)} was approved at ${approved[1].score}%.`)
+  if (out.length < 2 && row?.position && row.position < row.grid) out.push(`Gained ${row.grid - row.position} place${row.grid - row.position === 1 ? "" : "s"} from the grid.`)
   if (out.length < 2 && row) out.push(`Finished the race in P${row.position} of ${race.results.length}.`)
-  if (out.length < 2) out.push(`Strongest table: ${stationName(scores[0].id)} at ${scores[0].score}%.`)
+  if (out.length < 2) out.push("You took part in every phase of the session.")
   return out.slice(0, 3)
 }
 
 /** The race incidents and FIA penalties that touched this team, in lap order. */
 export function incidentsFor(teamId, race) {
-  return (race?.events || []).filter((e) => e.team === teamId && ["bad", "good", "penalty"].includes(e.kind)).map((e) => ({ lap: e.lap, kind: e.kind, text: e.text, lesson: e.lesson || null }))
+  return (race?.events || []).filter((e) => e.team === teamId && ["bad", "good", "penalty"].includes(e.kind)).map((e) => ({ lap: e.lap, kind: e.kind, text: e.text, lesson: e.lesson || null, station: e.station || null }))
+}
+
+/** The board the race used for each table: the approved one, or the customer's existing setup. */
+export function racedBoards(team, stationIds = C.STATIONS.map((s) => s.id), budget = C.DEFAULT_BUDGET) {
+  const choices = choicesOf(team)
+  return stationIds.map((id) => {
+    const approved = isApproved(team, id)
+    const board = boardFor(id, approved ? choices : C.BASELINE_CHOICES, budget)
+    return { station: id, name: stationOf(id).name, color: stationOf(id).color, approved, fit: board.fit, status: board.status, inZone: board.inZone, raced: approved ? "approved" : "today", targets: board.targets.map((t) => ({ name: t.name, display: t.display, ok: t.ok })) }
+  })
 }
 
 /** The full readout for one team. */
-export function readoutFor(team, race, stationIds = C.STATIONS.map((s) => s.id)) {
+export function readoutFor(team, race, stationIds = C.STATIONS.map((s) => s.id), budget = C.DEFAULT_BUDGET) {
   const row = race.results.find((r) => r.id === team.id)
   const champ = race.standings.findIndex((s) => s.id === team.id) + 1
   return {
-    team: { id: team.id, name: team.name, color: team.color, tier: C.tierFor(team).label },
+    team: { id: team.id, name: team.name, color: team.color },
     result: { position: row?.position ?? null, of: race.results.length, championship: champ || null, points: row?.score ?? 0, racePoints: row?.racePoints ?? 0, tablePoints: row?.pitch ?? 0, penaltyPoints: row?.penaltyPoints ?? 0 },
-    wentWell: positivesFor(team, row, race, stationIds),
-    couldDo: suggestionsFor(team, stationIds),
+    boards: racedBoards(team, stationIds, budget),
+    wentWell: positivesFor(team, row, race, stationIds, budget),
+    couldDo: suggestionsFor(team, stationIds, budget),
     incidents: incidentsFor(team.id, race),
   }
 }

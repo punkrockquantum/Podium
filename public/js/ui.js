@@ -152,12 +152,6 @@ export function gameClock(state) {
   return c && typeof c.status === "string" ? c : null
 }
 
-/** "FIA rule 5.3" on an option card that a regulation drives. */
-export function tagFor(option) {
-  if (!option?.fia) return null
-  return el("span", { class: `opt-tag tag-fia${option.illegal ? " tag-illegal" : ""}`, title: "A 2027 FIA Infrastructure Specification rule applies to this option" }, option.illegal ? `Breaks FIA ${option.fia}` : `FIA rule ${option.fia}`)
-}
-
 /** Log any uncaught error with context and show a visible notice instead of a silent blank page. */
 export function installErrorLogging(screen) {
   const notice = (err) => {
@@ -175,36 +169,36 @@ const INSTRUCTIONS = {
     title: "Teams",
     steps: [
       "Tap your team on the table's iPad. Move between the four tables freely.",
-      "Brief: listen while the host runs the brief. Choices open when play starts.",
-      "Decide: pick one card for each of the three decisions.",
-      "Simulate: one score, one sentence, one hint. 80% or more is Optimised.",
-      "Pitch: Lock in, take a screenshot of the plan, then Call the Architect.",
-      "Only approved tables count. Sent back? Revise, lock in and call again.",
-      "After the race, open your readout: what went well and what to do differently.",
+      "Problem: the customer's need, the targets and the cap lines. The grey needle is today's setup.",
+      "Tune: turn the three dials until every gauge sits in the green zone without crossing a cap line.",
+      "FIT 80 or more means in the zone and inside the caps. Crossing a cap caps FIT at 40.",
+      "Pitch: Lock in, take a screenshot of your board, then Call the Architect.",
+      "Only approved boards count; the rest race on today's setup. Sent back? Retune and call again.",
+      "After the race, open your readout: lessons learned and what to do differently.",
     ],
   },
   architect: {
     title: "Architects",
     steps: [
       "On the host screen choose Architect, enter the Architect PIN and pick your table.",
-      "Set yourself Available. Tap a team in the queue to read its three choices in plain English.",
-      "Start pitch: 30 seconds on your screen and the team's iPad.",
+      "Set yourself Available. Tap a team in the queue: you see its board exactly as the team does.",
+      "Start pitch: 30 seconds. Ask why each dial helps the customer and how a provider helps.",
       "Approve, or Send back with a short reason the team will see.",
     ],
   },
   host: {
     title: "Session host",
     steps: [
-      "Set up 1–10 teams: name, colour and tier (Front-runner, Midfield or Challenger).",
+      "Set up 1–10 teams (name and colour) and one budget level for everyone: Tight, Standard or Generous.",
       "Start brief (5 min). Start play when it ends (35 min). Use +/− to adjust the clock.",
-      "Watch the approvals grid. End play, then Run race with the race password (30 s).",
+      "Watch the approvals grid fill with FIT gauges. End play, then Run race with the race password (30 s).",
       "Show readouts: the projector cycles through every team's readout (about 9 min).",
     ],
   },
   projector: {
     title: "Projector",
     steps: [
-      "Shows the phase, its countdown and the live standings.",
+      "Shows the phase, its countdown and the standings with four FIT gauges per team.",
       "The race plays in 30 seconds, then the podium.",
       "Readouts cycle through every team; tap a team to hold it on screen.",
     ],
@@ -247,8 +241,16 @@ export function confirmDialog(text, yes = "Yes", no = "Cancel") {
 export const WORDS = {
   chooseTeam: "Choose your team",
   switchTeam: "Switch team",
-  startDesigning: "Start designing",
-  runSimulation: "Run simulation",
+  startTuning: "Start tuning",
+  problem: "Problem",
+  tune: "Tune",
+  fit: "FIT",
+  inZone: "In the zone",
+  overCap: "Over the cap",
+  today: "Today's setup",
+  todaySetup: "Today's setup",
+  howProviderHelps: "How a provider helps",
+  learned: "What you just learned",
   lockIn: "Lock in",
   callArchitect: "Call the Architect",
   architectFree: "Your Architect is free: go and pitch now",
@@ -295,34 +297,10 @@ export function teamChip(team) {
   return el("span", { class: "team-chip" }, el("i", { style: `background:${team.color}` }), team.name)
 }
 
-/** The fixed four-step tab bar used on every table. */
-export const STATION_TABS = [["brief", "1 · Brief"], ["decide", "2 · Decide"], ["sim", "3 · Simulate"], ["pitch", "4 · Pitch"]]
+/** The fixed three-step tab bar used on every table. */
+export const STATION_TABS = [["problem", "1 · Problem"], ["tune", "2 · Tune"], ["pitch", "3 · Pitch"]]
 export function tabBar(active, onSelect) {
   return el("nav", { class: "tabs", role: "tablist" }, STATION_TABS.map(([id, label]) =>
     el("button", { class: `tab${id === active ? " active" : ""}`, "data-tab": id, role: "tab", "aria-selected": String(id === active), onclick: () => onSelect(id) }, label)))
 }
 
-/** An option card: same size and anatomy for every decision on every table. */
-export function optionCard({ name, why, lines = [], cost = null, tag = null, selected = false, disabled = false, onclick }) {
-  return el("button", { class: `card${selected ? " selected" : ""}`, disabled, onclick, "aria-pressed": String(selected) },
-    tag, el("div", { class: "name" }, name), why ? el("div", { class: "why" }, why) : null,
-    lines.length ? el("div", { class: "money" }, lines.map((line) => el("div", {}, line))) : null, cost)
-}
-
-/** A decision: heading, one line on why it matters to the customer, then the cards, then an optional note. */
-export function decisionSection({ id, title, why, cards, note }) {
-  return el("section", { class: "decision", id: id ? `decision-${id}` : null },
-    el("h3", {}, title), why ? el("p", { class: "decision-why" }, why) : null,
-    el("div", { class: "cards" }, cards), note ? el("p", { class: "decision-note" }, note) : null)
-}
-
-/** Simulation score ring. */
-export function scoreRing(score, band) {
-  const r = 52
-  const c = 2 * Math.PI * r
-  const tone = band === "Optimised" ? "var(--green)" : band === "Competitive" ? "var(--amber)" : "var(--bad)"
-  const svg = `<svg viewBox="0 0 120 120" width="132" height="132" aria-hidden="true"><circle cx="60" cy="60" r="${r}" fill="none" stroke="#2a2f3a" stroke-width="12"/><circle cx="60" cy="60" r="${r}" fill="none" stroke="${tone}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(c * Math.max(0, Math.min(100, score))) / 100} ${c}" transform="rotate(-90 60 60)"/><text x="60" y="68" text-anchor="middle" font-size="28" font-weight="900" fill="#fff">${Math.round(score)}%</text></svg>`
-  const ring = el("div", { class: "score-ring" })
-  ring.innerHTML = svg
-  return el("div", { class: "score-head" }, ring, el("div", {}, el("b", { class: "score-band" }, band), el("div", { class: "small muted" }, "Optimised is 80% or more")))
-}

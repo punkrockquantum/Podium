@@ -1,21 +1,24 @@
 # Podium 2027
 
-A 50-minute team game about building a Formula 1 team's IT infrastructure. Up to ten teams visit
-four tables, make three decisions at each on an iPad, pitch each design to that table's Architect in
-30 seconds, and then watch their approved designs race the Austin 2027 Grand Prix on the projector.
-Every team then gets a one-screen readout of what went well and what it could have done differently.
+A 50-minute team game for sales teams about solving a Formula 1 team's infrastructure problems. Up to
+ten teams visit four tables. Each table is one customer problem: the team **tunes three dials** until
+every target gauge sits in its green zone **without crossing a cost cap line**. Each team then pitches
+its board to the table's Architect in 30 seconds and watches the approved boards race the Austin 2027
+Grand Prix on the projector. Every team then gets a one-screen readout: the lessons it achieved, and
+what it could have done differently.
 
-Prices, speeds and rules are **teaching estimates**, not quotes. The "FIA rules" are a simplified,
-fictional version of the real regulations.
+The point for the players is to learn **why each choice matters to the customer** and **how a
+provider helps**. Prices, speeds and rules are **teaching estimates**, not quotes. The "FIA rules"
+are a simplified, fictional version of the real regulations.
 
 ## Contents
 
 1. [The game in one minute](#1-the-game-in-one-minute)
 2. [The 50-minute session](#2-the-50-minute-session)
 3. [Screens, roles and PINs](#3-screens-roles-and-pins)
-4. [Teams and tiers](#4-teams-and-tiers)
+4. [Teams and the budget level](#4-teams-and-the-budget-level)
 5. [The four tables](#5-the-four-tables)
-6. [Scoring and approval](#6-scoring-and-approval)
+6. [FIT, scoring and approval](#6-fit-scoring-and-approval)
 7. [The race and the readouts](#7-the-race-and-the-readouts)
 8. [Running an event](#8-running-an-event)
 9. [Background service and public tunnel](#9-background-service-and-public-tunnel)
@@ -27,18 +30,22 @@ fictional version of the real regulations.
 
 ## 1. The game in one minute
 
-- **Teams:** 1 to 10. Each has a name, one of ten colours, and a tier: Front-runner, Midfield or
-  Challenger.
+- **Teams:** 1 to 10. Each has a name and one of ten colours. Every team plays the same four problems
+  on the same budget.
 - **Tables:** four, one iPad each, each with its own Architect: Connectivity, OEMs, Datacenter & Power
   and the CFD Supercomputer.
-- **At each table**, the team works through four tabs:
-  1. **Brief:** three bullets, plus what the Architect is looking for.
-  2. **Decide:** three decisions with three options each.
-  3. **Simulate:** one score, one sentence and one hint.
-  4. **Pitch:** **Lock in**, take a screenshot of the plan, **Call the Architect**, pitch for 30
-     seconds, and get **Approved** or **Sent back**.
-- **Only approved tables count.** A table that was skipped or not approved races on its default
-  options, which are deliberately weak.
+- **At each table**, the team works through three tabs, which look the same on every table:
+  1. **Problem:** the customer's need in one sentence, 2–3 **targets** drawn as gauges with a green
+     zone, and the **cap lines** (CapEx, yearly OpEx, and power where it matters). A grey needle and
+     marker show **Today's setup**, what the customer has now, and it sits outside the zone.
+  2. **Tune:** three dials with three settings each. Every tap moves the needles, the cost bars and
+     the **FIT** ring at once. Each dial says *Why it matters to the F1 team* and
+     *How a provider helps*. Crossing a cap line turns the bar red and says what would happen and what would fix it.
+     The first time a board gets **In the zone**, the team sees **What you just learned**.
+  3. **Pitch:** **Lock in**, take a screenshot of the board snapshot, **Call the Architect**, pitch
+     for 30 seconds, and get **Approved** or **Sent back**.
+- **Only approved boards count.** A table that was skipped or not approved races on **today's
+  setup** (the customer's existing infrastructure), and the readout says so.
 - **The finale:** a 56-lap race animated in 30 seconds, then a readout for every team.
 
 ---
@@ -94,113 +101,119 @@ reason. The server refuses Architect actions for any other table.
 
 ---
 
-## 4. Teams and tiers
+## 4. Teams and the budget level
 
-The host sets up 1–10 teams with a name, a colour (ten distinct colours, assigned in order) and a
-tier. The tier makes the game fair: faster cars get tighter limits.
+The host sets up 1–10 teams with a name; colours are assigned in order (ten distinct colours). There
+are no per-team tiers: every team plays the same problems.
 
-| Tier | Meaning | CapEx headroom | Compute allowance | Car pace |
-| --- | --- | --- | --- | --- |
-| Front-runner (Tier 1) | Fastest car, tightest limits | $6M | 70% | 0.15 s/lap quicker |
-| Midfield (Tier 2) | Balanced | $8M | 100% | baseline |
-| Challenger (Tier 3) | Slower car, most room to catch up | $10M | 115% | 0.15 s/lap slower |
+**The budget level** is one setting for the whole session, chosen at setup or in the lobby. It moves
+every table's CapEx and OpEx cap lines, never the physical power limits.
 
-Every team has the same yearly OpEx allowance: **$5.0M**, with $0.5M of tolerance before a breach.
+| Level | Cap lines | Effect |
+| --- | --- | --- |
+| Tight | 85% of Standard | One or two clean answers per table: a harder, more focused session. |
+| Standard (default) | The season's allowance | Two to five answers per table. |
+| Generous | 125% of Standard | Premium options come within reach (for example buying Dell, HPE or Lenovo outright, or dark fibre). |
+
+Each table has its own slice of the infrastructure allowance, so a board is self-contained: what you
+see on the table is everything that scores it.
 
 ---
 
 ## 5. The four tables
 
-Each table has three decisions with three options; the default (marked ★) is what an unapproved table
-races on. The plan's ledger shows four numbers: **CapEx**, **yearly OpEx**, **power** (facility kW)
-and **FIA risk** (Low, Med or High).
+Each table has a problem, 2–3 targets, its cap lines and three dials. ★ marks today's setup.
 
 ### Connectivity (`network`): Connectivity Architect
 
-*Looking for:* a fast, legal link that survives a cut fibre without blowing the budget.
+*Problem:* get car data from the track to the factory strategists fast and reliably at every race.
+*Caps (Standard):* CapEx $600k, OpEx $700k a year.
+*Targets:* round-trip latency 120 ms or less · weekend availability 99.9% or more · FIA compliance.
 
-| Decision | Options |
+| Dial | Settings |
 | --- | --- |
-| Factory link | ★ Single tunnel (breaks FIA 5.3 redundancy) · Redundant tunnels · Redundant + satellite |
-| Latency path | ★ Public internet · Private cross-connect · Dark fibre |
-| Garage data | Wi-Fi dumps (illegal, FIA 5.2: time penalty) · ★ Wired umbilical · Umbilical + edge cache |
+| Paths to the factory | ★ Single tunnel (breaks FIA 5.3) · Two diverse paths · Two paths + satellite |
+| Route to the data centre | ★ Public internet · Private cross-connect · Dark fibre |
+| Car data out of the garage | Garage Wi-Fi (breaks FIA 5.2) · ★ Wired umbilical · Umbilical + edge cache |
 
 ### OEMs (`oem`): OEM Architect
 
-*Looking for:* a vendor and payment plan that fits your tier's limits, with support that matches the
-risk.
+*Problem:* refresh the hardware this season without blowing the CapEx envelope or the yearly cost cap.
+*Caps:* CapEx $3.4M, OpEx $1.9M a year.
+*Targets:* performance 2.0× today or more · race-weekend fix time 4 hours or less · lead time 12 weeks
+or less.
 
-| Decision | Options |
+| Dial | Settings |
 | --- | --- |
-| Vendor | Supermicro · Dell, HPE or Lenovo · ★ NVIDIA DGX |
-| How you pay | ★ Buy (CapEx) · Lease (≈30% a year, OpEx) · As-a-service (Dell, HPE or Lenovo only; support included) |
-| Support | ★ Basic · Next business day · 4-hour |
+| Hardware | ★ Incumbent, last generation · Dell, HPE or Lenovo · NVIDIA DGX, newest |
+| How you pay | ★ Buy outright · Lease · As-a-service (Dell, HPE or Lenovo only; DGX falls back to a lease) |
+| Race-weekend support | ★ Basic · Next business day · 4-hour, 24/7 |
 
 ### Datacenter & Power (`dc`): Datacenter Architect
 
-*Looking for:* cooling that matches the chips, a site near the factory, and power headroom on a hot
-day.
+*Problem:* house, power and cool the 400 kW cluster so it runs at full speed, inside the cost cap.
+*Caps:* CapEx $1.0M, OpEx $1.0M a year, plus facility power against the site's supply.
+*Targets:* power and cooling 100% of need or more · PUE 1.30 or less · N+1 backup.
 
-| Decision | Options |
+| Dial | Settings |
 | --- | --- |
-| Location | ★ Home factory (no N+1, FIA 4.1) · Colo near factory · Cheap-power region (+latency) |
-| Cooling | ★ Air · Rear-door · Direct-to-chip liquid |
-| Power plan | ★ Standard · Capped at 85% · Max boost |
+| Where it lives | ★ Factory server room (300 kW, no N+1, FIA 4.1) · Colo near the factory · Cheap-power region (single grid feed, FIA 4.1) |
+| Cooling | ★ Air · Rear-door water · Direct-to-chip liquid |
+| Power setting | Capped at 85% · ★ Standard · Max boost |
 
 ### CFD Supercomputer (`compute`): CFD Architect
 
-*Looking for:* a cluster sized to the allowance, the right chips, and storage that keeps it fed.
+*Problem:* run the season's aero simulations inside the FIA compute cap, with each design cycle back
+the same day.
+*Caps:* CapEx $3.6M, OpEx $500k a year, plus cluster power against the 400 kW hall.
+*Targets:* 10 or more design cycles a week · compute 100% of the FIA cap or less · nodes kept fed 90%
+or more.
 
-| Decision | Options |
+| Dial | Settings |
 | --- | --- |
-| Cluster size | ★ Small (≈60% of allowance) · Medium (matches it) · Large (140%, FIA 2.4 overrun risk) |
+| Cluster size | ★ 8 nodes · 16 nodes · 28 nodes |
 | Chips | ★ CPU only · Mixed CPU + GPU · GPU heavy |
-| Storage | ★ Basic · Fast parallel · Fast + cache |
+| Storage | ★ Office NAS · Parallel file system · Parallel + flash cache |
 
-Every option on the iPad shows a sentence of at most about 12 words and a one-line "why".
+**In-zone answers at Standard** (FIT in brackets; the tests require at least two per table):
 
-**The tables interact.** Hot chips (GPU heavy, max boost) throttle on air cooling. A far site adds
-latency to every strategy call. A big cluster or a premium vendor can push the team over its CapEx
-headroom, and leasing moves the cost onto OpEx. The simulation shows the effects as you choose.
+- Connectivity: two paths + cross-connect + umbilical (95); + edge cache (87); satellite +
+  cross-connect + umbilical (87).
+- OEMs: Dell/HPE/Lenovo lease + 4-hour (94); Dell/HPE/Lenovo as-a-service + 4-hour (94).
+- Datacenter & Power: colo + rear-door + 85% cap (93); colo + liquid + 85% cap (91); and three more
+  colo combinations.
+- CFD: 16 nodes + CPU + parallel (91); 16 nodes + CPU + flash cache (88); 16 nodes + mixed + parallel
+  (84).
 
-**Known strong routes.** Each of these scores Optimised (80 or more) for every tier; the tests
-require at least two per table:
-
-- Connectivity: redundant tunnels + cross-connect + edge cache (93); satellite + cross-connect + edge
-  cache (92); redundant tunnels + dark fibre + wired umbilical (87).
-- OEMs: Dell/HPE/Lenovo lease + 4-hour (95); Dell/HPE/Lenovo as-a-service + next business day (91);
-  Supermicro lease + 4-hour (89).
-- Datacenter & Power: colo + liquid + 85% cap (95); colo + rear-door + 85% cap (94); cheap-power
-  region + liquid + standard (91).
-- CFD: medium + mixed + fast + cache (89); medium + mixed + fast parallel (88); medium + CPU only +
-  fast parallel (88).
-
-The defaults score 66 (Connectivity), 76 (OEMs), 74 (Datacenter & Power) and 68 (CFD).
+**Today's setup** scores 18 (Connectivity: breaks FIA 5.3), 33 (OEMs), 20 (Datacenter & Power: the
+factory room cannot power the cluster) and 61 (CFD: too few cycles).
 
 ---
 
-## 6. Scoring and approval
+## 6. FIT, scoring and approval
 
-**The simulation score** (0–100) for a table blends performance (35%), cost (20%), compliance (25%)
-and resilience (20%). Bands: **Optimised** at 80 or more, **Competitive** at 60 or more, otherwise
-**Needs work**. The hint names the biggest thing to fix.
+**FIT (0–100)** is one number per board. Each target has a closeness from 0 to 1, where 1 means it is
+in its green zone. When every target is in the zone, FIT is 80 plus up to 20 for spare budget (the
+average share of each money cap left unused, with half a cap spare earning the full 20). Otherwise FIT
+is 70 × the average closeness. **Any cap breach (CapEx, OpEx or power) or FIA breach caps FIT at
+40**, so an over-cap board can never score well. The board shows FIT as a ring with one sentence and
+one hint that names the single dial setting that fixes the most urgent problem.
 
-**Approval gates everything.** When the Architect approves a plan, the team earns
-`round(score × 1.1 ÷ 4)` table points (up to 28 per table). A table that is never locked in
-(*missed*), or locked in but not approved (*not approved*), earns nothing and races on its defaults.
-A sent-back team can revise, lock in again and re-pitch while play is running. A plan locked in
-before play ended can still be pitched and approved afterwards.
+**Approval gates everything.** When the Architect approves a locked board, the team earns
+`round(FIT × 1.1 ÷ 4)` table points (up to 28 per table). A table that is never locked in
+(*missed*), or locked in but not approved (*not approved*), earns nothing and races on today's
+setup. A sent-back team can retune, lock in again and re-pitch while play is running. A board locked
+in before play ended can still be pitched and approved afterwards.
 
-**FIA penalties** are rolled in the race with fixed chances:
+**Penalties** are rolled in the race with fixed chances:
 
-| Risk | Table | Chance | Points |
+| Breach | Table | Chance | Points |
 | --- | --- | --- | --- |
 | Single tunnel (FIA 5.3) | Connectivity | 60% | −5 |
-| Wi-Fi car dumps (FIA 5.2) | Connectivity | 80% | −6 and +5 s |
-| No N+1 at the factory (FIA 4.1) | Datacenter & Power | 50% | −6 |
-| Large cluster overruns the allowance (FIA 2.4) | CFD | 50% | −8 |
-| Over CapEx headroom | OEMs | certain | −10 |
-| OpEx over tolerance / major breach | OEMs | certain | −10 / −25 |
+| Garage Wi-Fi (FIA 5.2) | Connectivity | 80% | −6 and +5 s |
+| No N+1 power (FIA 4.1) | Datacenter & Power | 50% | −6 |
+| Over the FIA compute cap (FIA 2.4) | CFD | 50% | −8 |
+| Over a CapEx or OpEx cap line | any | certain | −10 |
 
 **Final score** = table points + race points × 4 − penalty points. Race points follow F1:
 25, 18, 15, 12, 10, 8, 6, 4, 2, 1.
@@ -212,35 +225,37 @@ before play ended can still be pitched and approved afterwards.
 The race is the Austin 2027 Grand Prix at the Circuit of the Americas: 56 laps animated in 30
 seconds. It is deterministic for a seed, so a rerun with the same seed gives the same result.
 
-Lap pace comes from the tier, the aero gain from the CFD table, and a "system" score across the four
-tables. Incidents tie back to the tables:
+Lap pace follows the team's **system FIT**: the average FIT of the four boards it raced (approved
+boards as tuned, the rest on today's setup). Strategy quality follows the Connectivity and CFD FITs.
+Incidents follow visible dial settings, and each names its dial:
 
-- **Connectivity:** a tunnel drop on a single tunnel, public-internet jitter, a fibre cut (a
-  satellite backup survives it, redundant tunnels lose 0.8 s, a single tunnel loses 4 s), and the
-  edge cache's gain.
-- **OEMs:** a failed node, saved by 4-hour support and costly with basic support.
-- **Datacenter & Power:** a heat spike (air cooling and max boost suffer; liquid plus the 85% cap
-  stays stable), max boost overheating, and room power limits. The cheap-power region adds 40 ms to
-  every call.
-- **CFD:** a small cluster gives a poor strategy model, slow storage delays answers, and the flash
-  cache's gain.
+- **Connectivity:** a drop on a single tunnel, public-internet jitter, a fibre cut (satellite backup
+  survives it, two paths lose 0.8 s, a single tunnel loses 4 s), the edge cache's gain, and the Wi-Fi
+  time penalty.
+- **OEMs:** last-generation kit runs too few what-ifs, late delivery, and a failed node (saved by
+  4-hour support, costly with basic support).
+- **Datacenter & Power:** a power blip without N+1, throttling when cooling falls short, and a heat
+  spike (air cooling and max boost suffer; an 85% cap stays stable).
+- **CFD:** too few design cycles, slow storage, the flash cache's gain, and tripping the hall's power.
 
-**Balance** (checked in the tests over 200 seeds for every tier): a team with all four tables
-approved on a strong design beats the same design with two tables unapproved at least 85% of the
-time, and beats an all-defaults team at least 95% of the time.
+**Balance** (checked in the tests over 200 seeds for every budget level): a team with four approved
+in-zone boards beats the same boards with two tables unapproved at least 85% of the time, and beats
+today's setup at least 95% of the time.
 
 **Each readout** shows:
 
 - the finishing position, the championship position and the points;
-- 2–3 things that went well;
-- 2–3 things that could have been done differently, each naming the better option and why;
+- a thumbnail of each table's board with its FIT, grey if it raced on today's setup;
+- **What went well:** 2–3 lessons achieved (each in-zone approved board says why it matters);
+- **What you could have done differently:** 2–3 suggestions, each naming the dial, the better
+  setting, the FIT gain, why it matters and how a provider helps;
 - the incidents that affected the team.
 
 Readouts are at `/race.html?team=<id>` and are listed on the host console. In the readout phase the
 projector cycles through every team every 20 seconds; tap a team in the chooser to hold it.
 
-**Demo mode** (on the host console) walks through six steps with sample data: brief → play → pitch →
-approve → race → readout. It does not touch the real game.
+**Demo mode** (on the host console) walks through seven steps with sample data: problem → tune (out
+of the zone) → in the zone → pitch → approve → race → readout. It does not touch the real game.
 
 ---
 
@@ -267,7 +282,7 @@ then triple-click the side button).
 **Rehearsal checklist.**
 
 - [ ] PINs set (no default-PIN warning in Terminal).
-- [ ] Teams created with names and tiers; phase lengths set.
+- [ ] Teams created; budget level and phase lengths set.
 - [ ] Four iPads on their table pages; the team grid shows every team.
 - [ ] Each Architect logged in on their own device, scoped to their table, and marked Available.
 - [ ] Projector on `/race.html`; the race password tested.
@@ -334,19 +349,19 @@ restarts.** Anyone with the URL can act as a team, so set real PINs before shari
 server.mjs               Node HTTP server: static files, JSON API, state, persistence (no dependencies)
 public/index.html        landing page            public/station.html   table iPad
 public/host.html         host / Architect console public/race.html     projector and readouts
-public/js/catalog.js     tables, decisions, options, tiers, colours, session defaults (the game data)
-public/js/model.js       evaluate(): ledger, power, latency, aero and FIA penalties for a team
-public/js/sim.js         per-table score, band, sentence and hint
+public/js/catalog.js     tables, problems, targets, caps, dials, budget levels, today's setup (the game data)
+public/js/model.js       boardFor(): gauges, cap bars, FIA chips, FIT, sentence and hint; evaluate() for the race
+public/js/board.js       the tuning board (SVG gauges, cap bars, FIT ring, dials), shared by every screen
 public/js/session.js     phases and countdowns
 public/js/race.js        the seeded race and its incidents
 public/js/report.js      the podium and each team's readout
-public/js/plan.js, plandata.js, summary.js   the locked-in plan and the Architect's summary
+public/js/plan.js, plandata.js, summary.js   the locked-in board snapshot and the Architect's summary
 public/js/station.js, host.js, raceview.js, readoutview.js, approval.js, podium.js, ui.js, demo.js
 scripts/                 macOS service and tunnel helpers
 tests/                   node:test suites
 ```
 
-The browser and the server share the same ES modules, so scoring is identical on both. State is one
+The browser and the server share the same ES modules, so the board an iPad shows is exactly the board the server locks in (the server is authoritative at lock-in). State is one
 JSON document; every change increments `version`, and clients poll `GET /api/state?since=<version>`.
 
 **Routes.** Host routes need `x-pin: <HOST_PIN>`. Architect routes need `x-pin: <LEADER_PIN>` and
@@ -357,8 +372,8 @@ client IP (`CF-Connecting-IP` behind the tunnel).
 | --- | --- |
 | `GET /api/state`, `GET /api/health`, `GET /api/presence` | Read the game; health includes the phase. |
 | `POST /api/login` | `{pin, station?}` → `{role: "host" \| "architect", station?}`. |
-| `POST /api/host/setup` | `{teams: [{name, tier}], stations?}` with 1–10 teams. |
-| `POST /api/host/phase` | `{action: set \| brief \| play \| pause \| resume \| add \| end \| readout}`. |
+| `POST /api/host/setup` | `{teams: [{name}], stations?, budget?}` with 1–10 teams; `budget` is `tight`, `standard` or `generous`. |
+| `POST /api/host/phase` | `{action: set (phase minutes and `budget`, lobby only) \| brief \| play \| pause \| resume \| add \| end \| readout}`. |
 | `POST /api/host/race`, `POST /api/race/run` | Run the race (`racePassword`, optional `seed`, `endClock`). |
 | `POST /api/host/unrace`, `/api/host/queue`, `/api/host/reset` | Clear the race, manage queues, start an empty game. |
 | `POST /api/architect/availability`, `/pitch`, `/decide` | Available toggle, start/stop a pitch, approve or send back. |
@@ -374,14 +389,15 @@ npm test
 
 The suites (`node:test`, no dependencies) cover:
 
-- **Catalog:** 4 tables × 3 decisions × 3 options, the word limits, 10 colours, the tiers and a
-  50-minute session.
-- **Model and simulation:** the ledger, payment and cooling physics, penalties, the approval gate,
-  and at least two Optimised routes per table for every tier.
-- **Race:** determinism, every incident, the balance over 200 seeds (printed as `[balance]` lines),
-  and a 10-team race with a full readout for every team.
-- **Server:** setup validation, the phases (the brief blocks choices, play allows them, ending play
-  locks), lock-in, call, pitch, approve and send back, Architect scoping, rate limiting, persistence,
-  old-save migration, a damaged save, and static-file safety.
-- **UX:** one vocabulary (Architect, never "leader"), dead modules removed, the phases, and the demo
-  steps.
+- **Catalog and model:** 4 tables × 3 dials × 3 settings, the word limits (problem ≤ 20 words, setting
+  ≤ 12, why/how ≤ 18), FIT (a cap or FIA breach caps it at 40), at least two in-zone answers per
+  table inside the caps, today's setup out of the zone everywhere, the budget level moving the cap
+  lines, and the plan, summary and race reading the same board.
+- **Race:** determinism, incidents tied to dials, the balance over 200 seeds per budget level
+  (printed as `[balance]` lines), and a 10-team race with board thumbnails, lessons and suggestions
+  in every readout.
+- **Server:** setup and budget validation, the phases, lock-in, call, pitch, approve and send back,
+  the approval gate scoring FIT, Architect scoping, rate limiting, persistence, old-save migration, a
+  damaged save, and static-file safety.
+- **UX:** one vocabulary (Problem, Tune, FIT, In the zone, Today's setup…), no retired product names,
+  no tiers or old score bands, dead modules removed, the phases, the demo steps, and the landing page.

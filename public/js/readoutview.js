@@ -1,5 +1,6 @@
 /** One team's readout as a single, screenshot-friendly card (race page, projector, demo mode). */
-import { el } from "./ui.js"
+import { el, WORDS } from "./ui.js"
+import { boardThumb } from "./board.js"
 
 const ordinal = (n) => (n ? `P${n}` : "—")
 
@@ -9,12 +10,14 @@ export function readoutCard(readout, { compact = false } = {}) {
   return el("div", { class: `readout${compact ? " compact" : ""}`, id: `readout-${team.id}`, "data-team": team.id, style: `--team:${team.color}` },
     el("header", { class: "readout-head" },
       el("i", { style: `background:${team.color}` }),
-      el("div", {}, el("h2", {}, team.name), el("span", { class: "muted small" }, team.tier)),
+      el("div", {}, el("h2", {}, team.name), el("span", { class: "muted small" }, `${readout.boards.filter((b) => b.raced === "approved").length} of ${readout.boards.length} boards approved`)),
       el("div", { class: "readout-result" },
         el("div", {}, el("b", {}, ordinal(result.position)), el("span", {}, `race of ${result.of}`)),
         el("div", {}, el("b", {}, ordinal(result.championship)), el("span", {}, "championship")),
         el("div", {}, el("b", {}, result.points), el("span", {}, "points")))),
     el("p", { class: "small muted readout-points" }, `${result.tablePoints} table points + ${result.racePoints} race points × 4${result.penaltyPoints ? ` − ${result.penaltyPoints} FIA penalty points` : ""}.`),
+    el("div", { class: "thumbs", id: `thumbs-${team.id}` }, readout.boards.map(boardThumb)),
+    readout.boards.some((b) => b.raced === "today") ? el("p", { class: "small muted" }, `Grey boards were not approved, so they raced on ${WORDS.todaySetup.toLowerCase()}.`) : null,
     el("div", { class: "readout-cols" },
       el("section", { class: "went-well" }, el("h3", {}, "What went well"), el("ul", {}, readout.wentWell.map((line) => el("li", {}, line)))),
       el("section", { class: "could-do" }, el("h3", {}, "What you could have done differently"), el("ul", {}, readout.couldDo.map((tip) => el("li", {}, tip.text))))),

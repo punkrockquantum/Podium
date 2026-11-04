@@ -12,9 +12,8 @@ import { join, normalize, extname, dirname, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { networkInterfaces } from "node:os"
 import { randomUUID, randomInt, timingSafeEqual, createHash } from "node:crypto"
-import { STATIONS, TEAM_COLORS, SESSION, TIERS, MAX_TEAMS, MIN_TEAMS, validChoice, decision, tablePoints } from "./public/js/catalog.js"
-import { evaluate, effectiveTeam } from "./public/js/model.js"
-import { simulateStation } from "./public/js/sim.js"
+import { STATIONS, TEAM_COLORS, SESSION, BUDGET_LEVELS, DEFAULT_BUDGET, MAX_TEAMS, MIN_TEAMS, validChoice, decision, tablePoints } from "./public/js/catalog.js"
+import { evaluate, effectiveTeam, boardFor, choicesOf } from "./public/js/model.js"
 import { runRace, systemScore } from "./public/js/race.js"
 import { buildPlan } from "./public/js/plandata.js"
 import { PITCH_MS, SEND_BACK_REASON_MAX } from "./public/js/approval.js"
@@ -56,8 +55,11 @@ const clampMinutes = (value, fallback) => {
   return Math.min(SESSION.maxMinutes, Math.max(0.5, Math.round((Number.isFinite(n) && n > 0 ? n : fallback) * 2) / 2))
 }
 
+const budgetOf = (value) => (BUDGET_LEVELS.some((b) => b.id === value) ? value : DEFAULT_BUDGET)
+
+/** Phase lengths and the session's budget level (one budget for every team). */
 function sessionSettings(source = {}) {
-  return Object.fromEntries(PHASE_KEYS.map((key) => [key, clampMinutes(source[key], SESSION[key])]))
+  return { ...Object.fromEntries(PHASE_KEYS.map((key) => [key, clampMinutes(source[key], SESSION[key])])), budget: budgetOf(source.budget) }
 }
 
 export function blankState() {
@@ -80,17 +82,14 @@ export function blankState() {
 
 const PLAN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const planId = () => Array.from({ length: 5 }, () => PLAN_ALPHABET[randomInt(PLAN_ALPHABET.length)]).join("")
-const STEPS = ["brief", "decide", "sim", "pitch"]
+const STEPS = ["problem", "tune", "pitch"]
 const TEAM_KEYS = ["choices", "touched", "submitted", "scores", "pitch", "visits", "sims", "plans", "reviews"]
-
-const tierOf = (value) => (TIERS.some((t) => t.id === Number(value)) ? Number(value) : 2)
 
 function makeTeams(list) {
   return list.slice(0, MAX_TEAMS).map((item, i) => ({
     id: `t${i + 1}`,
     name: oneLine(item?.name, 32) || `Team ${i + 1}`,
     color: TEAM_COLORS[i % TEAM_COLORS.length],
-    tier: tierOf(item?.tier),
     ...Object.fromEntries(TEAM_KEYS.map((key) => [key, {}])),
   }))
 }
@@ -118,10 +117,11 @@ function loadState(file) {
     delete loaded.leaders
     for (const team of loaded.teams) {
       for (const key of TEAM_KEYS) team[key] = team[key] || {}
-      team.tier = tierOf(team.tier)
-      for (const key of Object.keys(team.choices)) if (!decision(key)) delete team.choices[key]
+      for (const [key, value] of Object.entries(team.choices)) if (!validChoice(key, value)) delete team.choices[key]
+      for (const [id, plan] of Object.entries(team.plans)) if (!plan?.board) delete team.plans[id]
       delete team.architect
       delete team.rank
+      delete team.tier
     }
     return loaded
   } catch (err) {
@@ -408,9 +408,9 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const lockout = reviewBlocked(t, station)
       if (lockout) return send(res, 409, { error: lockout })
       const now = Date.now()
-      const record = { by: oneLine(body?.by, 40) || live.by || architectTitle(station), at: now, startedAt: live.startedAt, durationMs: now - live.startedAt, planId: plan.id, score: plan.score }
+      const record = { by: oneLine(body?.by, 40) || live.by || architectTitle(station), at: now, startedAt: live.startedAt, durationMs: now - live.startedAt, planId: plan.id, fit: plan.fit, inZone: plan.inZone }
       if (verdict === "approve") {
-        const points = tablePoints(plan.score, true)
+        const points = tablePoints(plan.fit, true)
         t.reviews[station] = { status: "approved", ...record, points }
         t.scores[station] = { total: points, at: now }
         t.pitch[station] = points
@@ -442,7 +442,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     state.tables = {}
   }
 
-  /** The race uses approved tables only: everything else races on its defaults and scores 0. */
+  /** The race uses approved tables only: everything else races on the customer's existing setup and scores 0. */
   function startRace(res, body, by) {
     if (!state.teams.length) return send(res, 400, { error: "Set up teams first" })
     const phase = phaseOf(state)
@@ -457,11 +457,11 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
     state.pitches = {}
     const entries = state.teams.map((t) => {
       const raced = effectiveTeam(t, stations)
-      const evaluation = evaluate(raced)
+      const evaluation = evaluate(raced, state.settings.budget, stations)
       const pitch = Object.fromEntries(raced.approved.map((id) => [id, t.pitch[id] || 0]))
       return { id: t.id, name: t.name, color: t.color, pitch, missed: raced.missed, notApproved: raced.notApproved, system: systemScore(evaluation, stations), evaluation }
     })
-    state.race = { seed, ranAt: Date.now(), ranBy: by, result: runRace(entries, seed, stations) }
+    state.race = { seed, ranAt: Date.now(), ranBy: by, budget: state.settings.budget, result: runRace(entries, seed, stations) }
     state.readout = null
     bump()
     return send(res, 200, publicState())
@@ -522,7 +522,8 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const station = body?.station
       if (!STATION_IDS.includes(station)) return send(res, 400, { error: "Unknown table" })
       const runs = t.sims[station] || { total: 0 }
-      t.sims[station] = { total: runs.total + 1, lastScore: simulateStation(t, station).score, lastAt: Date.now() }
+      const board = boardFor(station, choicesOf(t), state.settings.budget)
+      t.sims[station] = { total: runs.total + 1, lastFit: board.fit, inZone: board.inZone, firstZoneAt: runs.firstZoneAt || (board.inZone ? Date.now() : null), lastAt: Date.now() }
       bump()
       return send(res, 200, { ok: true, runs: t.sims[station] })
     },
@@ -551,7 +552,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const reason = lockReason(t, station)
       if (reason) return send(res, 409, { error: reason })
       if (t.plans[station]) return send(res, 200, { ok: true, team: t, plan: t.plans[station] })
-      const plan = buildPlan(t, station, { id: planId(), at: Date.now() })
+      const plan = buildPlan(t, station, { id: planId(), at: Date.now(), budget: state.settings.budget })
       t.plans[station] = plan
       t.submitted[station] = plan.at
       bump()

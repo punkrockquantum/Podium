@@ -1,6 +1,7 @@
 import * as C from "/js/catalog.js"
-import { simulateStation } from "/js/sim.js"
-import { planSheet, summaryBlock } from "/js/plan.js"
+import { boardFor } from "/js/model.js"
+import { miniFit, staticBoard, learningCard } from "/js/board.js"
+import { planSheet, summaryBlock, frozenBoard } from "/js/plan.js"
 import { designSummary } from "/js/summary.js"
 import { designStatus, approvalGrid, STATUS_LABEL, STATUS_ORDER, PITCH_SECONDS, SEND_BACK_REASON_MAX } from "/js/approval.js"
 import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
@@ -106,22 +107,27 @@ function renderLogin() {
 /* ------------------------------------------------------------ setup */
 
 const DEFAULT_NAMES = ["Scuderia Silicon", "Photon Racing", "Team Liquid Cool", "Petaflop GP", "Latency Zero", "Rack & Roll", "Throttle Up", "Edge Dynamics", "Quantum Pit", "Fibre Optic F1"]
-const DEFAULT_TIERS = [1, 2, 3, 2, 1, 3, 2, 1, 3, 2]
-
 function defaultSetup() {
-  return { count: 6, teams: DEFAULT_NAMES.map((name, i) => ({ name, tier: DEFAULT_TIERS[i] })), stations: C.STATIONS.map((s) => s.id), ...Object.fromEntries(["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"].map((k) => [k, C.SESSION[k]])) }
+  return { count: 6, teams: DEFAULT_NAMES.map((name) => ({ name })), budget: C.DEFAULT_BUDGET, stations: C.STATIONS.map((s) => s.id), ...Object.fromEntries(["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"].map((k) => [k, C.SESSION[k]])) }
 }
+
+/** One budget level for the whole session: it moves every table's cap lines. */
+function budgetSelect(value, onChange, id) {
+  const select = el("select", { class: "field", id }, C.BUDGET_LEVELS.map((b) => el("option", { value: b.id, selected: b.id === value }, `${b.name} budget`)))
+  select.addEventListener("change", () => onChange(select.value))
+  return select
+}
+
+const budgetLines = () => el("ul", { class: "tier-lines small" }, C.BUDGET_LEVELS.map((b) => el("li", {}, el("b", {}, b.name), `: ${b.line}`)))
 
 function renderSetup() {
   const d = setupDraft || (setupDraft = state?.teams?.length
-    ? { ...defaultSetup(), count: state.teams.length, teams: [...state.teams.map((t) => ({ name: t.name, tier: t.tier })), ...defaultSetup().teams.slice(state.teams.length)], stations: [...state.settings.stations] }
+    ? { ...defaultSetup(), count: state.teams.length, budget: state.settings.budget || C.DEFAULT_BUDGET, teams: [...state.teams.map((t) => ({ name: t.name })), ...defaultSetup().teams.slice(state.teams.length)], stations: [...state.settings.stations] }
     : defaultSetup())
   const rows = d.teams.slice(0, d.count).map((t, i) => {
     const name = el("input", { type: "text", value: t.name, maxlength: 32, "data-team-name": i })
     name.addEventListener("input", () => { t.name = name.value })
-    const tier = el("select", { class: "field", "data-team-tier": i }, C.TIERS.map((x) => el("option", { value: x.id, selected: t.tier === x.id }, x.label)))
-    tier.addEventListener("change", () => { t.tier = Number(tier.value) })
-    return el("tr", {}, el("td", {}, el("i", { class: "swatch", style: `background:${C.TEAM_COLORS[i]}` })), el("td", {}, name), el("td", {}, tier))
+    return el("tr", {}, el("td", {}, el("i", { class: "swatch", style: `background:${C.TEAM_COLORS[i]}` })), el("td", {}, name))
   })
   const count = el("select", { class: "field", id: "teamCount" }, Array.from({ length: C.MAX_TEAMS }, (_, k) => el("option", { value: k + 1, selected: d.count === k + 1 }, `${k + 1} team${k ? "s" : ""}`)))
   count.addEventListener("change", () => { d.count = Number(count.value); render(true) })
@@ -131,13 +137,14 @@ function renderSetup() {
     return el("label", { class: "row", style: "min-height:40px" }, box, el("span", { style: `color:${s.color};font-weight:800` }, s.name))
   })
   return panel("wide", el("h2", {}, state?.teams?.length ? "Re-create the game" : "Set up the game"),
-    el("ul", { class: "tier-lines small" }, C.TIERS.map((x) => el("li", {}, el("b", {}, x.label), `: ${x.line}`))),
-    el("div", { class: "row" }, count),
+    el("p", { class: "small muted" }, "Every team plays the same four problems. The budget level moves every table's CapEx and OpEx cap lines for everyone."),
+    budgetLines(),
+    el("div", { class: "row" }, count, budgetSelect(d.budget, (v) => { d.budget = v }, "setupBudget")),
     el("table", { class: "grid setup-grid" }, el("tbody", {}, rows)),
     el("h3", { style: "margin-top:12px" }, "Tables in play"), el("div", { class: "row" }, stations),
     el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn primary", id: "createGame", onclick: async () => {
       if (state?.teams?.length && !(await confirmDialog("This wipes every team's choices, plans and scores. Continue?", "Re-create"))) return
-      act("/api/host/setup", { teams: d.teams.slice(0, d.count), stations: d.stations, briefMinutes: d.briefMinutes, playMinutes: d.playMinutes, raceMinutes: d.raceMinutes, readoutMinutes: d.readoutMinutes }, "Game created")
+      act("/api/host/setup", { teams: d.teams.slice(0, d.count), stations: d.stations, budget: d.budget, briefMinutes: d.briefMinutes, playMinutes: d.playMinutes, raceMinutes: d.raceMinutes, readoutMinutes: d.readoutMinutes }, "Game created")
       setupDraft = null
     } }, state?.teams?.length ? "Re-create game" : "Create game")))
 }
@@ -158,10 +165,12 @@ function minutesInputs() {
     return el("label", {}, `${label} `, inputs[key])
   }
   const total = ["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"].reduce((sum, k) => sum + s[k], 0)
+  let level = s.budget || C.DEFAULT_BUDGET
   return el("div", { class: "session-plan" },
     el("div", { class: "row" }, field("briefMinutes", "Brief"), field("playMinutes", "Play"), field("raceMinutes", "Race"), field("readoutMinutes", "Readout"),
-      button("Save plan", () => act("/api/host/phase", { action: "set", ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, Number(i.value)])) }, "Session plan saved"), { small: true })),
-    el("p", { class: "small muted" }, `Total ${total} minutes (default ${C.sessionTotal()}). The race itself lasts 30 seconds; its minute includes the podium.`))
+      budgetSelect(level, (v) => { level = v }, "lobbyBudget"),
+      button("Save plan", () => act("/api/host/phase", { action: "set", budget: level, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, Number(i.value)])) }, "Session plan saved"), { small: true })),
+    el("p", { class: "small muted" }, `Total ${total} minutes (default ${C.sessionTotal()}). The race itself lasts 30 seconds; its minute includes the podium. Budget: ${C.budgetFor(level).line}`))
 }
 
 function renderSession() {
@@ -177,7 +186,7 @@ function renderSession() {
   if (phase === "play") {
     buttons.push(s.clock.status === "paused" ? button("Resume", () => phaseAct({ action: "resume" }), { kind: "go" }) : button("Pause", () => phaseAct({ action: "pause" })))
     buttons.push(...add([-5, -1, 1, 5]))
-    buttons.push(button("End play", async () => (await confirmDialog("End play now? Every table locks; unapproved tables race on their defaults.", "End play")) && phaseAct({ action: "end" }, "Play ended"), { kind: "danger" }))
+    buttons.push(button("End play", async () => (await confirmDialog("End play now? Every table locks; unapproved tables race on the customer's existing setup.", "End play")) && phaseAct({ action: "end" }, "Play ended"), { kind: "danger" }))
   }
   if (phase === "ended") buttons.push(...add([1, 5]))
   if (phase === "race") buttons.push(button("Show readouts", () => phaseAct({ action: "readout" }, "Readouts on the projector"), { kind: "go" }))
@@ -201,23 +210,38 @@ function renderRunRace() {
   const password = el("input", { type: "password", placeholder: WORDS.racePassword, autocomplete: "off", maxlength: 64, id: "hostRacePassword" })
   const go = async () => {
     if (!password.value) return toast(`Enter the ${WORDS.racePassword.toLowerCase()}`)
-    if (await confirmDialog("Run the race? Unapproved tables score 0 and race on their defaults.", WORDS.runRace)) act("/api/host/race", { seed: seed.value, racePassword: password.value }, "Lights out!")
+    if (await confirmDialog("Run the race? Unapproved tables score 0 and race on the customer's existing setup.", WORDS.runRace)) act("/api/host/race", { seed: seed.value, racePassword: password.value }, "Lights out!")
   }
   return el("div", { class: "row run-race", style: "justify-content:center;margin-top:12px" }, password, seed, el("button", { class: "btn primary", id: "hostRunRace", onclick: go }, WORDS.runRace))
 }
 
 /* ------------------------------------------------------------ approvals, feed and queues */
 
+/** The board a cell shows: the locked plan if there is one, otherwise the live draft. */
+function cellBoard(s, team, id, d) {
+  if (d.plan) return { fit: d.plan.fit, status: d.plan.status }
+  if (d.status === "none") return null
+  const b = boardFor(id, team.choices, s.settings.budget)
+  return { fit: b.fit, status: b.status }
+}
+
+function fitCell(s, team, id, d) {
+  const b = cellBoard(s, team, id, d)
+  return el("div", { class: "fit-cell", "data-cell": `${team.id}-${id}` },
+    miniFit(b ? b.fit : NaN, { status: b?.status, grey: d.status !== "approved", title: b ? `FIT ${b.fit}` : "Not started" }),
+    el("span", { class: `status-pill st-${d.status}`, title: d.label }, STATUS_LABEL[d.status]))
+}
+
 function renderApprovals(s) {
   const grid = approvalGrid(s)
   const head = el("tr", {}, el("th", {}, "Team"), ...grid.stations.map((id) => el("th", {}, shortName(id))), el("th", {}, "Approved"))
   const rows = grid.rows.map((row) => el("tr", {},
     el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${row.team.color}` }), el("b", {}, row.team.name)),
-    ...grid.stations.map((id) => el("td", {}, el("span", { class: `status-pill st-${row.cells[id].status}`, title: row.cells[id].label }, STATUS_LABEL[row.cells[id].status]))),
+    ...grid.stations.map((id) => el("td", {}, fitCell(s, row.team, id, row.cells[id]))),
     el("td", {}, el("b", {}, `${row.approved}/${grid.stations.length}`))))
   const counts = STATUS_ORDER.filter((st) => grid.counts[st]).map((st) => el("span", { class: `status-pill st-${st}` }, `${STATUS_LABEL[st]} ${grid.counts[st]}`))
   return panel("wide", el("h2", {}, "Approvals"),
-    el("p", { class: "small muted" }, `Only approved tables score and race as designed. ${grid.counts.approved} of ${grid.total} approved.`),
+    el("p", { class: "small muted" }, `Each cell shows the board's FIT (grey until approved). Only approved boards score and race as tuned; the rest race on ${WORDS.todaySetup.toLowerCase()}. ${grid.counts.approved} of ${grid.total} approved · ${C.budgetFor(s.settings.budget).name} budget.`),
     el("div", { class: "row", id: "approvalCounts" }, counts),
     el("div", { class: "table-scroll", id: "approvalsGrid" }, el("table", { class: "grid approvals" }, el("thead", {}, head), el("tbody", {}, rows))))
 }
@@ -230,16 +254,16 @@ function renderFeed(s, pres) {
     const where = p ? `${shortName(p.station)} · ${p.step}` : seat ? shortName(seat[0]) : "—"
     const seen = p ? now - p.at : null
     const queued = Object.entries(s.queues || {}).filter(([, list]) => list.some((e) => e.team === t.id)).map(([id]) => shortName(id))
-    const sims = Object.entries(t.sims || {}).filter(([, r]) => Number.isFinite(r.lastScore)).sort((a, b) => b[1].lastAt - a[1].lastAt)[0]
+    const sims = Object.entries(t.sims || {}).filter(([, r]) => Number.isFinite(r.lastFit)).sort((a, b) => b[1].lastAt - a[1].lastAt)[0]
     return el("tr", {},
-      el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${t.color}` }), el("b", {}, t.name), el("span", { class: "small muted" }, ` ${C.tierFor(t).name}`)),
+      el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${t.color}` }), el("b", {}, t.name)),
       el("td", { class: "small" }, where),
-      el("td", { class: "small" }, sims ? `${sims[1].lastScore}% ${shortName(sims[0])}` : "—"),
+      el("td", { class: "small" }, sims ? `FIT ${sims[1].lastFit}${sims[1].inZone ? " ✓" : ""} ${shortName(sims[0])}` : "—"),
       el("td", { class: "small" }, queued.length ? queued.join(", ") : "—"),
       el("td", { class: `small ${seen == null ? "muted" : seen > 30_000 ? "dead" : seen > 12_000 ? "stale" : ""}` }, seen == null ? "—" : `${ago(seen)} ago`))
   })
   return panel("", el("h2", {}, "Live feed"),
-    el("div", { class: "table-scroll" }, el("table", { class: "grid feed" }, el("thead", {}, el("tr", {}, ["Team", "Now", "Latest sim", "Queued", "Seen"].map((h) => el("th", {}, h)))), el("tbody", {}, rows))))
+    el("div", { class: "table-scroll" }, el("table", { class: "grid feed" }, el("thead", {}, el("tr", {}, ["Team", "Now", "Latest FIT", "Queued", "Seen"].map((h) => el("th", {}, h)))), el("tbody", {}, rows))))
 }
 
 function renderQueues(s) {
@@ -343,12 +367,13 @@ function renderArchitect(stationId) {
     const t = byId(selectedTeam)
     if (!t) return panel("wide", el("p", { class: "muted" }, "Pick a team to read its design."))
     const d = designStatus(s, t, stationId)
-    const draft = d.plan ? { ...t, choices: { ...t.choices, ...d.plan.choices } } : t
+    const choices = d.plan ? d.plan.choices : t.choices
     return panel("wide architect-summary",
-      el("div", { class: "row" }, el("h2", { style: "margin:0" }, teamChip(t)), el("span", { class: `status-pill st-${d.status}` }, d.label), el("span", { class: "small muted" }, C.tierFor(t).label),
+      el("div", { class: "row" }, el("h2", { style: "margin:0" }, teamChip(t)), el("span", { class: `status-pill st-${d.status}` }, d.label),
         el("span", { style: "flex:1" }), d.plan ? el("span", { class: "small muted" }, `Plan ${d.plan.id}`) : null, startButton(t)),
-      !d.plan ? el("p", { class: "small warn-text" }, d.status === "sentBack" ? "Sent back: the team is revising. This is their current draft." : "Not locked in yet: this is their current draft.") : null,
-      summaryBlock(designSummary(draft, stationId)),
+      !d.plan ? el("p", { class: "small warn-text" }, d.status === "sentBack" ? "Sent back: the team is retuning. This is their current draft." : "Not locked in yet: this is their current draft.") : null,
+      d.plan ? frozenBoard(d.plan, { showProblem: true, id: "architectBoard" }) : staticBoard(stationId, choices, s.settings.budget, { id: "architectBoard" }),
+      summaryBlock(designSummary(choices, stationId, d.plan?.budget || s.settings.budget)),
       d.review ? el("p", { class: "small muted" }, d.review.status === "approved" ? `Approved by ${d.review.by} at ${hhmm(d.review.at)}.` : `Sent back by ${d.review.by} at ${hhmm(d.review.at)}${d.review.reason ? `: "${d.review.reason}"` : ""}.`) : null)
   })()
 
@@ -388,26 +413,26 @@ function renderDemo() {
   const st = demo.focus.station
   const station = C.byId(C.STATIONS, st)
   const screen = []
-  if (demo.step.screen === "brief") {
-    screen.push(panel("", el("h2", {}, `${station.name}: ${WORDS.listen}`), el("ul", {}, station.brief.map((line) => el("li", {}, line))), el("p", {}, el("b", {}, `The ${station.architect} is looking for: `), station.looking)))
-  } else if (demo.step.screen === "decide") {
-    const sim = simulateStation(team, st)
-    screen.push(panel("", el("h2", {}, `${team.name} at ${station.name}`),
-      el("table", { class: "grid" }, el("tbody", {}, C.decisionsFor(st).map((d) => {
-        const o = d.options.find((x) => x.id === (team.choices[d.id] || d.def))
-        return el("tr", {}, el("td", { class: "muted" }, d.name), el("td", {}, el("b", {}, o.name)), el("td", { class: "small" }, o.why))
-      }))),
-      el("p", {}, el("b", {}, `Simulation ${sim.score}% · ${sim.band}. `), sim.sentence, " ", el("i", {}, `Hint: ${sim.hint}`))))
+  const budget = s.settings.budget
+  if (demo.step.screen === "problem") {
+    screen.push(panel("wide", el("h2", {}, `${station.name}: ${WORDS.problem}`), el("p", { class: "problem-text" }, station.problem),
+      el("p", {}, el("b", {}, `${WORDS.todaySetup}: `), station.today, " ", el("b", {}, `The ${station.architect} wants: `), station.looking),
+      staticBoard(st, C.BASELINE_CHOICES, budget, { showProblem: false, showDials: false, id: "demoBoard" })))
+  } else if (demo.step.screen === "tuneOff" || demo.step.screen === "tuneOn") {
+    screen.push(panel("wide", el("h2", {}, `${team.name} tuning ${station.name}`),
+      demo.step.screen === "tuneOn" ? learningCard(st, { id: "demoLesson" }) : null,
+      staticBoard(st, team.choices, budget, { id: "demoBoard" })))
   } else if (demo.step.screen === "plan") {
-    screen.push(planSheet(team, team.plans[st]), panel("", stateBanner(`${WORDS.waitingForArchitect}. ${WORDS.architectFree}.`, "good")))
+    screen.push(el("div", { class: "wide" }, planSheet(team, team.plans[st])), panel("wide", stateBanner(`${WORDS.waitingForArchitect}. ${WORDS.architectFree}.`, "good")))
   } else if (demo.step.screen === "architect") {
-    screen.push(panel("wide", el("h2", {}, `${station.architect} · ${WORDS.pitching}: ${team.name}`), el("div", { class: "pitch-timer" }, `0:${PITCH_SECONDS}`), summaryBlock(designSummary(team, st)),
+    screen.push(panel("wide", el("h2", {}, `${station.architect} · ${WORDS.pitching}: ${team.name}`), el("div", { class: "pitch-timer" }, `0:${PITCH_SECONDS}`),
+      frozenBoard(team.plans[st], { showProblem: true, id: "demoBoard" }), summaryBlock(designSummary(team.plans[st].choices, st, budget)),
       el("div", { class: "row" }, el("span", { class: "btn go" }, WORDS.approve), el("span", { class: "btn danger" }, WORDS.sendBack))))
     screen.push(renderApprovals(s))
   } else if (demo.step.screen === "race") {
     screen.push(podiumGraphic(s.race.result), panel("", el("h2", {}, "Race ticker"), el("ul", { class: "small" }, s.race.result.events.filter((e) => e.team).slice(0, 6).map((e) => el("li", {}, `Lap ${e.lap}: ${e.text}`)))))
   } else if (demo.step.screen === "readout") {
-    screen.push(el("div", { class: "wide" }, readoutCard(readoutFor(team, s.race.result, s.settings.stations))))
+    screen.push(el("div", { class: "wide" }, readoutCard(readoutFor(team, s.race.result, s.settings.stations, budget))))
   }
   app.replaceChildren(el("div", { class: "host-grid" },
     panel("demo-narration wide", el("h2", {}, `Demo mode · ${demo.step.title}`), el("p", {}, demo.step.narration),

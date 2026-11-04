@@ -5,8 +5,9 @@ import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createApp } from "../server.mjs"
-import { REFERENCE_BUILD } from "../public/js/sim.js"
-import { TEAM_COLORS } from "../public/js/catalog.js"
+import { TEAM_COLORS, tablePoints } from "../public/js/catalog.js"
+import { boardFor } from "../public/js/model.js"
+import { pick } from "./routes.js"
 
 const PINS = { host: "host-test", leader: "arch-test", race: "race-test" }
 let server
@@ -37,33 +38,35 @@ async function call(path, body, pin, station, ip) {
   return { status: res.status, json: await res.json().catch(() => null) }
 }
 const host = (path, body) => call(path, body, PINS.host)
-const pick = (station) => Object.fromEntries(Object.entries(REFERENCE_BUILD).filter(([k]) => ({ link: "network", path: "network", garage: "network", vendor: "oem", payment: "oem", support: "oem", location: "dc", cooling: "dc", power: "dc", size: "compute", chips: "compute", storage: "compute" })[k] === station))
 
-test("setup: 1–10 teams, each with a name, a colour and a tier", async () => {
+test("setup: 1–10 teams with a name and a colour, and one budget level for the session", async () => {
   assert.equal((await host("/api/host/setup", { teams: [] })).status, 400)
   assert.equal((await host("/api/host/setup", { teams: Array.from({ length: 11 }, () => ({ name: "X" })) })).status, 400)
   assert.equal((await call("/api/host/setup", { teams: [{ name: "A" }] }, "wrong")).status, 403)
-  const one = await host("/api/host/setup", { teams: [{ name: "Solo", tier: 3 }] })
+  const one = await host("/api/host/setup", { teams: [{ name: "Solo" }] })
   assert.equal(one.status, 200, "a single team is allowed")
-  const ten = await host("/api/host/setup", { teams: Array.from({ length: 10 }, (_, i) => ({ name: `Team ${i + 1}`, tier: (i % 3) + 1 })) })
+  const ten = await host("/api/host/setup", { teams: Array.from({ length: 10 }, (_, i) => ({ name: `Team ${i + 1}` })), budget: "tight" })
   assert.equal(ten.status, 200)
   assert.equal(ten.json.teams.length, 10)
   assert.deepEqual(ten.json.teams.map((t) => t.color), TEAM_COLORS)
-  assert.deepEqual(ten.json.teams.slice(0, 3).map((t) => t.tier), [1, 2, 3])
+  assert.ok(ten.json.teams.every((t) => t.tier === undefined), "no per-team tiers")
+  assert.equal(ten.json.settings.budget, "tight")
   assert.deepEqual(ten.json.settings.stations, ["network", "oem", "dc", "compute"])
   const s = ten.json.settings
   assert.equal(s.briefMinutes + s.playMinutes + s.raceMinutes + s.readoutMinutes, 50)
-  const weird = await host("/api/host/setup", { teams: [{ name: "<b>Bad</b>\u0000", tier: 99 }] })
-  assert.equal(weird.json.teams[0].tier, 2, "an invalid tier becomes Midfield")
+  const weird = await host("/api/host/setup", { teams: [{ name: "<b>Bad</b>\u0000" }], budget: "infinite" })
+  assert.equal(weird.json.settings.budget, "standard", "an unknown budget level becomes Standard")
   assert.ok(!weird.json.teams[0].name.includes("\u0000"))
 })
 
 test("phases: the brief blocks choices, play allows them, ending play locks every table", async () => {
-  const setup = await host("/api/host/setup", { teams: [{ name: "A", tier: 2 }, { name: "B", tier: 1 }] })
+  const setup = await host("/api/host/setup", { teams: [{ name: "A" }, { name: "B" }] })
   const [a] = setup.json.teams
   const tryChoice = () => call(`/api/teams/${a.id}/choices`, { station: "network", choices: { link: "redundant" } })
   assert.equal((await tryChoice()).status, 409, "no choices in the lobby")
-  assert.equal((await host("/api/host/phase", { action: "set", briefMinutes: 4, playMinutes: 30, raceMinutes: 1, readoutMinutes: 15 })).json.settings.playMinutes, 30, "the plan is editable")
+  const plan = await host("/api/host/phase", { action: "set", briefMinutes: 4, playMinutes: 30, raceMinutes: 1, readoutMinutes: 15, budget: "generous" })
+  assert.equal(plan.json.settings.playMinutes, 30, "the plan is editable")
+  assert.equal(plan.json.settings.budget, "generous", "the budget level is set in the lobby")
   const brief = await host("/api/host/phase", { action: "brief" })
   assert.equal(brief.json.brief.status, "running")
   const blocked = await tryChoice()
@@ -96,7 +99,7 @@ test("the brief ends on time and offers play", async () => {
 })
 
 test("pitch and approval: the Architect is scoped to one table, and only approved tables count", async () => {
-  const setup = await host("/api/host/setup", { teams: [{ name: "Alpha", tier: 2 }, { name: "Beta", tier: 2 }] })
+  const setup = await host("/api/host/setup", { teams: [{ name: "Alpha" }, { name: "Beta" }] })
   const [a, b] = setup.json.teams
   await host("/api/host/phase", { action: "play" })
   for (const station of ["network", "oem", "dc", "compute"]) {
@@ -107,8 +110,9 @@ test("pitch and approval: the Architect is scoped to one table, and only approve
   const locked = await call(`/api/teams/${a.id}/submit`, { station: "network" })
   assert.equal(locked.status, 200)
   assert.equal(locked.json.plan.decisions.length, 3)
-  assert.equal(locked.json.plan.band, "Optimised")
-  assert.ok(["Low", "Med", "High"].includes(locked.json.plan.ledger.fia))
+  assert.equal(locked.json.plan.inZone, true)
+  assert.equal(locked.json.plan.fit, boardFor("network", pick("network")).fit, "the server builds the same board as the iPad")
+  assert.equal(locked.json.plan.board.targets.length, 3)
   assert.equal((await call(`/api/teams/${a.id}/choices`, { station: "network", choices: { link: "single" } })).status, 409, "a locked plan is frozen")
   assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).json.position, 1)
 
@@ -138,7 +142,8 @@ test("pitch and approval: the Architect is scoped to one table, and only approve
   const ok = await arch("/api/architect/decide", { team: a.id, decision: "approve" })
   const approved = ok.json.teams.find((t) => t.id === a.id)
   assert.equal(approved.reviews.network.status, "approved")
-  assert.ok(approved.pitch.network > 0)
+  assert.equal(approved.pitch.network, tablePoints(approved.plans.network.fit, true), "approval scores the locked board's FIT")
+  assert.equal(approved.reviews.network.fit, approved.plans.network.fit)
   assert.equal(ok.json.architects.network.available, true)
 
   await call(`/api/teams/${a.id}/submit`, { station: "dc" })
@@ -156,6 +161,30 @@ test("pitch and approval: the Architect is scoped to one table, and only approve
   assert.equal((await call("/api/health")).json.phase, "readout")
   await host("/api/host/unrace", {})
   assert.equal(app.getState().readout, null)
+})
+
+test("the approval gate scores FIT: an approved over-cap board earns far less than an in-zone one; tuning is logged", async () => {
+  const setup = await host("/api/host/setup", { teams: [{ name: "Zone" }, { name: "Over" }] })
+  const [zone, over] = setup.json.teams
+  await host("/api/host/phase", { action: "play" })
+  await call(`/api/teams/${zone.id}/choices`, { station: "oem", choices: pick("oem") })
+  await call(`/api/teams/${over.id}/choices`, { station: "oem", choices: { vendor: "dgx", payment: "buy", support: "4h" } })
+  const sim = await call(`/api/teams/${zone.id}/sim`, { station: "oem" })
+  assert.equal(sim.json.runs.inZone, true)
+  assert.ok(sim.json.runs.firstZoneAt > 0 && sim.json.runs.lastFit >= 80, "the host feed sees the latest FIT")
+  const arch = (path, body) => call(path, { station: "oem", ...body }, PINS.leader, "oem")
+  await arch("/api/architect/availability", { available: true })
+  const points = {}
+  for (const t of [zone, over]) {
+    const plan = (await call(`/api/teams/${t.id}/submit`, { station: "oem" })).json.plan
+    await call(`/api/teams/${t.id}/call`, { station: "oem" })
+    await arch("/api/architect/pitch", { action: "start", team: t.id })
+    const res = await arch("/api/architect/decide", { team: t.id, decision: "approve" })
+    points[t.id] = { plan, pitch: res.json.teams.find((x) => x.id === t.id).pitch.oem }
+  }
+  assert.equal(points[over.id].plan.status, "over")
+  assert.ok(points[over.id].plan.fit <= 40)
+  assert.ok(points[zone.id].pitch >= points[over.id].pitch * 2, `in zone ${points[zone.id].pitch} vs over the cap ${points[over.id].pitch}`)
 })
 
 test("removed Architect-mode routes and retired tables are gone", async () => {
@@ -177,7 +206,7 @@ test("PIN-protected routes rate limit repeated failed attempts per client IP", a
 })
 
 test("state survives a server restart", async () => {
-  const setup = await host("/api/host/setup", { teams: [{ name: "Keep A", tier: 3 }, { name: "Keep B", tier: 1 }] })
+  const setup = await host("/api/host/setup", { teams: [{ name: "Keep A" }, { name: "Keep B" }] })
   await host("/api/host/phase", { action: "play" })
   const [a] = setup.json.teams
   await call(`/api/teams/${a.id}/checkin`, { station: "dc" })
@@ -189,8 +218,7 @@ test("state survives a server restart", async () => {
     const again = restarted.getState()
     assert.equal(again.id, before.id)
     assert.deepEqual(again.teams[0].choices, { location: "colo", cooling: "liquid" })
-    assert.deepEqual(again.teams[0].plans.dc, before.teams[0].plans.dc)
-    assert.equal(again.teams[0].tier, 3)
+    assert.deepEqual(again.teams[0].plans.dc, JSON.parse(JSON.stringify(before.teams[0].plans.dc)))
     assert.equal(again.tables.dc.team, a.id)
     assert.equal(again.clock.endsAt, before.clock.endsAt)
   } finally {
@@ -209,7 +237,9 @@ test("an old six-table save loads into the four-table game", async () => {
     assert.equal(s.settings.playMinutes, 35)
     assert.deepEqual(s.teams[0].choices, { link: "redundant" })
     assert.equal(s.teams[0].architect, undefined)
-    assert.equal(s.teams[0].tier, 2)
+    assert.equal(s.teams[0].tier, undefined)
+    assert.equal(s.teams[0].rank, undefined)
+    assert.equal(s.settings.budget, "standard")
   } finally {
     await rm(other, { recursive: true, force: true })
   }

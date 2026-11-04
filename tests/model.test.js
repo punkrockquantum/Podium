@@ -1,99 +1,156 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as C from "../public/js/catalog.js"
-import { evaluate, effectiveTeam, choicesOf } from "../public/js/model.js"
-import { GOOD, IDS, approvedAt } from "./routes.js"
+import { boardFor, evaluate, effectiveTeam, choicesOf, allBoards, FIT_ZONE, FIT_BREACH_MAX } from "../public/js/model.js"
+import { designSummary } from "../public/js/summary.js"
+import { buildPlan } from "../public/js/plandata.js"
+import { GOOD, IDS, approvedAt, pick } from "./routes.js"
 
 const words = (text) => text.trim().split(/\s+/).length
+const LEVELS = C.BUDGET_LEVELS.map((b) => b.id)
 
-test("four tables, exactly three decisions each, exactly three options each", () => {
+test("four tables: a problem card, 2–3 targets, cap lines and three dials of three settings", () => {
   assert.deepEqual(C.STATIONS.map((s) => s.id), ["network", "oem", "dc", "compute"])
   assert.deepEqual(C.STATIONS.map((s) => s.name), ["Connectivity", "OEMs", "Datacenter & Power", "CFD Supercomputer"])
   for (const s of C.STATIONS) {
+    assert.ok(words(s.problem) <= 20, `${s.id} problem is at most 20 words: "${s.problem}"`)
+    assert.ok(s.targets.length >= 2 && s.targets.length <= 3, `${s.id} has 2–3 targets`)
+    assert.ok(s.caps.capex > 0 && s.caps.opex > 0, `${s.id} has CapEx and OpEx caps`)
+    assert.ok(s.today.length > 10 && s.looking.length > 10 && s.architect.endsWith("Architect"))
+    assert.ok(s.lesson.why.length > 10 && s.lesson.provider.length > 10, `${s.id} has a lesson`)
     const ds = C.decisionsFor(s.id)
-    assert.equal(ds.length, 3, `${s.id} has three decisions`)
-    assert.ok(s.brief.length >= 1 && s.brief.length <= 3, `${s.id} brief has at most three bullets`)
-    assert.ok(s.looking.length > 10 && s.architect.endsWith("Architect"))
+    assert.equal(ds.length, 3, `${s.id} has three dials`)
     for (const d of ds) {
-      assert.equal(d.options.length, 3, `${d.id} has three options`)
-      assert.ok(d.why.length > 10, `${d.id} says why it matters`)
-      assert.ok(d.options.some((o) => o.id === d.def), `${d.id} default is an option`)
-      for (const o of d.options) {
-        assert.ok(words(o.text) <= 12, `${d.id}/${o.id} sentence is at most 12 words: "${o.text}"`)
-        assert.ok(o.why.length > 10 && words(o.why) <= 14, `${d.id}/${o.id} has a one-line why`)
-      }
+      assert.equal(d.options.length, 3, `${d.id} has three settings`)
+      assert.ok(d.options.some((o) => o.id === d.today), `${d.id}: today's setting is one of the three`)
+      assert.ok(words(d.why) <= 18 && d.why.length > 10, `${d.id} "why it matters" is at most 18 words: "${d.why}"`)
+      assert.ok(words(d.how) <= 18 && d.how.length > 10, `${d.id} "how a provider helps" is at most 18 words: "${d.how}"`)
+      for (const o of d.options) assert.ok(words(o.text) <= 12, `${d.id}/${o.id} setting is at most 12 words: "${o.text}"`)
     }
   }
   assert.equal(C.DECISIONS.length, 12)
   for (const old of ["ai", "storage", "governance"]) assert.ok(C.RETIRED_STATIONS[old], `${old} is listed as retired`)
-})
-
-test("tiers: Front-runner, Midfield, Challenger, each with a one-line explanation", () => {
-  assert.deepEqual(C.TIERS.map((t) => t.label), ["Front-runner (Tier 1)", "Midfield (Tier 2)", "Challenger (Tier 3)"])
-  for (const t of C.TIERS) assert.match(t.line, /CapEx headroom/)
-  assert.ok(C.TIERS[0].capex < C.TIERS[1].capex && C.TIERS[1].capex < C.TIERS[2].capex, "front-runners get the least headroom")
-  assert.ok(C.TIERS[0].compute < C.TIERS[1].compute && C.TIERS[1].compute < C.TIERS[2].compute, "and the least compute")
-  assert.equal(C.tierFor({ tier: 9 }).id, 2, "an unknown tier falls back to Midfield")
+  assert.equal(C.TIERS, undefined, "per-team tiers are gone")
 })
 
 test("ten distinct team colours and a 50-minute session by default", () => {
-  assert.equal(C.TEAM_COLORS.length, 10)
   assert.equal(new Set(C.TEAM_COLORS).size, 10)
   assert.equal(C.MAX_TEAMS, 10)
   assert.equal(C.MIN_TEAMS, 1)
   assert.equal(C.sessionTotal(), 50)
-  assert.equal(C.SESSION.briefMinutes, 5)
-  assert.equal(C.SESSION.playMinutes, 35)
 })
 
-test("the ledger is four numbers: CapEx, yearly OpEx, power and FIA risk", () => {
-  const ev = evaluate({ tier: 2, choices: GOOD })
-  for (const key of ["capex", "opex", "facilityKW"]) assert.ok(Number.isFinite(ev.ledger[key]) && ev.ledger[key] > 0, key)
-  assert.ok(["Low", "Med", "High"].includes(ev.ledger.fia))
-  assert.equal(ev.ledger.fia, "Low", "the reference build is FIA-clean")
-  assert.equal(evaluate({ tier: 2, choices: {} }).ledger.fia, "High", "the defaults carry FIA risk")
-})
-
-test("invalid or missing choices fall back to the defaults", () => {
+test("today's setup is coherent, and out of the zone at every table on every budget", () => {
+  for (const level of LEVELS) {
+    for (const s of C.STATIONS) {
+      const b = boardFor(s.id, C.BASELINE_CHOICES, level)
+      assert.equal(b.inZone, false, `${s.id} baseline at ${level}: FIT ${b.fit}`)
+      assert.ok(b.fit < FIT_ZONE)
+      assert.equal(b.todayFit, b.fit)
+    }
+  }
+  assert.deepEqual(choicesOf({}), C.BASELINE_CHOICES, "a team that never touches a dial is on today's setup")
   const ch = choicesOf({ choices: { link: "bogus", cooling: "liquid", ai: "old" } })
-  assert.equal(ch.link, "single")
+  assert.equal(ch.link, "single", "an invalid setting falls back to today")
   assert.equal(ch.cooling, "liquid")
   assert.equal(Object.keys(ch).length, 12)
 })
 
-test("buying stretches a Front-runner's CapEx; leasing moves it to OpEx; as-a-service needs Dell, HPE or Lenovo", () => {
-  const buy = { ...GOOD, payment: "buy", support: "4h" }
-  assert.ok(evaluate({ tier: 1, choices: buy }).ledger.capexOver > 0, "Front-runners cannot buy this cluster")
-  assert.equal(evaluate({ tier: 3, choices: buy }).ledger.capexOver, 0, "Challengers can")
-  assert.ok(evaluate({ tier: 1, choices: buy }).penalties.some((p) => p.id === "capex"))
-  const lease = evaluate({ tier: 1, choices: { ...GOOD, payment: "lease" } })
-  assert.ok(lease.ledger.capex < evaluate({ tier: 1, choices: buy }).ledger.capex)
-  assert.equal(evaluate({ choices: { ...GOOD, vendor: "dgx", payment: "aas" } }).payment, "lease", "DGX has no as-a-service: it falls back to a lease")
-  assert.equal(evaluate({ choices: GOOD }).payment, "aas")
+test("at least two in-zone answers per table inside the caps at Standard, and the reference build is one", () => {
+  for (const s of C.STATIONS) {
+    const zone = allBoards(s.id, "standard").filter((b) => b.inZone)
+    assert.ok(zone.length >= 2, `${s.id}: ${zone.length} in-zone answers`)
+    for (const b of zone) {
+      assert.ok(b.fit >= FIT_ZONE && b.fit <= 100)
+      assert.ok(b.caps.every((c) => c.over === 0) && b.breaches.length === 0)
+    }
+    const ref = boardFor(s.id, GOOD, "standard")
+    assert.ok(ref.inZone, `reference build at ${s.id}: FIT ${ref.fit}`)
+    console.log(`[zone] ${s.id}: ${LEVELS.map((l) => `${l} ${allBoards(s.id, l).filter((b) => b.inZone).length}`).join(", ")} · baseline FIT ${boardFor(s.id, {}, "standard").fit} · reference FIT ${ref.fit}`)
+  }
 })
 
-test("hot chips on air cooling throttle; liquid does not", () => {
-  assert.ok(evaluate({ choices: { ...GOOD, chips: "gpu", cooling: "air" } }).power.thermal < 1)
-  assert.equal(evaluate({ choices: { ...GOOD, chips: "gpu", cooling: "liquid", power: "boost" } }).power.thermal, 1)
-  assert.ok(evaluate({ choices: { ...GOOD, cooling: "liquid" } }).power.pue < evaluate({ choices: { ...GOOD, cooling: "air" } }).power.pue)
+test("FIT: in the zone scores 80–100; crossing a cap or an FIA rule caps it at 40", () => {
+  const inZone = boardFor("oem", pick("oem"))
+  assert.equal(inZone.status, "zone")
+  assert.ok(inZone.fit >= 80)
+  const overCap = boardFor("oem", { vendor: "dgx", payment: "buy", support: "4h" })
+  assert.equal(overCap.status, "over")
+  assert.ok(overCap.fit <= FIT_BREACH_MAX, `over the CapEx cap: FIT ${overCap.fit}`)
+  const capex = overCap.caps.find((c) => c.id === "capex")
+  assert.ok(capex.over > 0)
+  assert.match(capex.consequence, /Over the CapEx envelope by \$[\d.]+[kM]: the FIA would reject this budget\./)
+  assert.ok(capex.fix, "a cap breach names a one-dial fix")
+  assert.match(capex.consequence, /would bring it back/)
+  const fia = boardFor("network", { ...pick("network"), garage: "wifi" })
+  assert.equal(fia.status, "fia")
+  assert.ok(fia.fit <= FIT_BREACH_MAX)
+  assert.ok(fia.breaches.some((b) => b.kind === "fia" && b.rule === "5.2" && b.dial === "garage"))
+  assert.match(fia.hint, /^Breaks FIA 5\.2: .+ would fix that\.$/)
+  const power = boardFor("compute", { size: "large", chips: "gpu", storage: "cache" })
+  assert.ok(power.caps.find((c) => c.id === "power").over > 0, "28 GPU nodes trip the 400 kW hall")
+  assert.ok(power.fit <= FIT_BREACH_MAX)
+  const off = boardFor("network", { link: "redundant", path: "public", garage: "umbilical" })
+  assert.equal(off.status, "off")
+  assert.ok(off.fit > FIT_BREACH_MAX && off.fit < FIT_ZONE, `out of the zone, inside the caps: FIT ${off.fit}`)
+  assert.match(off.sentence, /^2 of 3 targets in the zone/)
+  assert.match(off.hint, /Latency is still too high: .+ would fix that\./)
+  for (const s of C.STATIONS) for (const b of allBoards(s.id)) {
+    assert.ok(b.fit >= 0 && b.fit <= 100)
+    if (b.breaches.length) assert.ok(b.fit <= FIT_BREACH_MAX, `${s.id} ${JSON.stringify(b.choices)} breached but FIT ${b.fit}`)
+    assert.ok(b.sentence.length > 5 && b.hint.length > 5)
+  }
 })
 
-test("illegal and risky choices carry FIA penalties at the right table", () => {
-  const ev = evaluate({ choices: { ...GOOD, garage: "wifi", link: "single", location: "factory", size: "large" } })
-  const at = Object.fromEntries(ev.penalties.map((p) => [p.id, p.station]))
-  assert.equal(at.wifi, "network")
-  assert.equal(at.tunnel, "network")
-  assert.equal(at.nplus1, "dc")
-  assert.equal(at.overrun, "compute")
-  assert.equal(ev.penalties.find((p) => p.id === "wifi").seconds, 5)
+test("the budget level moves every money cap line, never the power limits", () => {
+  for (const s of C.STATIONS) {
+    const [tight, standard, generous] = LEVELS.map((l) => boardFor(s.id, GOOD, l))
+    for (const id of ["capex", "opex"]) {
+      const cap = (b) => b.caps.find((c) => c.id === id).cap
+      assert.ok(cap(tight) < cap(standard) && cap(standard) < cap(generous), `${s.id} ${id}`)
+      assert.equal(Math.round(cap(tight)), Math.round(s.caps[id] * 0.85))
+    }
+    const power = (b) => b.caps.find((c) => c.id === "power")?.cap
+    assert.equal(power(tight), power(generous))
+    const counts = LEVELS.map((l) => allBoards(s.id, l).filter((b) => b.inZone).length)
+    assert.ok(counts[0] >= 1, `${s.id}: at least one answer even on a Tight budget`)
+    assert.ok(counts[0] <= counts[1] && counts[1] <= counts[2], `${s.id}: ${counts}`)
+  }
+  assert.equal(boardFor("oem", { vendor: "tier1", payment: "buy", support: "4h" }, "standard").status, "over")
+  assert.equal(boardFor("oem", { vendor: "tier1", payment: "buy", support: "4h" }, "generous").status, "zone", "Generous puts buying Dell, HPE or Lenovo within reach")
+  assert.equal(C.budgetFor("nonsense").id, C.DEFAULT_BUDGET)
 })
 
-test("only approved tables keep their choices in the race", () => {
-  const team = { tier: 2, choices: GOOD, reviews: approvedAt(["network", "dc"]), plans: { oem: { id: "X" } } }
+test("as-a-service needs a vendor that offers it; DGX falls back to a lease with a note", () => {
+  const dgx = boardFor("oem", { vendor: "dgx", payment: "aas", support: "4h" })
+  assert.equal(dgx.payment, "lease")
+  assert.ok(dgx.notes.some((n) => /as-a-service/.test(n)))
+  assert.equal(boardFor("oem", pick("oem")).payment, "aas")
+})
+
+test("the plan snapshot, the Architect's summary and the race all read the same board", () => {
+  const team = { choices: GOOD }
+  for (const s of C.STATIONS) {
+    const plan = buildPlan(team, s.id, { id: "P1", at: 1, budget: "tight" })
+    const board = boardFor(s.id, GOOD, "tight")
+    assert.deepEqual(plan.board, board)
+    assert.equal(plan.fit, board.fit)
+    assert.equal(plan.decisions.length, 3)
+    const summary = designSummary(plan.choices, s.id, "tight")
+    assert.equal(summary.fit, board.fit)
+    assert.equal(summary.sentences.length, 3)
+    assert.equal(summary.targets.length, s.targets.length)
+    assert.equal(evaluate(team, "tight").fit[s.id], board.fit)
+  }
+})
+
+test("only approved tables keep their dials in the race; the rest race on today's setup", () => {
+  const team = { choices: GOOD, reviews: approvedAt(["network", "dc"]), plans: { oem: { id: "X" } } }
   const raced = effectiveTeam(team, IDS)
   assert.deepEqual(raced.approved.sort(), ["dc", "network"])
   assert.deepEqual(raced.notApproved, ["oem"])
   assert.deepEqual(raced.missed, ["compute"])
-  assert.equal(raced.choices.link, "redundant")
-  assert.equal(raced.choices.size, undefined, "an unapproved table races on its default")
+  const ev = evaluate(raced, "standard", IDS)
+  assert.ok(ev.boards.network.inZone)
+  assert.equal(ev.fit.oem, boardFor("oem", C.BASELINE_CHOICES).fit, "an unapproved table scores today's FIT")
 })

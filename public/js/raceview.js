@@ -2,6 +2,7 @@ import * as C from "/js/catalog.js"
 import { LAPS, RACE_POINT_MULT, RACE_SECONDS } from "/js/race.js"
 import { readoutFor } from "/js/report.js"
 import { readoutCard } from "/js/readoutview.js"
+import { miniFit } from "/js/board.js"
 import { podiumGraphic } from "/js/podium.js"
 import { approvedStations } from "/js/approval.js"
 import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
@@ -106,7 +107,8 @@ function liveRows() {
     const approved = approvedStations(t, ids)
     const points = approved.reduce((sum, id) => sum + (t.pitch?.[id] || 0), 0)
     const waiting = ids.filter((id) => t.plans?.[id] && !approved.includes(id)).length
-    return { t, approved: approved.length, waiting, points }
+    const fits = ids.map((id) => ({ id, approved: approved.includes(id), fit: t.plans?.[id]?.fit, status: t.plans?.[id]?.status }))
+    return { t, approved: approved.length, waiting, points, fits }
   }).sort((a, b) => b.points - a.points || b.approved - a.approved || a.t.name.localeCompare(b.t.name))
 }
 
@@ -133,19 +135,19 @@ function renderWaiting() {
   sub.textContent = state.teams.length ? info.line : "Waiting for the host"
   const rows = liveRows()
   const ids = state.settings.stations
-  const key = JSON.stringify(["wait", info.id, rows.map((r) => [r.t.id, r.t.name, r.approved, r.waiting, r.points])])
+  const key = JSON.stringify(["wait", info.id, rows.map((r) => [r.t.id, r.t.name, r.approved, r.waiting, r.points, r.fits])])
   if (key === viewKey) return
   if (document.activeElement?.id === "racePassword") return
   viewKey = key
   const standings = el("div", { class: `standings-grid${rows.length > 5 ? " two" : ""}`, id: "liveStandings" }, rows.map((r, i) => el("div", { class: "standing" },
     el("span", { class: "pos" }, i + 1), el("i", { style: `background:${r.t.color}` }),
-    el("span", { class: "name" }, r.t.name, el("small", {}, ` ${C.tierFor(r.t).name}`)),
-    el("span", { class: "tables" }, `${r.approved}/${ids.length}`, r.waiting ? el("small", {}, ` +${r.waiting} waiting`) : null),
+    el("span", { class: "name" }, r.t.name, r.waiting ? el("small", {}, ` +${r.waiting} waiting`) : null),
+    el("span", { class: "fits", "data-team": r.t.id }, r.fits.map((f) => miniFit(f.fit, { status: f.status, grey: !f.approved, size: 30, title: `${C.byId(C.STATIONS, f.id).name}: ${Number.isFinite(f.fit) ? `FIT ${f.fit}` : "not locked in"}${f.approved ? "" : " · not approved"}` }))),
     el("b", {}, r.points))))
   app.replaceChildren(el("div", { class: "projector" },
     el("div", { class: "panel phase-panel" }, el("div", { class: "phase-name" }, info.name), el("div", { class: "phase-clock", id: "phaseClock" }, lapBox.textContent), el("p", { class: "muted" }, info.line),
       el("div", { class: "phase-steps" }, ["brief", "play", "race", "readout"].map((id) => el("div", { class: `phase-step${info.id === id || (id === "brief" && info.id === "briefDone") || (id === "race" && info.id === "ended") ? " on" : ""}` }, el("b", {}, phaseInfo(id).name))))),
-    el("div", { class: "panel" }, el("h2", {}, "Live standings"), el("p", { class: "small muted" }, "Approved tables and table points. The race adds race points × 4, minus FIA penalties."),
+    el("div", { class: "panel" }, el("h2", {}, "Live standings"), el("p", { class: "small muted" }, "Four FIT gauges per team, one per table (grey until approved), and table points. The race adds race points × 4, minus penalties."),
       state.teams.length ? standings : el("p", { class: "muted" }, "No teams yet.")),
     info.id === "ended" || info.id === "play" ? runRacePanel() : null))
 }
@@ -340,7 +342,7 @@ function renderReadouts() {
   viewKey = key
   sub.dataset.phase = "readout"
   sub.textContent = "Readouts: what went well and what to do differently"
-  app.replaceChildren(el("div", { class: "readout-page" }, readoutChooser(id), readoutCard(readoutFor(team, state.race.result, state.settings.stations))))
+  app.replaceChildren(el("div", { class: "readout-page" }, readoutChooser(id), readoutCard(readoutFor(team, state.race.result, state.settings.stations, state.race.budget || state.settings.budget))))
 }
 
 /** race.html?team=<id>: one team's readout on one screen, for a screenshot. */
@@ -361,5 +363,5 @@ function renderTeamReadout() {
     return app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "state-banner info" }, `${team.name}: your readout appears here after the race. Now: ${info.name}.`)))
   }
   sub.textContent = `${team.name} readout · ${C.FINALE.race}`
-  app.replaceChildren(el("div", { class: "readout-page single" }, readoutCard(readoutFor(team, state.race.result, state.settings.stations))))
+  app.replaceChildren(el("div", { class: "readout-page single" }, readoutCard(readoutFor(team, state.race.result, state.settings.stations, state.race.budget || state.settings.budget))))
 }

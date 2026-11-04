@@ -1,14 +1,10 @@
 import * as C from "/js/catalog.js"
-import { evaluate } from "/js/model.js"
-import { simulateStation } from "/js/sim.js"
+import { boardFor } from "/js/model.js"
+import { createBoard, staticBoard, learningCard } from "/js/board.js"
 import { planSheet, queueStatus } from "/js/plan.js"
-import { millions } from "/js/summary.js"
 import { designStatus, PITCH_SECONDS } from "/js/approval.js"
 import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
-import {
-  el, clock, post, watchState, gameClock, tagFor, installErrorLogging, instructionsButton,
-  WORDS, button, stateBanner, panel, stat, teamChip, tabBar, optionCard, decisionSection, scoreRing,
-} from "/js/ui.js"
+import { el, clock, post, watchState, gameClock, installErrorLogging, instructionsButton, WORDS, button, stateBanner, panel, teamChip, tabBar } from "/js/ui.js"
 
 installErrorLogging("table")
 
@@ -41,7 +37,6 @@ function returnHome() {
 }
 
 function startTable() {
-  const decisions = C.decisionsFor(station.id)
   const KEY_TEAM = `podium-team-${station.id}`
   document.title = `Podium · ${station.name}`
   document.getElementById("stationName").textContent = station.name
@@ -49,12 +44,13 @@ function startTable() {
 
   let state = null
   let offset = 0
-  let tab = "brief"
+  let tab = "problem"
   let teamId = sessionStorage.getItem(KEY_TEAM) || ""
   let pending = {}
   let lastKey = ""
-  let simView = null
   let gameId = null
+  /** The live Tune board, kept across polls so needles animate instead of jumping. */
+  let tune = null
 
   const toast = (text) => {
     const node = el("div", { class: "toast" }, text)
@@ -69,6 +65,7 @@ function startTable() {
       strip.classList.add("hidden")
       app.replaceChildren(el("div", { class: "workspace-single" }, stateBanner("Reconnecting to the game server. This page retries every second.", "info")))
       lastKey = ""
+      tune = null
       return
     }
     if (gameId && state.id !== gameId) forgetTeam()
@@ -80,7 +77,7 @@ function startTable() {
   function forgetTeam() {
     teamId = ""
     pending = {}
-    simView = null
+    tune = null
     sessionStorage.removeItem(KEY_TEAM)
   }
 
@@ -104,7 +101,7 @@ function startTable() {
     const team = currentTeam()
     if (team) await post(`/api/teams/${team.id}/checkout`, { station: station.id }).catch(() => {})
     forgetTeam()
-    tab = "brief"
+    tab = "problem"
     render(true)
   }
 
@@ -118,9 +115,9 @@ function startTable() {
   function chooseTeam(id) {
     teamId = id
     pending = {}
-    simView = null
+    tune = null
     sessionStorage.setItem(KEY_TEAM, id)
-    tab = "brief"
+    tab = "problem"
     seatHere()
     render(true)
     window.scrollTo({ top: 0 })
@@ -132,16 +129,23 @@ function startTable() {
     window.scrollTo({ top: 0 })
   }
 
-  const withPending = (team) => ({ ...team, choices: { ...team.choices, ...pending } })
+  const budget = () => state.settings.budget || C.DEFAULT_BUDGET
+  const choicesNow = (team) => ({ ...team.choices, ...pending })
   const notInPlay = () => !state.settings.stations.includes(station.id)
 
-  /** Why choices are closed for everyone right now, or null. */
+  /* ------------------------------------------------------------ learning moments */
+
+  const learnedKey = () => `podium-learned-${state.id}-${teamId}`
+  const learned = () => { try { return new Set(JSON.parse(sessionStorage.getItem(learnedKey()) || "[]")) } catch { return new Set() } }
+  const markLearned = () => sessionStorage.setItem(learnedKey(), JSON.stringify([...learned(), station.id]))
+
+  /** Why dials are closed for everyone right now, or null. */
   function phaseReason() {
     const phase = phaseOf(state)
-    if (phase === "lobby") return ["Choose your team and read the brief. Choices open when the host starts play.", "info"]
-    if (phase === "brief" || phase === "briefDone") return [`${WORDS.listen}. Choices open when play starts.`, "warn"]
-    if (phase === "ended") return ["Time is up: every table is locked. Tables not approved score 0 and race on their defaults.", "bad"]
-    if (phase === "race" || phase === "readout") return ["The race has run: decisions are locked.", "bad"]
+    if (phase === "lobby") return ["Choose your team and read the problem. Dials open when the host starts play.", "info"]
+    if (phase === "brief" || phase === "briefDone") return [`${WORDS.listen}. Dials open when play starts.`, "warn"]
+    if (phase === "ended") return [`Time is up: every table is locked. Tables not approved race on ${WORDS.todaySetup.toLowerCase()}.`, "bad"]
+    if (phase === "race" || phase === "readout") return ["The race has run: the dials are locked.", "bad"]
     return null
   }
 
@@ -151,13 +155,13 @@ function startTable() {
     if (reason) return stateBanner(...reason)
     if (!team) return null
     const d = designStatus(state, team, station.id)
-    if (d.status === "approved") return stateBanner(`${WORDS.approved} by ${d.review.by}: this table scores and races as designed.`, "good")
-    if (d.plan) return stateBanner(`Locked in as plan ${d.plan.id}: choices are frozen until the Architect decides.`, "info")
-    if (d.status === "sentBack") return stateBanner(`${d.label}. Revise, lock in again and call the Architect.`, "warn")
+    if (d.status === "approved") return stateBanner(`${WORDS.approved} by ${d.review.by}: this board races as tuned.`, "good")
+    if (d.plan) return stateBanner(`Locked in as plan ${d.plan.id}: the dials are frozen until the Architect decides.`, "info")
+    if (d.status === "sentBack") return stateBanner(`${d.label}. Retune, lock in again and call the Architect.`, "warn")
     return null
   }
 
-  const decisionsLocked = (team) => Boolean(phaseReason()) || notInPlay() || Boolean(team.plans?.[station.id])
+  const dialsLocked = (team) => Boolean(phaseReason()) || notInPlay() || Boolean(team.plans?.[station.id])
 
   /* ------------------------------------------------------------ header */
 
@@ -183,7 +187,7 @@ function startTable() {
   function renderStrip(team) {
     strip.classList.toggle("hidden", !team)
     if (!team) return strip.replaceChildren()
-    strip.replaceChildren(teamChip(team), el("span", { class: "muted small" }, `${C.tierFor(team).label} · ${station.name}`), button(WORDS.switchTeam, () => switchTeam(), { small: true }))
+    strip.replaceChildren(teamChip(team), el("span", { class: "muted small" }, `${station.name} · ${C.budgetFor(budget()).name} budget`), button(WORDS.switchTeam, () => switchTeam(), { small: true }))
   }
 
   /* ------------------------------------------------------------ step 0: choose your team */
@@ -195,64 +199,69 @@ function startTable() {
     if (!state.teams.length) nodes.push(stateBanner("The host has not created the teams yet.", "info"))
     nodes.push(el("div", { class: "team-grid", id: "teamGrid" }, state.teams.map((t) => {
       const at = Object.entries(state.tables || {}).find(([, seat]) => seat.team === t.id)?.[0]
-      const where = at === station.id ? "Checked in here" : at ? `At ${C.byId(C.STATIONS, at)?.name || at}` : C.tierFor(t).name
+      const where = at === station.id ? "Checked in here" : at ? `At ${C.byId(C.STATIONS, at)?.name || at}` : "Free to start here"
       return el("button", { class: "team-button", "data-team": t.id, onclick: () => chooseTeam(t.id) }, el("i", { style: `background:${t.color}` }), el("b", {}, t.name), el("span", {}, where))
     })))
     app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "panel step-zero" }, ...nodes)))
   }
 
-  /* ------------------------------------------------------------ the four steps */
+  /* ------------------------------------------------------------ 1 · Problem */
 
-  function renderBrief(team) {
-    const tier = C.tierFor(team)
+  function renderProblem() {
     const listening = ["lobby", "brief", "briefDone"].includes(phaseOf(state))
+    const level = C.budgetFor(budget())
     return [
-      el("div", { class: "brief-grid" },
-        panel(station.name, el("ul", { class: "brief-list" }, station.brief.map((line) => el("li", {}, line)))),
-        panel(`What the ${station.architect} is looking for`, el("p", { class: "looking" }, station.looking),
-          el("p", { class: "small muted" }, `${team.name}: ${tier.label}. ${tier.line}`))),
-      el("div", { class: "actions" }, listening ? el("span", { class: "muted" }, `${WORDS.listen}: choices open when play starts.`) : button(WORDS.startDesigning, () => goTab("decide"), { kind: "primary" })),
+      el("div", { class: "problem-card", style: `--table:${station.color}` },
+        el("span", { class: "problem-tag" }, `${WORDS.problem} · ${station.name}`),
+        el("p", { class: "problem-text" }, station.problem),
+        el("div", { class: "problem-facts" },
+          el("div", {}, el("b", {}, `${WORDS.todaySetup}: `), station.today),
+          el("div", {}, el("b", {}, `The ${station.architect} wants: `), station.looking),
+          el("div", {}, el("b", {}, `${level.name} budget: `), level.line))),
+      panel(`${WORDS.todaySetup}: out of the zone`, el("p", { class: "small muted" }, "Green arcs are the targets, bold lines are the caps, the grey needle is today. Your job: tune the three dials so every gauge sits in the green without crossing a cap line."),
+        staticBoard(station.id, C.BASELINE_CHOICES, budget(), { showProblem: false, showDials: false, id: "todayBoard" })),
+      el("div", { class: "actions" }, listening ? el("span", { class: "muted" }, `${WORDS.listen}: the dials open when play starts.`) : button(WORDS.startTuning, () => goTab("tune"), { kind: "primary" })),
     ]
   }
 
-  function choose(team, d, value) {
-    if (decisionsLocked(team)) return toast(banner(team)?.textContent || "Choices are locked")
-    pending[d.id] = value
-    simView = null
-    render(true)
-    post(`/api/teams/${team.id}/choices`, { station: station.id, choices: { [d.id]: value } })
+  /* ------------------------------------------------------------ 2 · Tune */
+
+  function turn(team, decisionId, value) {
+    if (dialsLocked(team)) return toast(banner(team)?.textContent || "The dials are locked")
+    const before = tune?.view.board()
+    pending[decisionId] = value
+    const after = tune.view.update(choicesNow(team), { locked: false })
+    if (after.inZone && !before?.inZone && !learned().has(station.id)) {
+      markLearned()
+      showLesson()
+    }
+    post(`/api/teams/${team.id}/choices`, { station: station.id, choices: { [decisionId]: value } })
+      .then(() => post(`/api/teams/${team.id}/sim`, { station: station.id }).catch(() => {}))
       .then(() => watcher.refresh())
       .catch((err) => {
-        delete pending[d.id]
-        render(true)
+        delete pending[decisionId]
+        tune?.view.update(choicesNow(team), { locked: dialsLocked(team) })
         toast(err.message)
       })
   }
 
-  function renderDecide(team, ev) {
-    const locked = decisionsLocked(team)
-    return [
-      ...decisions.map((d) => decisionSection({
-        id: d.id, title: d.name, why: d.why,
-        cards: d.options.map((o) => optionCard({ name: o.name, why: o.text, lines: [o.why], tag: tagFor(o), selected: ev.choices[d.id] === o.id, disabled: locked, onclick: () => choose(team, d, o.id) })),
-      })),
-      el("div", { class: "actions" }, button(WORDS.runSimulation, () => { goTab("sim"); runSim(team) }, { kind: "primary" })),
-    ]
+  function showLesson() {
+    if (!tune) return
+    tune.lesson.replaceChildren(learningCard(station.id, { onClose: () => tune?.lesson.replaceChildren() }))
   }
 
-  function runSim(team) {
-    simView = { at: Date.now(), result: simulateStation(withPending(team), station.id) }
-    render(true)
-    post(`/api/teams/${team.id}/sim`, { station: station.id }).catch(() => {})
+  function renderTune(team) {
+    const view = createBoard({ stationId: station.id, budget: budget(), interactive: true, onDial: (d, o) => turn(currentTeam(), d, o), id: "tuneBoard" })
+    view.update(choicesNow(team), { locked: dialsLocked(team) })
+    const lesson = el("div", { class: "lesson-slot" })
+    tune = { key: tuneKey(team), view, lesson }
+    return [lesson, view.el,
+      el("div", { class: "actions" }, button("Go to Pitch", () => goTab("pitch"), { kind: view.board().inZone ? "primary" : "secondary" }))]
   }
 
-  function renderSim(team) {
-    const r = simView?.result
-    return [panel("Simulation",
-      r ? el("div", { class: "sim-one", id: "simResult" }, scoreRing(r.score, r.band), el("p", { class: "sim-sentence" }, r.sentence), el("p", { class: "sim-hint" }, el("b", {}, "Hint: "), r.hint))
-        : el("p", { class: "muted" }, `Tap ${WORDS.runSimulation} to score your ${station.name} choices.`),
-      el("div", { class: "actions" }, button(WORDS.runSimulation, () => runSim(team), { kind: r ? "secondary" : "primary" }), r ? button("Go to Pitch", () => goTab("pitch"), { kind: "primary" }) : null))]
-  }
+  const tuneKey = (team) => JSON.stringify([state.id, team.id, budget(), station.id])
+
+  /* ------------------------------------------------------------ 3 · Pitch */
 
   const act = (url, body, done) => post(url, body).then((res) => { if (done) toast(done); watcher.refresh(); return res }).catch((err) => { toast(err.message); throw err })
 
@@ -267,51 +276,50 @@ function startTable() {
     return null
   }
 
-  function renderPitch(team, ev) {
+  function renderPitch(team) {
     const d = designStatus(state, team, station.id)
     const nodes = []
     if (state.race) nodes.push(el("div", { class: "actions" }, el("a", { class: "btn primary", href: `/race.html?team=${encodeURIComponent(team.id)}`, id: "readoutLink", style: "display:inline-flex;align-items:center;text-decoration:none" }, "Open your readout")))
     if (!d.plan) {
-      nodes.push(panel("Your plan",
-        el("table", { class: "grid" }, el("tbody", {}, decisions.map((dd) => el("tr", {}, el("td", { class: "muted" }, dd.name), el("td", {}, el("b", {}, dd.options.find((o) => o.id === ev.choices[dd.id]).name)))))),
-        el("p", { class: "small muted" }, `Lock in freezes this table and shows your plan page. Take a screenshot, then call the Architect and pitch in ${PITCH_SECONDS} seconds.`),
-        el("div", { class: "actions" }, button(WORDS.lockIn, () => act(`/api/teams/${team.id}/submit`, { station: station.id }, WORDS.screenshot).catch(() => {}), { kind: "primary", disabled: decisionsLocked(team) }))))
+      const b = boardFor(station.id, choicesNow(team), budget())
+      nodes.push(panel("Your board",
+        stateBanner(b.inZone ? `${WORDS.inZone} with FIT ${b.fit}: lock in and pitch it.` : `FIT ${b.fit}: ${b.sentence} You can still pitch it, but only an in-zone board scores well.`, b.inZone ? "good" : "warn"),
+        staticBoard(station.id, choicesNow(team), budget(), { showProblem: false, id: "pitchPreview" }),
+        el("p", { class: "small muted" }, `Lock in freezes the dials and shows your board snapshot. Take a screenshot, then call the Architect and pitch in ${PITCH_SECONDS} seconds.`),
+        el("div", { class: "actions" }, button(WORDS.lockIn, () => act(`/api/teams/${team.id}/submit`, { station: station.id }, `📸 ${WORDS.screenshot}`).catch(() => {}), { kind: "primary", disabled: dialsLocked(team) }))))
     } else {
       nodes.push(pitchStatus(team))
+      if (d.status === "approved") nodes.push(learningCard(station.id, { id: "approvedLesson" }))
       if (d.status === "locked") nodes.push(el("div", { class: "actions" }, button(WORDS.callArchitect, () => act(`/api/teams/${team.id}/call`, { station: station.id }, "You are in the queue").catch(() => {}), { kind: "primary", disabled: Boolean(state.race) })))
       nodes.push(planSheet(team, d.plan, { review: d.review }))
     }
     return nodes
   }
 
-  /** Four numbers for the whole team: CapEx, yearly OpEx, power and FIA risk. */
-  function renderLedger(ev) {
-    const L = ev.ledger
-    const tone = (bad) => (bad ? "warn-text" : "")
-    return el("aside", { class: "ledger" }, panel("Your ledger",
-      el("div", { class: "ledger-four" },
-        stat(el("span", { class: tone(L.capexOver > 0) }, millions(L.capex)), `CapEx of ${millions(L.capexLimit)}`),
-        stat(el("span", { class: tone(L.opexState !== "ok") }, millions(L.opex)), `OpEx a year of ${millions(L.opexLimit)}`),
-        stat(`${Math.round(L.facilityKW)} kW`, "Power"),
-        stat(el("span", { class: `fia-${L.fia.toLowerCase()}` }, L.fia), "FIA risk")),
-      el("p", { class: "small muted" }, "The whole team, across all four tables.")))
-  }
+  /* ------------------------------------------------------------ render */
 
   function render(force) {
     if (!state || !gameClock(state)) return
     renderClock()
     const team = currentTeam()
-    const key = JSON.stringify([team, phaseOf(state), state.clock.status, state.queues?.[station.id], state.architects?.[station.id], state.pitches?.[station.id], state.teams.map((t) => [t.id, t.name]), state.tables, Boolean(state.race), state.settings.stations, tab, simView?.at, pending])
+    if (team) for (const [k, v] of Object.entries(pending)) if (team.choices[k] === v) delete pending[k]
+    const key = JSON.stringify([team, phaseOf(state), state.clock.status, state.queues?.[station.id], state.architects?.[station.id], state.pitches?.[station.id], state.teams.map((t) => [t.id, t.name]), state.tables, Boolean(state.race), state.settings, tab])
     if (!force && key === lastKey) return
     lastKey = key
-    if (team) for (const [k, v] of Object.entries(pending)) if (team.choices[k] === v) delete pending[k]
     renderStrip(team)
-    if (!team) return renderStepZero()
-    const full = withPending(team)
-    const ev = evaluate(full)
-    const view = tab === "decide" ? renderDecide(team, ev) : tab === "sim" ? renderSim(team) : tab === "pitch" ? renderPitch(team, ev) : renderBrief(team)
-    app.replaceChildren(el("div", { class: "workspace" },
-      el("main", {}, tabBar(tab, goTab), banner(team), el("section", { id: "view", class: `view view-${tab}` }, view)),
-      renderLedger(ev)))
+    if (!team) {
+      tune = null
+      return renderStepZero()
+    }
+    const slot = document.getElementById("bannerSlot")
+    if (tab === "tune" && tune && tune.key === tuneKey(team) && slot && document.getElementById("tuneBoard")) {
+      slot.replaceChildren(...[banner(team)].filter(Boolean))
+      tune.view.update(choicesNow(team), { locked: dialsLocked(team) })
+      return
+    }
+    tune = null
+    const view = tab === "tune" ? renderTune(team) : tab === "pitch" ? renderPitch(team) : renderProblem()
+    app.replaceChildren(el("div", { class: "workspace-single wide" },
+      el("main", {}, tabBar(tab, goTab), el("div", { id: "bannerSlot" }, banner(team)), el("section", { id: "view", class: `view view-${tab}` }, view))))
   }
 }

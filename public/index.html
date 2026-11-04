@@ -14,8 +14,15 @@
   <header class="topbar"><div class="brand"><b>PODIUM</b> 2027</div><div class="station-title"><h1>F1 Infrastructure Strategy</h1><span>FIA 2027 Infrastructure Specification · Issue 01</span></div></header>
   <main class="home">
     <section>
-      <h1>Build the infrastructure that wins the finale.</h1>
-      <p class="muted">Four tables, three decisions each. A 50-minute session: a 5-minute brief, 35 minutes of play, a 30-second race and the readouts. At every table: Brief, Decide, Simulate, then Lock in and pitch to the table's Architect. Only approved tables count; everything else races on its defaults at the Austin, Texas 2027 Grand Prix.</p>
+      <h1>Tune the customer's infrastructure into the zone.</h1>
+      <p class="muted">Four tables, one customer problem each. A 50-minute session: a 5-minute brief, 35 minutes of play, a 30-second race and the readouts.</p>
+      <ol class="how-to" id="howToPlay">
+        <li><b>Problem:</b> read the need, the targets (gauges with a green zone) and the cost caps (bold lines). The grey needle is today's setup, and it is out of the zone.</li>
+        <li><b>Tune:</b> turn three dials. Every tap moves the gauges and cost bars live. Each dial says why it matters to the F1 team and how a provider helps.</li>
+        <li><b>FIT (0–100):</b> 80 or more means every target is in the zone, inside the caps. Crossing a cap or breaking an FIA rule caps FIT at 40.</li>
+        <li><b>Pitch:</b> lock in, take a screenshot, and pitch to the table's Architect in 30 seconds. Only approved boards count. The rest race on the customer's existing setup at the Austin, Texas 2027 Grand Prix.</li>
+      </ol>
+      <p class="muted small">The host picks one budget level for everyone (Tight, Standard or Generous), which moves every cap line.</p>
       <div class="row"><button class="btn" data-role="team">Teams</button><button class="btn" data-role="architect">Architects</button><button class="btn" data-role="host">Session host</button><button class="btn" data-role="projector">Projector</button></div>
     </section>
     <section>
@@ -40,7 +47,7 @@
     installErrorLogging("home")
     for (const b of document.querySelectorAll("[data-role]")) b.addEventListener("click", () => openInstructions(b.dataset.role))
     const box = document.getElementById("stations")
-    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}`, "data-station": s.id }, el("b", {}, s.name), el("span", { class: "muted" }, `${s.architect} · ${s.looking}`)))
+    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}`, "data-station": s.id }, el("b", {}, s.name), el("span", {}, s.problem), el("span", { class: "muted small" }, `Targets: ${s.targets.map((t) => `${t.name} ${t.zone}`).join(" · ")} · pitch to the ${s.architect}`)))
   </script>
 </body>
 </html>

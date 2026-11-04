@@ -1,13 +1,15 @@
 /**
- * Podium 2027: the game catalog. Four tables, three decisions each, three options per decision.
- * Pure data plus small lookups, shared by the server, every screen and the tests.
+ * Podium 2027: the game catalog. Four tables; each is a customer problem with visible targets,
+ * visible cost caps and three dials. Pure data plus small lookups, shared by the server, every
+ * screen and the tests.
  *
- * Money is in US dollars; OpEx is a year. Every figure is a teaching estimate, not a quote.
+ * The F1 team is the customer. Money is in US dollars; OpEx is a year. Every figure is a teaching
+ * estimate, not a quote.
  */
 
 export const byId = (list, id) => list.find((item) => item.id === id) || null
 
-/* ------------------------------------------------------------ teams */
+/* ------------------------------------------------------------ teams and the session budget */
 
 export const MAX_TEAMS = 10
 export const MIN_TEAMS = 1
@@ -15,209 +17,274 @@ export const MIN_TEAMS = 1
 /** Ten distinct colours that stay readable on the dark theme and on a projector. */
 export const TEAM_COLORS = ["#e10600", "#00a3ff", "#ffd60a", "#22c55e", "#ff7a00", "#c084fc", "#00e5d4", "#ff4fa3", "#f5f5f5", "#a3e635"]
 
-/** Tier = how strong the team was in 2026: front-runners get less CapEx headroom and compute. */
-export const TIERS = [
-  { id: 1, name: "Front-runner", label: "Front-runner (Tier 1)", capex: 6_000_000, compute: 0.7, pace: -0.15, line: "Fastest car, tightest limits: $6M CapEx headroom and 70% compute allowance." },
-  { id: 2, name: "Midfield", label: "Midfield (Tier 2)", capex: 8_000_000, compute: 1.0, pace: 0, line: "Balanced: $8M CapEx headroom and the full 100% compute allowance." },
-  { id: 3, name: "Challenger", label: "Challenger (Tier 3)", capex: 10_000_000, compute: 1.15, pace: 0.15, line: "Slower car, most room to catch up: $10M CapEx headroom and 115% compute." },
+/** One budget for every team, set by the host for the whole session. It moves every cap line. */
+export const BUDGET_LEVELS = [
+  { id: "tight", name: "Tight", mult: 0.85, line: "Every cap line is 15% lower: one clean answer per table, if you find it." },
+  { id: "standard", name: "Standard", mult: 1, line: "The season's real allowance: two or three good answers per table." },
+  { id: "generous", name: "Generous", mult: 1.25, line: "Every cap line is 25% higher: premium options come within reach." },
 ]
-export const tierFor = (team) => byId(TIERS, Number(team?.tier)) || TIERS[1]
+export const DEFAULT_BUDGET = "standard"
+export const budgetFor = (id) => byId(BUDGET_LEVELS, id) || byId(BUDGET_LEVELS, DEFAULT_BUDGET)
 
-/** The OpEx every team may spend a year on infrastructure. Up to TOLERANCE over costs aero; more is a breach. */
-export const OPEX_ALLOWANCE = 5_000_000
-export const OPEX_TOLERANCE = 500_000
-export const OPEX_MAJOR = 1_500_000
-/** Software, staff and spares every team pays whatever it chooses. */
-export const FIXED_OPEX = 1_000_000
+/** The FIA cost cap the infrastructure allowance is carved from (shown for context). */
+export const COST_CAP = 215_000_000
 
 /* ------------------------------------------------------------ the four tables */
 
+const fmtMs = (v) => `${Math.round(v)} ms`
+const fmtPct1 = (v) => `${v.toFixed(v >= 99.95 ? 2 : 1)}%`
+const fmtPct = (v) => `${Math.round(v)}%`
+const fmtX = (v) => `${v.toFixed(1)}×`
+const fmtH = (v) => `${Math.round(v)} h`
+const fmtWk = (v) => `${Math.round(v)} weeks`
+const fmtPue = (v) => v.toFixed(2)
+const fmtN = (v) => `${Math.round(v * 10) / 10}`
+const passFmt = (pass, fail) => (v) => (v ? pass : fail)
+
+/**
+ * Targets: `min` (at least), `max` (at most) or `pass`. `lo`/`hi` are the ends of the gauge; the
+ * green zone runs from the target to the good end.
+ */
 export const STATIONS = [
   {
     id: "network",
     name: "Connectivity",
     color: "#38bdf8",
     architect: "Connectivity Architect",
-    brief: [
-      "Race data must reach the factory and back within a strategy call.",
-      "FIA rule 5.3: two encrypted tunnels on separate paths.",
-      "FIA rule 5.2: car data dumps go over the wired umbilical.",
+    problem: "Get car data from the track to the factory strategists fast and reliably at every race.",
+    today: "One encrypted tunnel over the public internet; car data on the wired umbilical.",
+    looking: "A fast, legal link that survives a cut fibre, inside both caps.",
+    caps: { capex: 600_000, opex: 700_000 },
+    targets: [
+      { id: "latency", name: "Round-trip latency", kind: "max", target: 120, lo: 0, hi: 250, fmt: fmtMs, zone: "120 ms or less", miss: "Latency is still too high" },
+      { id: "availability", name: "Weekend availability", kind: "min", target: 99.9, lo: 98.5, hi: 100, fmt: fmtPct1, zone: "99.9% or more", miss: "The link is offline too often" },
+      { id: "fia", name: "FIA compliance", kind: "pass", fmt: passFmt("Pass", "Breach"), zone: "Pass", miss: "The design breaks an FIA rule" },
     ],
-    looking: "A fast, legal link that survives a cut fibre without blowing the budget.",
+    lesson: {
+      why: "Strategy calls only win races if race data arrives fast and never drops.",
+      provider: "Connectivity partners sell diverse fibre paths and private interconnects as a managed service.",
+    },
   },
   {
     id: "oem",
     name: "OEMs",
     color: "#f97316",
     architect: "OEM Architect",
-    brief: [
-      "Choose who builds and supports the supercomputer, and how you pay.",
-      "Buying uses CapEx headroom; leasing or as-a-service uses yearly OpEx.",
-      "A failed node on race weekend is only as bad as your support contract.",
+    problem: "Refresh the hardware this season without blowing the CapEx envelope or the yearly cost cap.",
+    today: "Last-generation servers bought outright from the incumbent, with basic support.",
+    looking: "Twice today's performance, on site before the first race, fixed fast, inside both caps.",
+    caps: { capex: 3_400_000, opex: 1_900_000 },
+    targets: [
+      { id: "perf", name: "Performance vs today", kind: "min", target: 2, lo: 1, hi: 3.5, fmt: fmtX, zone: "2.0× or more", miss: "Not enough performance over today's kit" },
+      { id: "fix", name: "Race-weekend fix time", kind: "max", target: 4, lo: 0, hi: 72, fmt: fmtH, zone: "4 hours or less", miss: "A failed node would wait too long for a fix" },
+      { id: "lead", name: "Delivery lead time", kind: "max", target: 12, lo: 0, hi: 24, fmt: fmtWk, zone: "12 weeks or less", miss: "The hardware would arrive after the first race" },
     ],
-    looking: "A vendor and payment plan that fits your tier's limits, with support that matches the risk.",
+    lesson: {
+      why: "New hardware only helps if it arrives before the first race and is fixed fast.",
+      provider: "OEMs offer leasing and as-a-service, so customers refresh without spending the CapEx envelope.",
+    },
   },
   {
     id: "dc",
     name: "Datacenter & Power",
     color: "#a855f7",
     architect: "Datacenter Architect",
-    brief: [
-      "Where the hardware lives, how it is cooled and how hard it runs.",
-      "Hot chips on weak cooling throttle; far-away sites add latency.",
-      "FIA rule 4.1: race-critical infrastructure needs N+1 power and cooling.",
+    problem: "House, power and cool the 400 kW cluster so it runs at full speed, inside the cost cap.",
+    today: "The factory server room: air cooling, one power feed, no backup.",
+    looking: "Enough power and cooling, an efficient PUE and N+1 backup, inside both caps.",
+    caps: { capex: 1_000_000, opex: 1_000_000 },
+    need: 400,
+    targets: [
+      { id: "capacity", name: "Power & cooling vs need", kind: "min", target: 100, lo: 0, hi: 200, fmt: fmtPct, zone: "100% or more", miss: "The site cannot power and cool the cluster" },
+      { id: "pue", name: "PUE (power efficiency)", kind: "max", target: 1.3, lo: 1, hi: 1.8, fmt: fmtPue, zone: "1.30 or less", miss: "Too much power goes on cooling" },
+      { id: "nplus1", name: "N+1 backup", kind: "pass", fmt: passFmt("N+1", "None"), zone: "N+1", miss: "There is no N+1 backup for power and cooling" },
     ],
-    looking: "Cooling that matches the chips, a site near the factory, and power headroom on a hot day.",
+    lesson: {
+      why: "Chips only run at full speed when power and cooling keep up, with a backup.",
+      provider: "A colo with liquid-ready halls gives N+1 power and cooling as OpEx, not a building project.",
+    },
   },
   {
     id: "compute",
     name: "CFD Supercomputer",
     color: "#22c55e",
     architect: "CFD Architect",
-    brief: [
-      "CFD turns compute into downforce; the strategy model needs it too.",
-      "FIA rule 2.4: aero testing is capped by your tier's compute allowance.",
-      "Bigger is not better above the cap: you pay for idle nodes.",
+    problem: "Run the season's aero simulations inside the FIA compute cap, with each design cycle back the same day.",
+    today: "An ageing eight-node CPU cluster on shared office storage.",
+    looking: "Ten or more design cycles a week, under the FIA cap, with every node kept fed.",
+    caps: { capex: 3_600_000, opex: 500_000 },
+    hallKW: 400,
+    targets: [
+      { id: "cycles", name: "Design cycles a week", kind: "min", target: 10, lo: 0, hi: 20, fmt: fmtN, zone: "10 or more", miss: "Too few design cycles a week" },
+      { id: "usage", name: "Compute vs FIA cap", kind: "max", target: 100, lo: 0, hi: 180, fmt: fmtPct, zone: "100% or less", miss: "The cluster is over the FIA compute cap" },
+      { id: "feed", name: "Nodes kept fed", kind: "min", target: 90, lo: 40, hi: 100, fmt: fmtPct, zone: "90% or more", miss: "Storage cannot keep the nodes fed" },
     ],
-    looking: "A cluster sized to the allowance, the right chips, and storage that keeps it fed.",
+    lesson: {
+      why: "Aero gains come from design cycles per week, inside the FIA's compute cap.",
+      provider: "Partners size the cluster to the cap and pair it with storage that keeps nodes fed.",
+    },
   },
 ]
 
-/** Tables from the earlier six-table game: old links show a friendly message instead of an error. */
+/** Tables from earlier versions: old links show a friendly message instead of an error. */
 export const RETIRED_STATIONS = { ai: "AI & strategy", storage: "Storage", governance: "Governance" }
 
-/* ------------------------------------------------------------ decisions (3 per table × 3 options) */
+/* ------------------------------------------------------------ dials (3 per table × 3 settings) */
 
-const opt = (id, name, text, why, data = {}) => ({ id, name, text, why, ...data })
+/**
+ * opt(id, name, text, as, data): `text` is the setting in one short sentence; `as` is how a hint
+ * names it ("a private cross-connect would fix that").
+ */
+const opt = (id, name, text, as, data = {}) => ({ id, name, text, as, ...data })
 
 export const DECISIONS = [
   /* Connectivity */
   {
-    id: "link", station: "network", name: "Factory link", def: "single",
-    why: "If the link drops, the pit wall loses its strategy calls.",
+    id: "link", station: "network", name: "Paths to the factory", today: "single",
+    why: "If the only link drops, the pit wall loses its strategy calls mid-race.",
+    how: "Carriers provide two diverse fibre routes plus satellite backup, monitored around the clock.",
     options: [
-      opt("single", "Single tunnel", "One encrypted tunnel to the factory over one path.", "Cheapest, but one cut and the pit wall is blind.", { capex: 50_000, opex: 100_000, res: 0.3, fia: "5.3" }),
-      opt("redundant", "Redundant tunnels", "Two encrypted tunnels on two separate fibre paths.", "Meets FIA 5.3; a cut fails over in seconds.", { capex: 150_000, opex: 200_000, res: 0.85 }),
-      opt("satellite", "Redundant + satellite", "Two tunnels plus a satellite backup for the worst day.", "Stays online even if both fibres are cut.", { capex: 250_000, opex: 300_000, res: 1 }),
+      opt("single", "Single tunnel", "One encrypted tunnel over one fibre path.", "a single tunnel", { capex: 50_000, opex: 100_000, avail: 99.0, fia: "5.3", fiaText: "FIA 5.3 asks for two encrypted tunnels on separate paths." }),
+      opt("redundant", "Two diverse paths", "Two encrypted tunnels on two separate fibre routes.", "two tunnels on diverse paths", { capex: 150_000, opex: 220_000, avail: 99.9 }),
+      opt("satellite", "Two paths + satellite", "Two diverse tunnels plus a satellite backup link.", "a satellite backup", { capex: 300_000, opex: 380_000, avail: 99.99 }),
     ],
   },
   {
-    id: "path", station: "network", name: "Latency path", def: "public",
-    why: "Every millisecond is added to every strategy call.",
+    id: "path", station: "network", name: "Route to the data centre", today: "public",
+    why: "Every millisecond of latency is added to every strategy call on the pit wall.",
+    how: "A private cross-connect in a carrier-neutral data centre gives steady low latency without building fibre.",
     options: [
-      opt("public", "Public internet", "Tunnels ride the public internet to the data centre.", "Cheap, but jitter can delay a pit call.", { capex: 0, opex: 20_000, perf: 0.45, ms: 140 }),
-      opt("crossconnect", "Private cross-connect", "A private interconnect straight into the data centre.", "Low, steady latency for a fair price.", { capex: 100_000, opex: 250_000, perf: 0.95, ms: 70 }),
-      opt("darkfibre", "Dark fibre", "Your own fibre from the factory to the data centre.", "Lowest latency, but expensive to light.", { capex: 600_000, opex: 350_000, perf: 1, ms: 55 }),
+      opt("public", "Public internet", "Tunnels ride the public internet, jitter and all.", "the public internet", { capex: 0, opex: 30_000, ms: 180 }),
+      opt("crossconnect", "Private cross-connect", "A private interconnect straight into the data centre.", "a private cross-connect", { capex: 100_000, opex: 250_000, ms: 95 }),
+      opt("darkfibre", "Dark fibre", "Your own dedicated fibre from factory to data centre.", "dark fibre", { capex: 400_000, opex: 450_000, ms: 70 }),
     ],
   },
   {
-    id: "garage", station: "network", name: "Garage data", def: "umbilical",
-    why: "How car data leaves the garage decides legality and speed.",
+    id: "garage", station: "network", name: "Car data out of the garage", today: "umbilical",
+    why: "How car data leaves the garage decides how fast engineers see it, and legality.",
+    how: "An edge cache in the garage keeps telemetry flowing when the link to the factory blips.",
     options: [
-      opt("wifi", "Wi-Fi dumps", "Dump car data over garage Wi-Fi: fast and banned.", "Breaks FIA 5.2: expect a time penalty.", { capex: 0, opex: 0, perf: 1, res: 0.5, fia: "5.2", illegal: true }),
-      opt("umbilical", "Wired umbilical", "Dump car data over the wired Gigabit umbilical.", "Legal and reliable; engineers wait a little.", { capex: 0, opex: 50_000, perf: 0.75, res: 0.7 }),
-      opt("edge", "Umbilical + edge cache", "Wired umbilical plus an edge cache in the garage.", "Legal, and telemetry keeps flowing if the link blips.", { capex: 300_000, opex: 100_000, perf: 1, res: 1 }),
+      opt("wifi", "Garage Wi-Fi", "Dump car data over garage Wi-Fi: fast, but banned.", "garage Wi-Fi", { capex: 0, opex: 0, ms: -15, fia: "5.2", illegal: true, fiaText: "FIA 5.2: car data must leave the garage on the wired umbilical." }),
+      opt("umbilical", "Wired umbilical", "Dump car data over the wired Gigabit umbilical.", "the wired umbilical", { capex: 0, opex: 50_000, ms: 15 }),
+      opt("edge", "Umbilical + edge cache", "Wired umbilical plus an edge cache in the garage.", "an edge cache in the garage", { capex: 250_000, opex: 100_000, ms: -20 }),
     ],
   },
 
   /* OEMs */
   {
-    id: "vendor", station: "oem", name: "Vendor", def: "dgx",
-    why: "The vendor sets the price, the delivery and the software stack.",
+    id: "vendor", station: "oem", name: "Hardware", today: "incumbent",
+    why: "Newer hardware runs more simulations per dollar, but only if it arrives in time.",
+    how: "OEMs offer current-generation systems with delivery slots booked ahead of the season.",
     options: [
-      opt("supermicro", "Supermicro", "Fast delivery and the lowest price; you integrate more yourself.", "Most hardware per dollar, thinner support.", { priceMult: 1, perf: 0.8, value: 1, support: 0.8, aas: false, strategy: 1 }),
-      opt("tier1", "Dell, HPE or Lenovo", "Mainstream servers with full support and an as-a-service programme.", "The only route to as-a-service payment.", { priceMult: 1.15, perf: 0.9, value: 0.85, support: 1, aas: true, strategy: 1 }),
-      opt("dgx", "NVIDIA DGX", "Reference systems with NVIDIA's full software stack, at a premium.", "Best tuned for AI, but the dearest and slowest.", { priceMult: 1.35, perf: 0.75, value: 0.55, support: 1, aas: false, strategy: 1.05 }),
+      opt("incumbent", "Incumbent, last generation", "More of today's servers from the current supplier.", "the incumbent's last-generation kit", { price: 2_400_000, perf: 1.4, lead: 4, aas: false }),
+      opt("tier1", "Dell, HPE or Lenovo", "Current-generation servers, with an as-a-service option.", "current-generation Dell, HPE or Lenovo servers", { price: 4_000_000, perf: 2.2, lead: 10, aasLead: 4, aas: true }),
+      opt("dgx", "NVIDIA DGX, newest", "The newest GPU systems, with long delivery times.", "NVIDIA DGX", { price: 6_500_000, perf: 3.2, lead: 18, aas: false }),
     ],
   },
   {
-    id: "payment", station: "oem", name: "How you pay", def: "buy",
-    why: "Buying spends CapEx headroom; leasing spends yearly OpEx.",
+    id: "payment", station: "oem", name: "How you pay", today: "buy",
+    why: "Buying spends the CapEx envelope now; leasing moves the cost into yearly OpEx.",
+    how: "Leasing and as-a-service let the customer refresh now and pay monthly, inside the cap.",
     options: [
-      opt("buy", "Buy", "Buy the hardware outright on this year's CapEx.", "No yearly bill, but uses your CapEx headroom.", { opexRate: 0 }),
-      opt("lease", "Lease", "Lease over three years: about 30% of the price a year.", "Saves CapEx; adds a yearly OpEx bill.", { opexRate: 0.3 }),
-      opt("aas", "As-a-service", "Pay monthly with support included (Dell, HPE or Lenovo only).", "No CapEx, support included; the highest yearly bill.", { opexRate: 0.36 }),
+      opt("buy", "Buy outright", "Pay the whole price this year from CapEx.", "buying outright", { rate: 0 }),
+      opt("lease", "Lease", "Lease over three years: about a third of the price yearly.", "leasing", { rate: 0.32 }),
+      opt("aas", "As-a-service", "Pay monthly; the OEM holds stock and bundles support.", "as-a-service", { rate: 0.35 }),
     ],
   },
   {
-    id: "support", station: "oem", name: "Support", def: "basic",
-    why: "A failed node on race weekend waits for this contract.",
+    id: "support", station: "oem", name: "Race-weekend support", today: "basic",
+    why: "A node that fails on Saturday must be back before Sunday's race.",
+    how: "OEM 4-hour on-site support puts an engineer and parts at the factory, 24/7.",
     options: [
-      opt("basic", "Basic", "Parts by post; you swap them yourselves.", "Cheapest; a failed node can stay down all weekend.", { rate: 0.03, aasRate: 0, res: 0.4 }),
-      opt("nbd", "Next business day", "An engineer on site the next business day.", "Covers most failures, but not a Sunday race.", { rate: 0.06, aasRate: 0, res: 0.8 }),
-      opt("4h", "4-hour", "An engineer and parts on site within four hours, 24/7.", "A failed node is back before the race.", { rate: 0.09, aasRate: 0.03, res: 1 }),
+      opt("basic", "Basic", "Parts by post; your own team swaps them.", "basic support", { hours: 72, rate: 0.02, aasRate: 0 }),
+      opt("nbd", "Next business day", "An engineer the next working day: Monday, after a race.", "next-business-day support", { hours: 24, rate: 0.04, aasRate: 0.005 }),
+      opt("4h", "4-hour, 24/7", "An engineer and parts on site within four hours.", "4-hour support", { hours: 4, rate: 0.06, aasRate: 0.02 }),
     ],
   },
 
   /* Datacenter & Power */
   {
-    id: "location", station: "dc", name: "Location", def: "factory",
-    why: "The site sets power prices, resilience and latency to the factory.",
+    id: "location", station: "dc", name: "Where it lives", today: "factory",
+    why: "The site sets the power price, the backup and the room the cluster has.",
+    how: "A colo near the factory provides N+1 power and cooling as a monthly service.",
     options: [
-      opt("factory", "Home factory", "A server room at the factory, on the factory's power.", "No rent, but dear power and no N+1 (FIA 4.1).", { capex: 200_000, kwYear: 1500, maxKW: 300, pueAdd: 0.1, ms: 0, perf: 0.9, res: 0.4, fia: "4.1" }),
-      opt("colo", "Colo near factory", "A colocation hall 30 km from the factory.", "N+1 power and cooling, close to the engineers.", { capex: 0, kwYear: 2000, maxKW: 1500, pueAdd: 0, ms: 2, perf: 1, res: 0.95 }),
-      opt("cheap", "Cheap-power region", "A hall in a cheap, green power region far away.", "Low bills, but every call travels much further.", { capex: 0, kwYear: 900, maxKW: 2000, pueAdd: 0, ms: 40, perf: 0.4, res: 0.85 }),
+      opt("factory", "Factory server room", "The room at the factory, on one power feed.", "the factory server room", { capex: 300_000, kwPrice: 1500, siteKW: 300, pueAdd: 0.1, nplus1: false, fia: "4.1", fiaText: "FIA 4.1: race-critical infrastructure needs N+1 power and cooling." }),
+      opt("colo", "Colo near the factory", "A colocation hall 30 km away with N+1 power.", "a colo near the factory", { capex: 0, kwPrice: 1900, siteKW: 1500, pueAdd: 0, nplus1: true }),
+      opt("cheap", "Cheap-power region", "A remote hall with cheap power and one grid feed.", "the cheap-power region", { capex: 0, kwPrice: 900, siteKW: 2000, pueAdd: -0.05, nplus1: false, fia: "4.1", fiaText: "FIA 4.1: race-critical infrastructure needs N+1 power and cooling." }),
     ],
   },
   {
-    id: "cooling", station: "dc", name: "Cooling", def: "air",
-    why: "Hot chips on weak cooling throttle when you need them most.",
+    id: "cooling", station: "dc", name: "Cooling", today: "air",
+    why: "Hot chips on weak cooling slow down exactly when the team needs them.",
+    how: "Liquid-ready halls let the customer run GPUs at full power without building a facility.",
     options: [
-      opt("air", "Air", "Cold aisles and fans: fine for CPUs, weak for GPUs.", "Cheapest; throttles hot chips on a hot day.", { capex: 0, pue: 1.45, heatLimit: 1, res: 0.7 }),
-      opt("reardoor", "Rear-door", "Water-cooled rear doors on every rack.", "Handles mixed racks; better efficiency.", { capex: 350_000, pue: 1.3, heatLimit: 1.3, res: 0.9 }),
-      opt("liquid", "Direct-to-chip liquid", "Liquid cold plates on every CPU and GPU.", "Cools anything and cuts the power bill.", { capex: 800_000, pue: 1.15, heatLimit: 2, res: 0.9 }),
+      opt("air", "Air", "Fans and cold aisles: fine for CPUs, weak for GPUs.", "air cooling", { capex: 0, coolKW: 280, pue: 1.5 }),
+      opt("reardoor", "Rear-door water", "Water-cooled doors on the back of every rack.", "rear-door water cooling", { capex: 400_000, coolKW: 450, pue: 1.3 }),
+      opt("liquid", "Direct-to-chip liquid", "Liquid cold plates on every chip.", "direct-to-chip liquid cooling", { capex: 750_000, coolKW: 800, pue: 1.12 }),
     ],
   },
   {
-    id: "power", station: "dc", name: "Power plan", def: "standard",
-    why: "Running harder is faster until something overheats.",
+    id: "power", station: "dc", name: "Power setting", today: "standard",
+    why: "Running chips harder needs more power and cooling, and costs more every year.",
+    how: "Providers meter power per rack, so a power cap turns straight into a lower bill.",
     options: [
-      opt("standard", "Standard", "Run every chip at its standard power limit.", "The default balance of speed and heat.", { kwMult: 1, heat: 0, perf: 1, dcPerf: 0.95, res: 0.8 }),
-      opt("cap85", "Capped at 85%", "Cap every chip at 85% power.", "About 4% slower, much cooler, lower bills.", { kwMult: 0.85, heat: -0.15, perf: 0.96, dcPerf: 0.95, res: 1 }),
-      opt("boost", "Max boost", "Unlock max boost on every chip.", "About 5% faster until it overheats.", { kwMult: 1.15, heat: 0.3, perf: 1.05, dcPerf: 1, res: 0.5 }),
+      opt("cap85", "Capped at 85%", "Chips capped at 85% power: about 4% slower.", "an 85% power cap", { needMult: 0.85, speed: 0.96 }),
+      opt("standard", "Standard", "Chips at their standard power limit.", "the standard power limit", { needMult: 1, speed: 1 }),
+      opt("boost", "Max boost", "Chips unlocked to 110% power: about 5% faster.", "max boost", { needMult: 1.1, speed: 1.05 }),
     ],
   },
 
   /* CFD Supercomputer */
   {
-    id: "size", station: "compute", name: "Cluster size", def: "small",
-    why: "The FIA caps aero compute; idle nodes above the cap are wasted money.",
+    id: "size", station: "compute", name: "Cluster size", today: "small",
+    why: "More nodes mean more design cycles, until the FIA compute cap stops you.",
+    how: "Partners size the cluster to the FIA cap, so no paid-for node sits idle.",
     options: [
-      opt("small", "Small", "8 nodes: about 60% of your compute allowance.", "Cheap, but leaves aero and strategy on the table.", { price: 2_000_000, kw: 120, capacity: 0.6, strategy: 0.75, res: 0.5 }),
-      opt("medium", "Medium", "16 nodes: matches your compute allowance.", "Uses every hour the FIA allows.", { price: 3_600_000, kw: 220, capacity: 1, strategy: 1, res: 0.9 }),
-      opt("large", "Large", "28 nodes: 40% more than the allowance.", "Idle above the cap, and a temptation to overrun it.", { price: 6_000_000, kw: 380, capacity: 1.4, strategy: 1, res: 1, fia: "2.4" }),
+      opt("small", "8 nodes", "Eight nodes: the size of today's ageing cluster.", "eight nodes", { nodes: 8 }),
+      opt("medium", "16 nodes", "Sixteen nodes: sized to the FIA compute cap.", "sixteen nodes", { nodes: 16 }),
+      opt("large", "28 nodes", "Twenty-eight nodes: well past the FIA compute cap.", "twenty-eight nodes", { nodes: 28 }),
     ],
   },
   {
-    id: "chips", station: "compute", name: "Chips", def: "cpu",
-    why: "CPUs suit CFD; GPUs run the AI strategy model.",
+    id: "chips", station: "compute", name: "Chips", today: "cpu",
+    why: "CFD runs well on CPUs; GPUs are faster but burn the FIA allowance faster.",
+    how: "OEMs benchmark the customer's CFD code to pick the chips that do most inside the cap.",
     options: [
-      opt("cpu", "CPU only", "High-memory CPUs: efficient CFD, a slow strategy model.", "Cheapest and coolest; weak race-day AI.", { priceMult: 1, kwMult: 1, cfd: 1, strategy: 0.55, heat: 0.8 }),
-      opt("mixed", "Mixed", "CPUs for CFD plus a GPU partition for strategy.", "The best of both, needs better than air cooling.", { priceMult: 1.3, kwMult: 1.2, cfd: 1.1, strategy: 0.85, heat: 1.1 }),
-      opt("gpu", "GPU heavy", "Mostly GPUs: superb AI, CFD billed at peak FP64.", "Best strategy model; hot and dear.", { priceMult: 1.7, kwMult: 1.45, cfd: 1, strategy: 1, heat: 1.5 }),
+      opt("cpu", "CPU only", "High-memory CPUs: efficient CFD within the allowance.", "CPU-only nodes", { nodePrice: 150_000, nodeOpex: 15_000, nodeKW: 10, cycles: 0.75, capShare: 5.625, io: 4 }),
+      opt("mixed", "Mixed CPU + GPU", "CPUs for CFD plus a small GPU partition.", "mixed CPU and GPU nodes", { nodePrice: 185_000, nodeOpex: 22_000, nodeKW: 13, cycles: 0.8, capShare: 5.3, io: 6 }),
+      opt("gpu", "GPU heavy", "Mostly GPUs: fastest, but billed at peak FP64.", "GPU-heavy nodes", { nodePrice: 300_000, nodeOpex: 35_000, nodeKW: 18, cycles: 1, capShare: 6.5, io: 9 }),
     ],
   },
   {
-    id: "storage", station: "compute", name: "Storage", def: "basic",
-    why: "Slow storage leaves expensive nodes waiting for data.",
+    id: "storage", station: "compute", name: "Storage", today: "basic",
+    why: "Slow storage leaves expensive nodes waiting for data instead of simulating.",
+    how: "A parallel file system from a storage partner keeps every node fed at full speed.",
     options: [
-      opt("basic", "Basic", "Network-attached storage shared with the office.", "Cheap; CFD and strategy jobs wait for data.", { price: 300_000, kw: 10, io: 0.8, strategy: 0.9, res: 0.4 }),
-      opt("parallel", "Fast parallel", "A parallel file system built for CFD.", "Keeps every node busy.", { price: 800_000, kw: 20, io: 1, strategy: 1, res: 0.85 }),
-      opt("cache", "Fast + cache", "Parallel file system plus a flash cache for what-ifs.", "Repeat strategy questions answer instantly.", { price: 1_200_000, kw: 25, io: 1.1, strategy: 1.08, res: 1 }),
+      opt("basic", "Office NAS", "Shared office storage on the corporate network.", "the office NAS", { price: 150_000, opex: 20_000, kw: 5, bandwidth: 40 }),
+      opt("parallel", "Parallel file system", "A parallel file system built for CFD.", "a parallel file system", { price: 600_000, opex: 60_000, kw: 10, bandwidth: 120 }),
+      opt("cache", "Parallel + flash cache", "A parallel file system plus a flash cache.", "a flash cache", { price: 900_000, opex: 90_000, kw: 12, bandwidth: 160 }),
     ],
   },
 ]
 
 export const decision = (id) => byId(DECISIONS, id)
 export const decisionsFor = (stationId) => DECISIONS.filter((d) => d.station === stationId)
-export const DEFAULT_CHOICES = Object.fromEntries(DECISIONS.map((d) => [d.id, d.def]))
+/** "What the customer has today": every unapproved table races on this. */
+export const BASELINE_CHOICES = Object.fromEntries(DECISIONS.map((d) => [d.id, d.today]))
 export const validChoice = (id, value) => Boolean(decision(id)?.options.some((o) => o.id === value))
+/** One in-zone answer per table at the Standard budget (demo mode and the tests). */
+export const REFERENCE_BUILD = {
+  link: "redundant", path: "crossconnect", garage: "umbilical",
+  vendor: "tier1", payment: "aas", support: "4h",
+  location: "colo", cooling: "liquid", power: "cap85",
+  size: "medium", chips: "cpu", storage: "parallel",
+}
 
 /* ------------------------------------------------------------ scoring and the session */
 
 export const APPROVAL_BONUS = 1.1
-/** Table points are a quarter of the approved score plus 10%, so four tables give about 100. */
-export const tablePoints = (score, approved) => (approved ? Math.round((Math.max(0, Math.min(100, score)) * APPROVAL_BONUS) / 4) : 0)
+/** Table points are a quarter of the approved FIT plus 10%, so four tables give about 100. */
+export const tablePoints = (fit, approved) => (approved ? Math.round((Math.max(0, Math.min(100, fit)) * APPROVAL_BONUS) / 4) : 0)
 export const PITCH_MAX = tablePoints(100, true)
 
 /** A 50-minute session: brief, play, race, readout. Every phase is editable on the host screen. */

@@ -1,131 +1,287 @@
 /**
- * The evaluation model: from a team's 12 choices to money, power, FIA risk and race performance.
- * Pure and deterministic; the server, every screen, the race and the tests share it.
+ * The tuning model: from a table's three dials to its gauges, cap bars, FIA chips and FIT score.
+ * Pure and deterministic; the iPads, the host, the server, the race and the tests share it, so the
+ * board a team sees is exactly the board the Architect approves and the race uses.
+ *
+ * FIT (0–100): every target in its zone and inside every cap scores 80–100 (more spare budget,
+ * higher FIT). Otherwise FIT is 70 × the mean closeness to each target. Any cap or FIA breach caps
+ * FIT at 40, so an over-cap board can never score high.
  */
 import * as C from "./catalog.js"
 
-/** The team's choices with every missing or invalid value replaced by the table default. */
+const clamp = (value, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, value))
+export const millions = (value) => `$${(value / 1e6).toFixed(1)}M`
+const money = (value) => (Math.abs(value) >= 1e6 ? millions(value) : `$${Math.round(value / 1e3)}k`)
+
+export const FIT_ZONE = 80
+export const FIT_BREACH_MAX = 40
+const FIT_OFF_MAX = 70
+/** Spare budget (share of a cap) that earns the full +20 inside the zone. */
+const FULL_HEADROOM = 0.5
+
+/** The team's choices with every missing or invalid value replaced by today's setup. */
 export function choicesOf(team) {
   const out = {}
   for (const d of C.DECISIONS) {
     const value = team?.choices?.[d.id]
-    out[d.id] = C.validChoice(d.id, value) ? value : d.def
+    out[d.id] = C.validChoice(d.id, value) ? value : d.today
   }
   return out
 }
 
 export const pickedOption = (decisionId, choices) => {
   const d = C.decision(decisionId)
-  return d.options.find((o) => o.id === choices?.[decisionId]) || d.options.find((o) => o.id === d.def)
+  return d.options.find((o) => o.id === choices?.[decisionId]) || d.options.find((o) => o.id === d.today)
 }
 
-const clamp = (value, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, value))
-
-/** Strategy calls slow down as latency grows. */
-export function latencyFactor(ms) {
-  if (ms <= 60) return 1
-  if (ms <= 80) return 0.97
-  if (ms <= 120) return 0.9
-  return 0.82
+/** One table's raw physics: target values, money, power and FIA rules broken. */
+const PHYSICS = {
+  network(o) {
+    const link = o("link")
+    const path = o("path")
+    const garage = o("garage")
+    const fia = [link, garage].filter((x) => x.fia)
+    return {
+      values: { latency: path.ms + garage.ms, availability: link.avail, fia: fia.length === 0 },
+      capex: link.capex + path.capex + garage.capex,
+      opex: link.opex + path.opex + garage.opex,
+      fia: fia.map((x) => ({ rule: x.fia, text: x.fiaText, dial: C.DECISIONS.find((d) => d.options.includes(x)).id })),
+      notes: [],
+    }
+  },
+  oem(o) {
+    const vendor = o("vendor")
+    const chosen = o("payment")
+    const pay = chosen.id === "aas" && !vendor.aas ? C.decision("payment").options.find((x) => x.id === "lease") : chosen
+    const support = o("support")
+    const price = vendor.price
+    const supportRate = pay.id === "aas" ? support.aasRate : support.rate
+    return {
+      values: { perf: vendor.perf, fix: support.hours, lead: pay.id === "aas" && vendor.aasLead ? vendor.aasLead : vendor.lead },
+      capex: pay.id === "buy" ? price : 0,
+      opex: price * (pay.rate + supportRate),
+      fia: [],
+      notes: pay.id !== chosen.id ? [`${vendor.name} has no as-a-service programme: this is priced as a lease.`] : [],
+      payment: pay.id,
+    }
+  },
+  dc(o) {
+    const site = o("location")
+    const cool = o("cooling")
+    const plan = o("power")
+    const station = C.byId(C.STATIONS, "dc")
+    const need = station.need * plan.needMult
+    const pue = Math.round((cool.pue + site.pueAdd) * 100) / 100
+    const delivered = Math.min(cool.coolKW, site.siteKW / pue)
+    const facilityKW = need * pue
+    return {
+      values: { capacity: (delivered / need) * 100, pue, nplus1: site.nplus1 },
+      capex: site.capex + cool.capex,
+      opex: facilityKW * site.kwPrice,
+      power: { name: "Facility power vs site supply", used: facilityKW, cap: site.siteKW, unit: "kW" },
+      fia: site.fia ? [{ rule: site.fia, text: site.fiaText, dial: "location" }] : [],
+      notes: [],
+      need,
+      speed: plan.speed,
+    }
+  },
+  compute(o) {
+    const size = o("size")
+    const chips = o("chips")
+    const storage = o("storage")
+    const station = C.byId(C.STATIONS, "compute")
+    const nodes = size.nodes
+    const usage = nodes * chips.capShare
+    const feed = Math.min(1, storage.bandwidth / (nodes * chips.io)) * 100
+    const itKW = nodes * chips.nodeKW + storage.kw
+    return {
+      values: { cycles: nodes * chips.cycles * (feed / 100), usage, feed },
+      capex: nodes * chips.nodePrice + storage.price,
+      opex: nodes * chips.nodeOpex + storage.opex,
+      power: { name: "Cluster power vs the 400 kW hall", used: itKW, cap: station.hallKW, unit: "kW" },
+      fia: usage > 100 ? [{ rule: "2.4", text: "FIA 2.4: aero CFD must stay inside the compute allowance.", dial: "size" }] : [],
+      notes: [],
+    }
+  },
 }
 
-/** Expected FIA penalty points and the Low / Med / High label shown on the ledger. */
-export function fiaRisk(penalties) {
-  const expected = penalties.reduce((sum, p) => sum + p.p * p.points, 0)
-  return { expected, label: expected < 2 ? "Low" : expected < 6 ? "Med" : "High" }
+/** Closeness (0–1) of a value to its target; 1 means in the zone. */
+function closeness(t, value) {
+  if (t.kind === "pass") return value ? 1 : 0
+  if (t.kind === "min") return value >= t.target ? 1 : clamp((value - t.lo) / (t.target - t.lo))
+  return value <= t.target ? 1 : clamp((t.hi - value) / (t.hi - t.target))
 }
 
-export function evaluate(team) {
-  const ch = choicesOf(team)
-  const o = (id) => pickedOption(id, ch)
-  const tier = C.tierFor(team)
-  const [link, path, garage, vendor, pay, support, loc, cool, plan, size, chips, storage] =
-    ["link", "path", "garage", "vendor", "payment", "support", "location", "cooling", "power", "size", "chips", "storage"].map(o)
+const raw = (stationId, choices) => PHYSICS[stationId]((id) => pickedOption(id, choices))
 
-  /* Hardware and how it is paid for. As-a-service is only offered by Dell, HPE or Lenovo. */
-  const hardware = (size.price * chips.priceMult + storage.price) * vendor.priceMult
-  const payment = pay.id === "aas" && !vendor.aas ? "lease" : pay.id
-  const payRate = C.byId(C.decision("payment").options, payment).opexRate
-  const hwCapex = payment === "buy" ? hardware : 0
-  const hwOpex = hardware * payRate
-  const supportOpex = hardware * (payment === "aas" ? support.aasRate : support.rate)
+/** Score one table's dials without hints (used by the search for hints and consequences). */
+function scoreCore(stationId, choices, budgetId) {
+  const station = C.byId(C.STATIONS, stationId)
+  const mult = C.budgetFor(budgetId).mult
+  const phys = raw(stationId, choices)
+  const targets = station.targets.map((t) => {
+    const value = phys.values[t.id]
+    const close = closeness(t, value)
+    return { id: t.id, name: t.name, kind: t.kind, target: t.target, lo: t.lo, hi: t.hi, zone: t.zone, value, display: t.fmt(value), ok: close >= 1, closeness: close }
+  })
+  const caps = [
+    { id: "capex", name: "CapEx", used: phys.capex, cap: station.caps.capex * mult, unit: "$" },
+    { id: "opex", name: "Yearly OpEx", used: phys.opex, cap: station.caps.opex * mult, unit: "$" },
+  ]
+  if (phys.power) caps.push({ id: "power", name: phys.power.name, used: phys.power.used, cap: phys.power.cap, unit: "kW" })
+  for (const c of caps) c.over = Math.max(0, c.used - c.cap)
+  const met = targets.every((t) => t.ok)
+  const breached = caps.some((c) => c.over > 0) || phys.fia.length > 0
+  const moneyCaps = caps.filter((c) => c.unit === "$")
+  const headroom = moneyCaps.reduce((sum, c) => sum + clamp((c.cap - c.used) / c.cap / FULL_HEADROOM), 0) / moneyCaps.length
+  let fit = met ? FIT_ZONE + (100 - FIT_ZONE) * headroom : FIT_OFF_MAX * (targets.reduce((sum, t) => sum + t.closeness, 0) / targets.length)
+  if (breached) fit = Math.min(fit, FIT_BREACH_MAX)
+  fit = Math.round(fit)
+  return { phys, targets, caps, met, breached, fit, inZone: met && !breached }
+}
 
-  /* Power and heat. */
-  const itKW = (size.kw * chips.kwMult + storage.kw) * plan.kwMult
-  const pue = Math.round((cool.pue + loc.pueAdd) * 100) / 100
-  const facilityKW = itKW * pue
-  const heat = chips.heat + plan.heat
-  const thermal = heat <= cool.heatLimit ? 1 : cool.heatLimit / heat
-  const roomFit = facilityKW <= loc.maxKW ? 1 : loc.maxKW / facilityKW
-  const throttle = thermal * roomFit
-  const powerOpex = facilityKW * loc.kwYear
+const capText = (c) => (c.unit === "kW" ? `${Math.round(c.used)} kW of ${Math.round(c.cap)} kW` : `${money(c.used)} of ${money(c.cap)}`)
 
-  /* Network and site. */
-  const netCapex = link.capex + path.capex + garage.capex
-  const netOpex = link.opex + path.opex + garage.opex
-  const dcCapex = cool.capex + loc.capex
+/** Every single-dial change on this table, scored. */
+function alternatives(stationId, choices, budgetId) {
+  const out = []
+  for (const d of C.decisionsFor(stationId)) {
+    for (const option of d.options) {
+      if (option.id === pickedOption(d.id, choices).id) continue
+      const next = { ...choices, [d.id]: option.id }
+      out.push({ decision: d, option, core: scoreCore(stationId, next, budgetId) })
+    }
+  }
+  return out.sort((a, b) => b.core.fit - a.core.fit)
+}
 
-  const capex = hwCapex + netCapex + dcCapex
-  const opex = C.FIXED_OPEX + hwOpex + supportOpex + powerOpex + netOpex
-  const capexOver = Math.max(0, capex - tier.capex)
-  const opexOver = Math.max(0, opex - C.OPEX_ALLOWANCE)
-  const opexState = opexOver <= 0 ? "ok" : opexOver <= C.OPEX_TOLERANCE ? "over" : opexOver <= C.OPEX_MAJOR ? "minor" : "major"
+const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1)
 
-  /* FIA penalties: each has a chance of being caught, points, and sometimes a time penalty. */
-  const penalties = []
-  const pen = (id, station, p, points, text, seconds = 0) => penalties.push({ id, station, p, points, seconds, text })
-  if (link.id === "single") pen("tunnel", "network", 0.6, 5, "Only one encrypted tunnel to the factory (FIA 5.3 asks for two on separate paths).")
-  if (garage.illegal) pen("wifi", "network", 0.8, 6, "Car data dumped over Wi-Fi instead of the wired umbilical (FIA 5.2).", 5)
-  if (loc.id === "factory") pen("nplus1", "dc", 0.5, 6, "The factory server room has no N+1 power or cooling (FIA 4.1).")
-  if (size.id === "large") pen("overrun", "compute", 0.5, 8, "The cluster ran CFD beyond the aero testing allowance (FIA 2.4).")
-  if (capexOver > 0) pen("capex", "oem", 1, 10, `CapEx is ${fmtM(capexOver)} over the ${tier.name} headroom.`)
-  if (opexState === "minor") pen("opexMinor", "oem", 1, 10, `Yearly OpEx is ${fmtM(opexOver)} over the allowance: a minor cost-cap breach.`)
-  if (opexState === "major") pen("opexMajor", "oem", 1, 25, `Yearly OpEx is ${fmtM(opexOver)} over the allowance: a major cost-cap breach.`)
-  const risk = fiaRisk(penalties)
+/** The best single-dial fix for one problem, phrased "a private cross-connect", or null. */
+function fixFor(stationId, choices, budgetId, solved) {
+  const best = alternatives(stationId, choices, budgetId).find((alt) => solved(alt.core))
+  return best ? { decision: best.decision.id, option: best.option.id, as: best.option.as, fit: best.core.fit } : null
+}
 
-  /* Performance: aero from CFD inside the allowance, strategy from AI, data and latency. */
-  const latencyMs = path.ms + loc.ms
-  const utilisation = Math.min(size.capacity, 1)
-  const capCut = opexState === "over" ? 0.95 : 1
-  const cfdEfficiency = utilisation * chips.cfd * storage.io * throttle * plan.perf
-  const aeroIndex = tier.compute * cfdEfficiency * capCut
-  const strategy = clamp(chips.strategy * size.strategy * storage.strategy * latencyFactor(latencyMs) * throttle * vendor.strategy, 0, 1.1)
+/** One table's full board: gauges, cap bars, FIA chips, FIT, one sentence and one hint. */
+export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
+  const station = C.byId(C.STATIONS, stationId)
+  const full = choicesOf({ choices })
+  const core = scoreCore(stationId, full, budgetId)
+  const today = scoreCore(stationId, C.BASELINE_CHOICES, budgetId)
+  const targets = core.targets.map((t, i) => ({ ...t, today: today.targets[i].value, todayDisplay: today.targets[i].display }))
+  const caps = core.caps.map((c, i) => {
+    const out = { ...c, today: today.caps[i].used, display: capText(c) }
+    if (c.over > 0) {
+      const fix = fixFor(stationId, full, budgetId, (alt) => alt.caps[i].over <= 0)
+      const what = c.id === "capex" ? `Over the CapEx envelope by ${money(c.over)}: the FIA would reject this budget.`
+        : c.id === "opex" ? `Over the yearly OpEx allowance by ${money(c.over)}: a breach of the $215M cost cap.`
+          : `Draws ${Math.round(c.used)} kW, more than the ${Math.round(c.cap)} kW available: it would trip and throttle.`
+      out.consequence = `${what}${fix ? ` ${capitalise(fix.as)} would bring it back.` : ""}`
+      out.fix = fix
+    }
+    return out
+  })
+  const breaches = [
+    ...caps.filter((c) => c.over > 0).map((c) => ({ kind: "cap", id: c.id, title: c.id === "power" ? "Over the power limit" : `Over the ${c.id === "capex" ? "CapEx" : "OpEx"} cap`, text: c.consequence })),
+    ...core.phys.fia.map((f) => ({ kind: "fia", id: `fia-${f.rule}`, rule: f.rule, dial: f.dial, title: `FIA ${f.rule}`, text: f.text })),
+  ]
+  const status = core.inZone ? "zone" : breaches.some((b) => b.kind === "cap") ? "over" : breaches.length ? "fia" : "off"
+  const metCount = targets.filter((t) => t.ok).length
+  const sentence = {
+    zone: () => "In the zone and inside both caps.",
+    over: () => {
+      const b = breaches.find((x) => x.kind === "cap")
+      return `${b.title}: ${b.id === "power" ? "the site would trip and throttle" : "the FIA would reject this budget"}.`
+    },
+    fia: () => `Breaks FIA ${breaches.find((b) => b.kind === "fia").rule}: a rule breach cannot win approval.`,
+    off: () => `${metCount} of ${targets.length} targets in the zone, inside the caps.`,
+  }[status]()
+
+  /* One hint: the most urgent problem, and the single dial setting that fixes it. */
+  let hint = null
+  let hintFix = null
+  const fia = breaches.find((b) => b.kind === "fia")
+  const cap = caps.find((c) => c.over > 0)
+  const worst = [...targets].filter((t) => !t.ok).sort((a, b) => a.closeness - b.closeness)[0]
+  if (fia) {
+    hintFix = fixFor(stationId, full, budgetId, (alt) => !alt.phys.fia.some((f) => f.rule === fia.rule))
+    hint = `Breaks FIA ${fia.rule}${hintFix ? `: ${hintFix.as} would fix that.` : "."}`
+  } else if (cap) {
+    hintFix = cap.fix
+    hint = cap.fix ? `${capitalise(cap.fix.as)} would bring it back under the cap line.` : cap.consequence
+  } else if (worst) {
+    const miss = station.targets.find((t) => t.id === worst.id).miss
+    const closer = (alt) => alt.targets.find((t) => t.id === worst.id).closeness
+    hintFix = fixFor(stationId, full, budgetId, (alt) => closer(alt) >= 1 && !alt.breached) || fixFor(stationId, full, budgetId, (alt) => closer(alt) >= 1)
+    if (hintFix) hint = `${miss}: ${hintFix.as} would fix that.`
+    else {
+      const step = alternatives(stationId, full, budgetId).filter((alt) => closer(alt.core) > worst.closeness).sort((a, b) => closer(b.core) - closer(a.core))[0]
+      hintFix = step ? { decision: step.decision.id, option: step.option.id, as: step.option.as, fit: step.core.fit } : null
+      hint = `${miss}: ${step ? `start with ${step.option.as}, then check the other dials` : "try another dial"}.`
+    }
+  } else {
+    const better = alternatives(stationId, full, budgetId).find((alt) => alt.core.inZone && alt.core.fit > core.fit)
+    hint = better ? `In the zone. ${capitalise(better.option.as)} would leave more budget spare (FIT ${better.core.fit}).` : "In the zone with budget to spare: ready to pitch."
+  }
 
   return {
-    choices: ch,
-    tier,
-    payment,
-    hardware,
-    ledger: { capex, capexLimit: tier.capex, capexOver, opex, opexLimit: C.OPEX_ALLOWANCE, opexOver, opexState, facilityKW, fia: risk.label, fiaExpected: risk.expected },
-    tables: {
-      network: { capex: netCapex, opex: netOpex },
-      oem: { capex: hwCapex, opex: hwOpex + supportOpex },
-      dc: { capex: dcCapex, opex: powerOpex },
-      compute: { capex: hwCapex, opex: hwOpex, price: hardware },
-    },
-    power: { itKW, pue, facilityKW, heat, thermal, roomFit, throttle, maxKW: loc.maxKW },
-    network: { latencyMs, redundant: link.id !== "single", satellite: link.id === "satellite" },
-    aero: { index: aeroIndex, efficiency: cfdEfficiency, utilisation, gain: aeroGainFor(aeroIndex) },
-    strategy,
-    penalties,
+    station: stationId,
+    budget: C.budgetFor(budgetId).id,
+    choices: Object.fromEntries(C.decisionsFor(stationId).map((d) => [d.id, full[d.id]])),
+    targets,
+    caps,
+    breaches,
+    notes: core.phys.notes,
+    met: core.met,
+    inZone: core.inZone,
+    fit: core.fit,
+    todayFit: today.fit,
+    status,
+    sentence,
+    hint,
+    hintFix,
+    payment: core.phys.payment || null,
+    speed: core.phys.speed || 1,
   }
 }
 
-/** Seconds a lap from aero. */
-export const aeroGainFor = (index) => 0.5 * Math.max(0, index)
-
-function fmtM(value) {
-  return `$${(value / 1e6).toFixed(1)}M`
+/** Every table's board for a team (missing dials sit at today's setup). */
+export function evaluate(team, budgetId = C.DEFAULT_BUDGET, stationIds = C.STATIONS.map((s) => s.id)) {
+  const choices = choicesOf(team)
+  const boards = Object.fromEntries(stationIds.map((id) => [id, boardFor(id, choices, budgetId)]))
+  const fit = Object.fromEntries(stationIds.map((id) => [id, boards[id].fit]))
+  const system = stationIds.length ? stationIds.reduce((sum, id) => sum + fit[id], 0) / stationIds.length / 100 : 0.5
+  return { choices, budget: C.budgetFor(budgetId).id, boards, fit, system, penalties: penaltiesFor(boards) }
 }
 
-/** A table counts only once its Architect approved the pitched design. */
+/** FIA and cost-cap penalties the race stewards may hand out, with the chance of being caught. */
+const FIA_PENALTY = {
+  "5.3": { id: "tunnel", p: 0.6, points: 5, seconds: 0, text: "Only one encrypted tunnel to the factory (FIA 5.3 asks for two on separate paths)." },
+  "5.2": { id: "wifi", p: 0.8, points: 6, seconds: 5, text: "Car data dumped over garage Wi-Fi instead of the wired umbilical (FIA 5.2)." },
+  "4.1": { id: "nplus1", p: 0.5, points: 6, seconds: 0, text: "Race-critical infrastructure without N+1 power and cooling (FIA 4.1)." },
+  "2.4": { id: "overrun", p: 0.5, points: 8, seconds: 0, text: "The cluster ran CFD beyond the FIA compute allowance (FIA 2.4)." },
+}
+
+function penaltiesFor(boards) {
+  const out = []
+  for (const board of Object.values(boards)) {
+    for (const b of board.breaches) {
+      if (b.kind === "fia" && FIA_PENALTY[b.rule]) out.push({ ...FIA_PENALTY[b.rule], station: board.station, dial: b.dial })
+      if (b.kind === "cap" && b.id !== "power") out.push({ id: `${board.station}-${b.id}`, station: board.station, dial: board.caps.find((c) => c.id === b.id)?.fix?.decision || C.decisionsFor(board.station)[0].id, p: 1, points: 10, seconds: 0, text: b.text.split(":")[0] + ` at ${C.byId(C.STATIONS, board.station).name}.` })
+    }
+  }
+  return out
+}
+
+/** A table counts only once its Architect approved the pitched board. */
 export function completedStations(team, stationIds = C.STATIONS.map((s) => s.id)) {
   return stationIds.filter((id) => team?.reviews?.[id]?.status === "approved")
 }
 
 /**
- * The team as the race sees it: choices only from approved tables; every other table keeps its
- * (deliberately weak) defaults. `missed` tables were never locked in; `notApproved` ones were.
+ * The team as the race sees it: dials only from approved tables; every other table races on the
+ * customer's existing setup. `missed` tables were never locked in; `notApproved` ones were.
  */
 export function effectiveTeam(team, stationIds = C.STATIONS.map((s) => s.id)) {
   const done = new Set(completedStations(team, stationIds))
@@ -137,4 +293,12 @@ export function effectiveTeam(team, stationIds = C.STATIONS.map((s) => s.id)) {
   const pending = stationIds.filter((id) => !done.has(id))
   const tried = (id) => Boolean(team?.plans?.[id] || team?.submitted?.[id] || team?.reviews?.[id])
   return { ...team, choices, approved: [...done], missed: pending.filter((id) => !tried(id)), notApproved: pending.filter(tried) }
+}
+
+/** Every combination of one table's three dials, scored (for the tests and the demo). */
+export function allBoards(stationId, budgetId = C.DEFAULT_BUDGET) {
+  const [a, b, c] = C.decisionsFor(stationId)
+  const out = []
+  for (const x of a.options) for (const y of b.options) for (const z of c.options) out.push(boardFor(stationId, { [a.id]: x.id, [b.id]: y.id, [c.id]: z.id }, budgetId))
+  return out
 }
