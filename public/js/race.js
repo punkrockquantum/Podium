@@ -3,10 +3,11 @@
  * simulated lap by lap from each team's APPROVED boards (unapproved tables race on the customer's
  * existing setup). Seeded, so the server, the race screen and every iPad replay the same race.
  *
- * Pace comes from the mean FIT of the boards the race sees. Incidents come from dial settings the
+ * Lap pace is literally the seconds per lap the team found on the boards the race sees. Incidents come from dial settings the
  * team could see on its boards, and every ticker line says who, why and what it cost.
  */
 import { PITCH_MAX, STATIONS, FINALE } from "./catalog.js"
+import { secondsTotal } from "./model.js"
 
 export const LAPS = FINALE.laps
 /** The animation on the race screen lasts this long. */
@@ -21,8 +22,6 @@ const SC_SPACING = 0.8
 const DEG_PER_LAP = 0.065
 const LAP_NOISE = 0.18
 const NOISE_CAP = 0.45
-/** Seconds a lap per unit of mean FIT (0–1) above or below 0.6. */
-const SYSTEM_PACE = 1.4
 const DRS_WINDOW = 1.0
 const DRS_GAIN = 0.25
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
@@ -160,7 +159,8 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     const strategy = strategyOf(ev)
     const incidents = carIncidents(ev, r)
     const system = Number.isFinite(entry.system) ? entry.system : systemScore(ev, stationIds)
-    const pace = BASE_LAP - SYSTEM_PACE * (system - 0.6)
+    const found = Number.isFinite(entry.seconds) ? entry.seconds : secondsTotal(ev, stationIds)
+    const pace = BASE_LAP - found
     const planned = Math.max(16, Math.min(42, Math.round(28 + r.normal() * (1.1 - Math.min(1, strategy)) * 13)))
     for (const inc of incidents) if (inc.undercut) inc.lap = Math.max(2, planned - 1)
     return {
@@ -170,6 +170,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
       ev,
       pace,
       system,
+      found,
       fit: { ...ev.fit },
       strategy,
       planned,
@@ -319,6 +320,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
       pitLoss: car.pitLoss,
       underSC: car.underSC,
       system: car.system,
+      found: car.found,
       fit: car.fit,
       strategy: car.strategy,
       racePoints,

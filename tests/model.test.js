@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as C from "../public/js/catalog.js"
-import { boardFor, evaluate, effectiveTeam, choicesOf, allBoards, FIT_ZONE, FIT_BREACH_MAX } from "../public/js/model.js"
+import { boardFor, evaluate, effectiveTeam, choicesOf, allBoards, FIT_ZONE, FIT_BREACH_MAX, secondsTotal, raceSeconds, SECONDS_MAX } from "../public/js/model.js"
 import { designSummary } from "../public/js/summary.js"
 import { buildPlan } from "../public/js/plandata.js"
 import { GOOD, IDS, approvedAt, pick } from "./routes.js"
@@ -153,4 +153,42 @@ test("only approved tables keep their dials in the race; the rest race on today'
   const ev = evaluate(raced, "standard", IDS)
   assert.ok(ev.boards.network.inZone)
   assert.equal(ev.fit.oem, boardFor("oem", C.BASELINE_CHOICES).fit, "an unapproved table scores today's FIT")
+})
+
+test("seconds found per lap: 0.00 on today's setup, 0.25–0.35 in the zone, breaches not allowed", () => {
+  for (const budget of C.BUDGET_LEVELS.map((b) => b.id)) {
+    for (const s of C.STATIONS) {
+      const today = boardFor(s.id, C.BASELINE_CHOICES, budget)
+      assert.equal(today.seconds, 0, `${s.id}/${budget}: today's setup finds nothing`)
+      for (const b of allBoards(s.id, budget)) {
+        assert.equal(typeof b.outcome, "string")
+        assert.ok(b.outcome.length > 10 && b.outcome.length < 90, `${s.id}: one plain-English outcome line (${b.outcome})`)
+        if (b.status === "over" || b.status === "fia") {
+          assert.equal(b.allowed, false)
+          assert.equal(b.seconds, 0, "a breach finds no time")
+          assert.match(b.outcome, /cap|limit|FIA/)
+        } else if (b.inZone) {
+          assert.ok(b.allowed && b.seconds >= 0.25 && b.seconds <= 0.35, `${s.id}: in-zone ${b.seconds}`)
+          assert.match(b.outcome, /^You've found 0\.\d\d s per lap and you're inside (both|every) caps?\.$/)
+        } else {
+          assert.ok(b.allowed && b.seconds >= 0 && b.seconds < 0.25, `${s.id}: off-zone ${b.seconds}`)
+        }
+      }
+    }
+  }
+  const ref = Object.fromEntries(IDS.map((id) => [id, boardFor(id, GOOD).seconds]))
+  assert.ok(Object.values(ref).every((v) => v >= 0.25), "the reference build finds time at every table")
+  assert.match(boardFor("network", { ...GOOD, path: "public" }).outcome, /strategy call arrives too late/)
+  assert.match(boardFor("compute", { ...GOOD, size: "large" }).outcome, /FIA 2\.4|cap/)
+})
+
+test("the team total adds up the boards the race sees", () => {
+  const ev = evaluate({ choices: GOOD }, "standard", IDS)
+  const sum = Math.round(IDS.reduce((a, id) => a + ev.boards[id].seconds, 0) * 100) / 100
+  assert.equal(ev.secondsTotal, sum)
+  assert.equal(secondsTotal(ev, ["network"]), ev.seconds.network)
+  assert.ok(ev.secondsTotal > 1 && ev.secondsTotal <= 4 * SECONDS_MAX)
+  const team = { choices: GOOD, reviews: approvedAt(["network", "dc"]) }
+  assert.equal(raceSeconds(team, "standard", IDS), Math.round((ev.seconds.network + ev.seconds.dc) * 100) / 100, "only approved tables count")
+  assert.equal(raceSeconds({ choices: GOOD }, "standard", IDS), 0)
 })

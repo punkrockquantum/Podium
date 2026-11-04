@@ -103,13 +103,30 @@ test("a 10-team race: every team gets a readout with boards, lessons and suggest
     assert.ok(r.wentWell.length >= 2 && r.wentWell.length <= 3, `${t.name}: 2–3 positives (${r.wentWell.length})`)
     assert.ok(r.couldDo.length >= 2 && r.couldDo.length <= 3, `${t.name}: 2–3 suggestions (${r.couldDo.length})`)
     for (const tip of r.couldDo.filter((x) => x.better)) {
-      assert.match(tip.text, / instead of .+\(FIT \d+ → \d+\)/, "each suggestion names the dial, the better setting and the FIT gain")
+      assert.match(tip.text, / instead of .+\(\d\.\d\d → \d\.\d\d s per lap, FIT \d+ → \d+\)/, "each suggestion names the dial, the better setting and the seconds and FIT gain")
       assert.match(tip.text, /How a provider helps: /)
     }
   }
   const all = readoutFor(teams[4], race, IDS)
-  assert.ok(all.wentWell.some((line) => /in the zone \(FIT \d+\)/.test(line)), "approved in-zone tables are lessons achieved")
+  assert.ok(all.wentWell.some((line) => /in the zone \(\d\.\d\d s per lap, FIT \d+\)/.test(line)), "approved in-zone tables are lessons achieved")
   const none = readoutFor(teams[0], race, IDS)
   assert.ok(none.boards.every((b) => b.raced === "today"))
   assert.ok(none.couldDo.some((tip) => /customer's existing setup/.test(tip.text)), "an unapproved team is told it raced on the existing setup")
+  assert.equal(none.result.seconds, 0, "nothing approved: 0.00 s found")
+  assert.match(none.summary, /^You found 0\.00 s per lap; the race said P\d+ of 10/)
+  const best = readoutFor(teams[0 + 5], race, IDS)
+  assert.equal(best.result.seconds, race.results.find((x) => x.id === "t6").found, "the readout quotes the seconds the race used")
+})
+
+test("the race runs on seconds found: pace is the base lap minus the team total", () => {
+  const full = entry({ id: "full", choices: GOOD, reviews: approvedAt(IDS) })
+  const half = entry({ id: "half", choices: GOOD, reviews: approvedAt(IDS.slice(0, 2)) })
+  const none = entry({ id: "none", choices: GOOD })
+  assert.ok(full.evaluation.secondsTotal > half.evaluation.secondsTotal && half.evaluation.secondsTotal > 0)
+  assert.equal(none.evaluation.secondsTotal, 0, "nothing approved races on today's setup: 0.00 s")
+  const r = runRace([full, half, none], "seconds", IDS)
+  const found = Object.fromEntries(r.results.map((x) => [x.id, x.found]))
+  assert.deepEqual(found, { full: full.evaluation.secondsTotal, half: half.evaluation.secondsTotal, none: 0 })
+  const forced = runRace([{ ...none, seconds: 1.3 }, full], "seconds", IDS)
+  assert.equal(forced.results.find((x) => x.id === "none").found, 1.3, "an explicit entry total wins")
 })

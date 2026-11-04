@@ -42,7 +42,7 @@ export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id), b
     const own = boardFor(id, choices, budget)
     const approved = isApproved(team, id)
     if (!approved && own.inZone) {
-      tips.push({ station: id, decision: null, better: null, gain: 100, text: `${station.name}: your board was in the zone (FIT ${own.fit}) but not approved, so it raced on the customer's existing setup. Lock in and pitch earlier.` })
+      tips.push({ station: id, decision: null, better: null, gain: 100, text: `${station.name}: your board was in the zone (${own.seconds.toFixed(2)} s per lap, FIT ${own.fit}) but not approved, so it raced on the customer's existing setup and found 0.00 s. Lock in and pitch earlier.` })
       continue
     }
     const change = bestChange(id, choices, budget)
@@ -54,7 +54,7 @@ export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id), b
       decision: change.decision.id,
       better: change.option.id,
       gain: change.gain + (approved ? 0 : 20) + (own.inZone ? 0 : 30),
-      text: `${station.name} · ${change.decision.name}: ${change.option.name} instead of ${change.current.name} (FIT ${own.fit} → ${change.board.fit}). ${prefix}${change.decision.why} How a provider helps: ${change.decision.how}`,
+      text: `${station.name} · ${change.decision.name}: ${change.option.name} instead of ${change.current.name} (${own.seconds.toFixed(2)} → ${change.board.seconds.toFixed(2)} s per lap, FIT ${own.fit} → ${change.board.fit}). ${prefix}${change.decision.why} How a provider helps: ${change.decision.how}`,
     })
   }
   tips.sort((a, b) => b.gain - a.gain)
@@ -77,7 +77,7 @@ export function positivesFor(team, row, race, stationIds = C.STATIONS.map((s) =>
   const choices = choicesOf(team)
   const out = []
   const lessons = stationIds.map((id) => ({ id, board: boardFor(id, choices, budget) })).filter((x) => isApproved(team, x.id) && x.board.inZone).sort((a, b) => b.board.fit - a.board.fit)
-  for (const { id, board } of lessons.slice(0, 3)) out.push(`${stationOf(id).name} in the zone (FIT ${board.fit}): ${stationOf(id).lesson.why}`)
+  for (const { id, board } of lessons.slice(0, 3)) out.push(`${stationOf(id).name} in the zone (${board.seconds.toFixed(2)} s per lap, FIT ${board.fit}): ${stationOf(id).lesson.why}`)
   for (const inc of row?.incidents || []) {
     if (out.length >= 3) break
     const text = inc.good ? GOOD_INCIDENT[inc.id] : null
@@ -104,7 +104,7 @@ export function racedBoards(team, stationIds = C.STATIONS.map((s) => s.id), budg
   return stationIds.map((id) => {
     const approved = isApproved(team, id)
     const board = boardFor(id, approved ? choices : C.BASELINE_CHOICES, budget)
-    return { station: id, name: stationOf(id).name, color: stationOf(id).color, approved, fit: board.fit, status: board.status, inZone: board.inZone, raced: approved ? "approved" : "today", targets: board.targets.map((t) => ({ name: t.name, display: t.display, ok: t.ok })) }
+    return { station: id, name: stationOf(id).name, color: stationOf(id).color, approved, choices: board.choices, board, seconds: board.seconds, allowed: board.allowed, fit: board.fit, status: board.status, inZone: board.inZone, raced: approved ? "approved" : "today", targets: board.targets.map((t) => ({ name: t.name, display: t.display, ok: t.ok })) }
   })
 }
 
@@ -112,10 +112,14 @@ export function racedBoards(team, stationIds = C.STATIONS.map((s) => s.id), budg
 export function readoutFor(team, race, stationIds = C.STATIONS.map((s) => s.id), budget = C.DEFAULT_BUDGET) {
   const row = race.results.find((r) => r.id === team.id)
   const champ = race.standings.findIndex((s) => s.id === team.id) + 1
+  const boards = racedBoards(team, stationIds, budget)
+  const seconds = Number.isFinite(row?.found) ? row.found : Math.round(boards.reduce((sum, b) => sum + b.seconds, 0) * 100) / 100
+  const said = row ? `P${row.position} of ${race.results.length}${row.position === 1 ? ", a win" : ""} and ${row.score} points` : "no result"
   return {
     team: { id: team.id, name: team.name, color: team.color },
-    result: { position: row?.position ?? null, of: race.results.length, championship: champ || null, points: row?.score ?? 0, racePoints: row?.racePoints ?? 0, tablePoints: row?.pitch ?? 0, penaltyPoints: row?.penaltyPoints ?? 0 },
-    boards: racedBoards(team, stationIds, budget),
+    summary: `You found ${seconds.toFixed(2)} s per lap; the race said ${said}.`,
+    result: { seconds, position: row?.position ?? null, of: race.results.length, championship: champ || null, points: row?.score ?? 0, racePoints: row?.racePoints ?? 0, tablePoints: row?.pitch ?? 0, penaltyPoints: row?.penaltyPoints ?? 0 },
+    boards,
     wentWell: positivesFor(team, row, race, stationIds, budget),
     couldDo: suggestionsFor(team, stationIds, budget),
     incidents: incidentsFor(team.id, race),

@@ -34,18 +34,25 @@ are a simplified, fictional version of the real regulations.
   on the same budget.
 - **Tables:** four, one iPad each, each with its own Architect: Connectivity, OEMs, Datacenter & Power
   and the CFD Supercomputer.
-- **At each table**, the team works through three tabs, which look the same on every table:
-  1. **Problem:** the customer's need in one sentence, 2–3 **targets** drawn as gauges with a green
-     zone, and the **cap lines** (CapEx, yearly OpEx, and power where it matters). A grey needle and
-     marker show **Today's setup**, what the customer has now, and it sits outside the zone.
-  2. **Tune:** three dials with three settings each. Every tap moves the needles, the cost bars and
-     the **FIT** ring at once. Each dial says *Why it matters to the F1 team* and
-     *How a provider helps*. Crossing a cap line turns the bar red and says what would happen and what would fix it.
-     The first time a board gets **In the zone**, the team sees **What you just learned**.
-  3. **Pitch:** **Lock in**, take a screenshot of the board snapshot, **Call the Architect**, pitch
-     for 30 seconds, and get **Approved** or **Sent back**.
+- **One outcome everywhere: Seconds found per lap.** Today's setup finds 0.00 s; a table in the
+  zone finds 0.25–0.35 s; a cap or FIA breach is *not allowed* and finds nothing. A team's total
+  (up to about 1.4 s) is what the host grid, the projector's **lap-time ladder**, the race and the
+  readout all show.
+- **At each table**, the team works through two tabs, which look the same on every table:
+  1. **Scenario & Tune:** a live picture of the customer's problem sits at the top (an F1 car in
+     the CFD wind tunnel, the data hall, the data path from Austin to the factory, the rack row and
+     its budget), with the problem sentence, the targets drawn on the scene, the seconds found and
+     one plain-English outcome line ("You've found 0.31 s per lap and you're inside both caps").
+     Below it: 2–3 **targets** as gauges with a green zone, the **cap lines** (CapEx, yearly OpEx,
+     and power where it matters), the **FIT** ring and three dials with three settings each. A grey
+     needle and marker show **Today's setup**. Every tap changes the scene, the needles and the bars
+     at once. Each dial says *Why it matters to the F1 team* and *How a provider helps*. The first
+     time a board gets **In the zone**, the team sees **What you just learned**. On scroll, the
+     scene shrinks to a sticky strip that keeps animating and keeps the seconds in view.
+  2. **Pitch:** **Lock in**, take a screenshot of the snapshot (the final scene and its seconds),
+     **Call the Architect**, pitch for 30 seconds, and get **Approved** or **Sent back**.
 - **Only approved boards count.** A table that was skipped or not approved races on **today's
-  setup** (the customer's existing infrastructure), and the readout says so.
+  setup** (the customer's existing infrastructure, 0.00 s), and the readout says so.
 - **The finale:** a 56-lap race animated in 30 seconds, then a readout for every team.
 
 ---
@@ -192,6 +199,32 @@ factory room cannot power the cluster) and 61 (CFD: too few cycles).
 
 ## 6. FIT, scoring and approval
 
+### The scenes and seconds found per lap
+
+Every table's board opens on a live SVG scene (`public/js/scene.js`, CSS animation plus SMIL motion
+for packets; no libraries). It is built once and updated in place on every dial, and paused when the
+tab is hidden or the device asks for reduced motion. Thumbnails (pitch preview, lock-in snapshot,
+readout) are still.
+
+| Table | The scene | What reacts |
+| --- | --- | --- |
+| CFD Supercomputer | An F1 car in a **wind tunnel**, a tunnel display and an "Aero efficiencies found this week" counter | Streamline count follows design cycles; the flow turns smooth once nodes are fed (≥ 90%) and cycles reach 10; downforce arrows grow; the display shows "Lap time −0.xx s"; over the FIA cap a red FIA 2.4 flag flashes and cycles read "not allowed". |
+| Datacenter & Power | A hall cross-section with six racks, a PUE meter and a power meter against the kW available | Rack glow follows GPU speed; throttled racks dim and read "GPUs running at 70%"; heat shimmer with air cooling (throttled or boosted); air flow, rear-door strips or liquid loops by cooling; N+1 generators appear at the colo. |
+| Connectivity | COTA on the left, the factory on the right, packets travelling between them | Packet speed follows latency ("Strategy call lands in 110 ms"); a second path appears with two paths, a satellite and a third path with satellite backup; packets drop on the public internet or a single tunnel; garage Wi-Fi flashes an FIA 5.2 flag; an edge cache appears in the garage. |
+| OEMs | A rack row, a performance bar against 2× today, CapEx and OpEx jars, a support clock and a lead-time calendar | Old servers slide out for current-generation or DGX ones; the bar fills; the jars fill by payment model (buy, lease, as-a-service); the clock reads 72 h, next day or 4 h; the delivery marker moves against the first race. |
+
+Each scene carries one label per dial (8 words or fewer), with the seconds that dial found against
+today's setting, for example "Liquid cooling: GPUs at 100% (+0.19 s)".
+
+**Seconds found per lap** (`outcomeOf` in `public/js/model.js`), per table:
+
+- a cap or FIA breach: **0.00 s, not allowed** ("Over the CapEx cap: the FIA would reject this");
+- in the zone: **0.25 + 0.10 × (FIT − 80) ÷ 20**, so 0.25–0.35 s (more spare budget, more time);
+- otherwise: **0.20 × progress from today's FIT towards 80**, so 0.00–0.20 s, with the line naming
+  the worst miss ("Latency too high: the strategy call arrives too late").
+
+The reference build finds 0.32 + 0.32 + 0.31 + 0.31 = 1.26 s per lap at Standard.
+
 **FIT (0–100)** is one number per board. Each target has a closeness from 0 to 1, where 1 means it is
 in its green zone. When every target is in the zone, FIT is 80 plus up to 20 for spare budget (the
 average share of each money cap left unused, with half a cap spare earning the full 20). Otherwise FIT
@@ -225,8 +258,11 @@ in before play ended can still be pitched and approved afterwards.
 The race is the Austin 2027 Grand Prix at the Circuit of the Americas: 56 laps animated in 30
 seconds. It is deterministic for a seed, so a rerun with the same seed gives the same result.
 
-Lap pace follows the team's **system FIT**: the average FIT of the four boards it raced (approved
-boards as tuned, the rest on today's setup). Strategy quality follows the Connectivity and CFD FITs.
+Lap pace is **96 s minus the team's seconds found per lap**: the sum over the four boards it raced
+(approved boards as tuned, the rest on today's setup at 0.00 s). Strategy quality follows the
+Connectivity and CFD FITs. Before the race the projector shows the **lap-time ladder**: one car per
+team, in its colour, as far right as its approved seconds, with four mini FIT gauges; cars slide
+and reorder as approvals land.
 Incidents follow visible dial settings, and each names its dial:
 
 - **Connectivity:** a drop on a single tunnel, public-internet jitter, a fibre cut (satellite backup
@@ -244,18 +280,20 @@ today's setup at least 95% of the time.
 
 **Each readout** shows:
 
-- the finishing position, the championship position and the points;
-- a thumbnail of each table's board with its FIT, grey if it raced on today's setup;
+- one line: "You found 1.26 s per lap; the race said P1 of 10, a win and 128 points.";
+- the seconds found, the finishing position, the championship position and the points;
+- each table's final scene thumbnail with its seconds and FIT, grey if it raced on today's setup;
 - **What went well:** 2–3 lessons achieved (each in-zone approved board says why it matters);
 - **What you could have done differently:** 2–3 suggestions, each naming the dial, the better
-  setting, the FIT gain, why it matters and how a provider helps;
+  setting, the seconds and FIT gain, why it matters and how a provider helps;
 - the incidents that affected the team.
 
 Readouts are at `/race.html?team=<id>` and are listed on the host console. In the readout phase the
 projector cycles through every team every 20 seconds; tap a team in the chooser to hold it.
 
-**Demo mode** (on the host console) walks through seven steps with sample data: problem → tune (out
-of the zone) → in the zone → pitch → approve → race → readout. It does not touch the real game.
+**Demo mode** (on the host console) walks through seven steps with sample data on the CFD table:
+scenario → tune (out of the zone, with live dials and a **Turn a dial for me** button that changes
+the wind tunnel) → in the zone → pitch → approve → race → readout. It does not touch the real game.
 
 ---
 
@@ -350,8 +388,9 @@ server.mjs               Node HTTP server: static files, JSON API, state, persis
 public/index.html        landing page            public/station.html   table iPad
 public/host.html         host / Architect console public/race.html     projector and readouts
 public/js/catalog.js     tables, problems, targets, caps, dials, budget levels, today's setup (the game data)
-public/js/model.js       boardFor(): gauges, cap bars, FIA chips, FIT, sentence and hint; evaluate() for the race
-public/js/board.js       the tuning board (SVG gauges, cap bars, FIT ring, dials), shared by every screen
+public/js/model.js       boardFor(): gauges, cap bars, FIA chips, FIT, seconds found, sentence and hint; evaluate() for the race
+public/js/scene.js       the live scenario per table (wind tunnel, hall, data path, rack row) and its labels
+public/js/board.js       the tuning board (scene, SVG gauges, cap bars, FIT ring, dials), shared by every screen
 public/js/session.js     phases and countdowns
 public/js/race.js        the seeded race and its incidents
 public/js/report.js      the podium and each team's readout
@@ -392,12 +431,15 @@ The suites (`node:test`, no dependencies) cover:
 - **Catalog and model:** 4 tables × 3 dials × 3 settings, the word limits (problem ≤ 20 words, setting
   ≤ 12, why/how ≤ 18), FIT (a cap or FIA breach caps it at 40), at least two in-zone answers per
   table inside the caps, today's setup out of the zone everywhere, the budget level moving the cap
-  lines, and the plan, summary and race reading the same board.
-- **Race:** determinism, incidents tied to dials, the balance over 200 seeds per budget level
-  (printed as `[balance]` lines), and a 10-team race with board thumbnails, lessons and suggestions
-  in every readout.
+  lines, the plan, summary and race reading the same board, seconds found (0.00 on today's setup,
+  0.25–0.35 in the zone, breaches not allowed) and the team total (approved tables only).
+- **Race:** determinism, incidents tied to dials, pace from the seconds found, the balance over 200
+  seeds per budget level (printed as `[balance]` lines), and a 10-team race with board thumbnails,
+  lessons, suggestions and "You found X s per lap" in every readout.
 - **Server:** setup and budget validation, the phases, lock-in, call, pitch, approve and send back,
   the approval gate scoring FIT, Architect scoping, rate limiting, persistence, old-save migration, a
   damaged save, and static-file safety.
-- **UX:** one vocabulary (Problem, Tune, FIT, In the zone, Today's setup…), no retired product names,
-  no tiers or old score bands, dead modules removed, the phases, the demo steps, and the landing page.
+- **UX:** one vocabulary (Scenario, Tune, Seconds found per lap, FIT, In the zone, Today's setup…),
+  the two tabs, scene labels of 8 words or fewer across every dial combination, the demo dial
+  changing the wind tunnel, no retired product names, no tiers or old score bands, dead modules
+  removed, the phases, the demo steps, and the landing page.

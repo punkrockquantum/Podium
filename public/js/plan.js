@@ -1,24 +1,31 @@
 /** The board snapshot a team gets when it locks in a table (station, host and demo mode). */
 import * as C from "./catalog.js"
+import { boardFor } from "./model.js"
 import { createBoard, miniFit, STATUS_WORD } from "./board.js"
 import { el, WORDS } from "./ui.js"
 
 /** The frozen board, read-only: the same gauges and bars the team tuned. */
 export function frozenBoard(plan, opts = {}) {
-  const view = createBoard({ stationId: plan.station, budget: plan.budget, interactive: false, showProblem: false, ...opts })
-  view.update(plan.choices, { locked: true, board: plan.board })
+  const view = createBoard({ stationId: plan.station, budget: plan.budget, interactive: false, showProblem: false, scene: "still", ...opts })
+  view.update(plan.choices, { locked: true, board: plan.board?.values ? plan.board : null })
   return view.el
 }
+
+/** The board a plan was scored on (plans locked before seconds existed are re-scored). */
+const planBoard = (plan) => (plan.board?.values ? plan.board : boardFor(plan.station, plan.choices, plan.budget))
 
 /** The one-page plan. `review` is the Architect's decision for this table, if any. */
 export function planSheet(team, plan, { review = null, screenshotPrompt = true } = {}) {
   const station = C.byId(C.STATIONS, plan.station)
   const approved = review?.status === "approved"
-  return el("div", { class: "plan-sheet", id: "planSheet" },
+  const found = planBoard(plan)
+  return el("div", { class: "plan-sheet", id: "planSheet", "data-seconds": found.seconds.toFixed(2) },
     screenshotPrompt ? el("div", { class: "shot" }, `📸 ${WORDS.screenshot}`) : null,
     el("div", { class: "meta" }, el("span", {}, `Plan ${plan.id}`), el("span", {}, `${C.budgetFor(plan.budget).name} budget`), el("span", {}, new Date(plan.at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }))),
     el("div", { class: "row plan-head" }, miniFit(plan.fit, { status: plan.status, size: 56 }),
-      el("div", {}, el("h2", {}, `${team.name} · ${station?.name || plan.station}`), el("b", {}, `${WORDS.fit} ${plan.fit} · ${STATUS_WORD[plan.status]}`), el("div", { class: "small" }, plan.sentence))),
+      el("div", {}, el("h2", {}, `${team.name} · ${station?.name || plan.station}`),
+        el("b", { class: "plan-seconds" }, found.allowed ? `${found.seconds.toFixed(2)} s per lap found` : "Not allowed: 0.00 s counts"),
+        el("b", {}, ` · ${WORDS.fit} ${plan.fit} · ${STATUS_WORD[plan.status]}`), el("div", { class: "small" }, found.outcome))),
     el("table", {}, el("tbody", {}, plan.decisions.map((d) => el("tr", {}, el("td", {}, d.name), el("td", {}, el("b", {}, d.label), el("div", { class: "small" }, d.text)))))),
     frozenBoard(plan, { showDials: false, id: null }),
     el("div", { class: "meta" },

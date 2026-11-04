@@ -44,7 +44,7 @@ function startTable() {
 
   let state = null
   let offset = 0
-  let tab = "problem"
+  let tab = "tune"
   let teamId = sessionStorage.getItem(KEY_TEAM) || ""
   let pending = {}
   let lastKey = ""
@@ -101,7 +101,7 @@ function startTable() {
     const team = currentTeam()
     if (team) await post(`/api/teams/${team.id}/checkout`, { station: station.id }).catch(() => {})
     forgetTeam()
-    tab = "problem"
+    tab = "tune"
     render(true)
   }
 
@@ -117,7 +117,7 @@ function startTable() {
     pending = {}
     tune = null
     sessionStorage.setItem(KEY_TEAM, id)
-    tab = "problem"
+    tab = "tune"
     seatHere()
     render(true)
     window.scrollTo({ top: 0 })
@@ -205,26 +205,19 @@ function startTable() {
     app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "panel step-zero" }, ...nodes)))
   }
 
-  /* ------------------------------------------------------------ 1 · Problem */
+  /* ------------------------------------------------------------ 1 · Scenario & Tune */
 
-  function renderProblem() {
-    const listening = ["lobby", "brief", "briefDone"].includes(phaseOf(state))
-    const level = C.budgetFor(budget())
-    return [
-      el("div", { class: "problem-card", style: `--table:${station.color}` },
-        el("span", { class: "problem-tag" }, `${WORDS.problem} · ${station.name}`),
-        el("p", { class: "problem-text" }, station.problem),
-        el("div", { class: "problem-facts" },
-          el("div", {}, el("b", {}, `${WORDS.todaySetup}: `), station.today),
-          el("div", {}, el("b", {}, `The ${station.architect} wants: `), station.looking),
-          el("div", {}, el("b", {}, `${level.name} budget: `), level.line))),
-      panel(`${WORDS.todaySetup}: out of the zone`, el("p", { class: "small muted" }, "Green arcs are the targets, bold lines are the caps, the grey needle is today. Your job: tune the three dials so every gauge sits in the green without crossing a cap line."),
-        staticBoard(station.id, C.BASELINE_CHOICES, budget(), { showProblem: false, showDials: false, id: "todayBoard" })),
-      el("div", { class: "actions" }, listening ? el("span", { class: "muted" }, `${WORDS.listen}: the dials open when play starts.`) : button(WORDS.startTuning, () => goTab("tune"), { kind: "primary" })),
-    ]
-  }
-
-  /* ------------------------------------------------------------ 2 · Tune */
+  /** On scroll the scene shrinks to a sticky strip that keeps animating and keeps the seconds. */
+  let compact = false
+  window.addEventListener("scroll", () => {
+    const scene = document.querySelector("#tuneBoard .scene")
+    if (!scene) return
+    const next = compact ? window.scrollY > 40 : window.scrollY > 220
+    if (next !== compact) {
+      compact = next
+      scene.classList.toggle("compact", compact)
+    }
+  }, { passive: true })
 
   function turn(team, decisionId, value) {
     if (dialsLocked(team)) return toast(banner(team)?.textContent || "The dials are locked")
@@ -251,8 +244,9 @@ function startTable() {
   }
 
   function renderTune(team) {
-    const view = createBoard({ stationId: station.id, budget: budget(), interactive: true, onDial: (d, o) => turn(currentTeam(), d, o), id: "tuneBoard" })
+    const view = createBoard({ stationId: station.id, budget: budget(), interactive: true, onDial: (d, o) => turn(currentTeam(), d, o), id: "tuneBoard", sticky: true })
     view.update(choicesNow(team), { locked: dialsLocked(team) })
+    compact = false
     const lesson = el("div", { class: "lesson-slot" })
     tune = { key: tuneKey(team), view, lesson }
     return [lesson, view.el,
@@ -261,7 +255,7 @@ function startTable() {
 
   const tuneKey = (team) => JSON.stringify([state.id, team.id, budget(), station.id])
 
-  /* ------------------------------------------------------------ 3 · Pitch */
+  /* ------------------------------------------------------------ 2 · Pitch */
 
   const act = (url, body, done) => post(url, body).then((res) => { if (done) toast(done); watcher.refresh(); return res }).catch((err) => { toast(err.message); throw err })
 
@@ -283,8 +277,8 @@ function startTable() {
     if (!d.plan) {
       const b = boardFor(station.id, choicesNow(team), budget())
       nodes.push(panel("Your board",
-        stateBanner(b.inZone ? `${WORDS.inZone} with FIT ${b.fit}: lock in and pitch it.` : `FIT ${b.fit}: ${b.sentence} You can still pitch it, but only an in-zone board scores well.`, b.inZone ? "good" : "warn"),
-        staticBoard(station.id, choicesNow(team), budget(), { showProblem: false, id: "pitchPreview" }),
+        stateBanner(b.inZone ? `${WORDS.inZone}: ${b.seconds.toFixed(2)} s per lap found (FIT ${b.fit}). Lock in and pitch it.` : `${b.outcome} You can still pitch it, but only an in-zone board scores well.`, b.inZone ? "good" : "warn"),
+        staticBoard(station.id, choicesNow(team), budget(), { id: "pitchPreview", scene: "still" }),
         el("p", { class: "small muted" }, `Lock in freezes the dials and shows your board snapshot. Take a screenshot, then call the Architect and pitch in ${PITCH_SECONDS} seconds.`),
         el("div", { class: "actions" }, button(WORDS.lockIn, () => act(`/api/teams/${team.id}/submit`, { station: station.id }, `📸 ${WORDS.screenshot}`).catch(() => {}), { kind: "primary", disabled: dialsLocked(team) }))))
     } else {
@@ -318,7 +312,7 @@ function startTable() {
       return
     }
     tune = null
-    const view = tab === "tune" ? renderTune(team) : tab === "pitch" ? renderPitch(team) : renderProblem()
+    const view = tab === "pitch" ? renderPitch(team) : renderTune(team)
     app.replaceChildren(el("div", { class: "workspace-single wide" },
       el("main", {}, tabBar(tab, goTab), el("div", { id: "bannerSlot" }, banner(team)), el("section", { id: "view", class: `view view-${tab}` }, view))))
   }

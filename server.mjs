@@ -459,7 +459,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       const raced = effectiveTeam(t, stations)
       const evaluation = evaluate(raced, state.settings.budget, stations)
       const pitch = Object.fromEntries(raced.approved.map((id) => [id, t.pitch[id] || 0]))
-      return { id: t.id, name: t.name, color: t.color, pitch, missed: raced.missed, notApproved: raced.notApproved, system: systemScore(evaluation, stations), evaluation }
+      return { id: t.id, name: t.name, color: t.color, pitch, missed: raced.missed, notApproved: raced.notApproved, system: systemScore(evaluation, stations), seconds: evaluation.secondsTotal, evaluation }
     })
     state.race = { seed, ranAt: Date.now(), ranBy: by, budget: state.settings.budget, result: runRace(entries, seed, stations) }
     state.readout = null
@@ -523,7 +523,7 @@ export function createApp({ dataDir = join(ROOT, "data"), pins = {} } = {}) {
       if (!STATION_IDS.includes(station)) return send(res, 400, { error: "Unknown table" })
       const runs = t.sims[station] || { total: 0 }
       const board = boardFor(station, choicesOf(t), state.settings.budget)
-      t.sims[station] = { total: runs.total + 1, lastFit: board.fit, inZone: board.inZone, firstZoneAt: runs.firstZoneAt || (board.inZone ? Date.now() : null), lastAt: Date.now() }
+      t.sims[station] = { total: runs.total + 1, lastFit: board.fit, lastSeconds: board.seconds, inZone: board.inZone, firstZoneAt: runs.firstZoneAt || (board.inZone ? Date.now() : null), lastAt: Date.now() }
       bump()
       return send(res, 200, { ok: true, runs: t.sims[station] })
     },

@@ -169,12 +169,13 @@ const INSTRUCTIONS = {
     title: "Teams",
     steps: [
       "Tap your team on the table's iPad. Move between the four tables freely.",
-      "Problem: the customer's need, the targets and the cap lines. The grey needle is today's setup.",
-      "Tune: turn the three dials until every gauge sits in the green zone without crossing a cap line.",
-      "FIT 80 or more means in the zone and inside the caps. Crossing a cap caps FIT at 40.",
+      "Scenario & Tune: the picture at the top is the customer's problem. Every dial changes it straight away.",
+      "The big number is seconds found per lap: 0.00 s on today's setup, up to about 0.35 s in the zone.",
+      "Turn the three dials until every gauge sits in the green zone without crossing a cap line.",
+      "Over a cap or breaking an FIA rule is not allowed: no seconds count. FIT 80+ means in the zone.",
       "Pitch: Lock in, take a screenshot of your board, then Call the Architect.",
       "Only approved boards count; the rest race on today's setup. Sent back? Retune and call again.",
-      "After the race, open your readout: lessons learned and what to do differently.",
+      "The race adds up every approved table's seconds. After it, open your readout: seconds found, lessons and what to do differently.",
     ],
   },
   architect: {
@@ -191,14 +192,14 @@ const INSTRUCTIONS = {
     steps: [
       "Set up 1–10 teams (name and colour) and one budget level for everyone: Tight, Standard or Generous.",
       "Start brief (5 min). Start play when it ends (35 min). Use +/− to adjust the clock.",
-      "Watch the approvals grid fill with FIT gauges. End play, then Run race with the race password (30 s).",
+      "Watch the approvals grid fill with seconds found and FIT gauges. End play, then Run race with the race password (30 s).",
       "Show readouts: the projector cycles through every team's readout (about 9 min).",
     ],
   },
   projector: {
     title: "Projector",
     steps: [
-      "Shows the phase, its countdown and the standings with four FIT gauges per team.",
+      "Shows the phase, its countdown and the lap-time ladder: each team's car moves right as its approved seconds land.",
       "The race plays in 30 seconds, then the podium.",
       "Readouts cycle through every team; tap a team to hold it on screen.",
     ],
@@ -243,7 +244,9 @@ export const WORDS = {
   switchTeam: "Switch team",
   startTuning: "Start tuning",
   problem: "Problem",
+  scenario: "Scenario",
   tune: "Tune",
+  secondsFound: "Seconds found per lap",
   fit: "FIT",
   inZone: "In the zone",
   overCap: "Over the cap",
@@ -297,8 +300,8 @@ export function teamChip(team) {
   return el("span", { class: "team-chip" }, el("i", { style: `background:${team.color}` }), team.name)
 }
 
-/** The fixed three-step tab bar used on every table. */
-export const STATION_TABS = [["problem", "1 · Problem"], ["tune", "2 · Tune"], ["pitch", "3 · Pitch"]]
+/** The fixed two-step tab bar used on every table. */
+export const STATION_TABS = [["tune", "1 · Scenario & Tune"], ["pitch", "2 · Pitch"]]
 export function tabBar(active, onSelect) {
   return el("nav", { class: "tabs", role: "tablist" }, STATION_TABS.map(([id, label]) =>
     el("button", { class: `tab${id === active ? " active" : ""}`, "data-tab": id, role: "tab", "aria-selected": String(id === active), onclick: () => onSelect(id) }, label)))

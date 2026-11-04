@@ -243,7 +243,80 @@ export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
     hintFix,
     payment: core.phys.payment || null,
     speed: core.phys.speed || 1,
+    values: { ...core.phys.values },
+    ...outcomeOf(station, { status, inZone: core.inZone, fit: core.fit, todayFit: today.fit, targets, caps, breaches }),
   }
+}
+
+/* ------------------------------------------------------------ seconds found per lap */
+
+/** The most one table can find: 4 tables × 0.35 s ≈ 1.4 s a lap for a perfect team. */
+export const SECONDS_MAX = 0.35
+const SECONDS_ZONE = 0.25
+const SECONDS_OFF_MAX = 0.2
+
+/** What a missed target costs the F1 team, in plain English. */
+const IMPACT = {
+  latency: "the strategy call arrives too late",
+  availability: "the pit wall goes blind when a link drops",
+  perf: "too few simulations per dollar",
+  fix: "Saturday's failure could miss Sunday's race",
+  lead: "the kit arrives after the season starts",
+  capacity: "the GPUs throttle",
+  pue: "the power bill eats the cost cap",
+  cycles: "too few aero upgrades this season",
+  feed: "nodes sit idle waiting for data",
+  nplus1: "one failure stops the cluster",
+}
+
+/** A missed target in a few words, for the outcome line. */
+const SHORT_MISS = {
+  latency: "Latency too high",
+  availability: "Link offline too often",
+  perf: "Not enough performance",
+  fix: "Fixes too slow",
+  lead: "Kit arrives too late",
+  capacity: "Not enough power and cooling",
+  pue: "PUE too high",
+  nplus1: "No N+1 backup",
+  cycles: "Too few design cycles",
+  usage: "Over the FIA compute cap",
+  feed: "Storage too slow",
+  fia: "Breaks an FIA rule",
+}
+
+const CAP_OUTCOME = {
+  capex: "Over the CapEx cap: the FIA would reject this.",
+  opex: "Over the OpEx cap: a breach of the cost cap.",
+  power: "Over the power limit: the site would trip.",
+}
+
+/**
+ * Seconds found per lap: 0.00 on today's setup, up to 0.20 s closing in on the targets, and
+ * 0.25–0.35 s in the zone (more budget spare, more time). A cap or FIA breach is not allowed and
+ * finds no time.
+ */
+function outcomeOf(station, b) {
+  const fmt = (s) => `${s.toFixed(2)} s`
+  if (b.status === "over" || b.status === "fia") {
+    const cap = b.caps.find((c) => c.over > 0)
+    const fia = b.breaches.find((x) => x.kind === "fia")
+    return { seconds: 0, allowed: false, outcome: cap ? CAP_OUTCOME[cap.id] : `Breaks FIA ${fia.rule}: not allowed, so no time counts.` }
+  }
+  if (b.inZone) {
+    const seconds = Math.round((SECONDS_ZONE + (SECONDS_MAX - SECONDS_ZONE) * clamp((b.fit - FIT_ZONE) / (100 - FIT_ZONE))) * 100) / 100
+    return { seconds, allowed: true, outcome: `You've found ${fmt(seconds)} per lap and you're inside ${b.caps.length === 2 ? "both caps" : "every cap"}.` }
+  }
+  const span = Math.max(1, FIT_ZONE - Math.min(b.todayFit, FIT_ZONE - 1))
+  const seconds = Math.round(SECONDS_OFF_MAX * clamp((b.fit - b.todayFit) / span) * 100) / 100
+  const worst = [...b.targets].filter((t) => !t.ok).sort((x, y) => x.closeness - y.closeness)[0]
+  const miss = SHORT_MISS[worst.id] || station.targets.find((t) => t.id === worst.id).miss
+  return { seconds, allowed: true, outcome: `${miss}: ${IMPACT[worst.id] || "keep tuning"}. ${fmt(seconds)} found so far.` }
+}
+
+/** Seconds found per lap across the boards the race sees. */
+export function secondsTotal(ev, stationIds = Object.keys(ev.boards || {})) {
+  return Math.round(stationIds.reduce((sum, id) => sum + (ev.boards?.[id]?.seconds || 0), 0) * 100) / 100
 }
 
 /** Every table's board for a team (missing dials sit at today's setup). */
@@ -252,7 +325,8 @@ export function evaluate(team, budgetId = C.DEFAULT_BUDGET, stationIds = C.STATI
   const boards = Object.fromEntries(stationIds.map((id) => [id, boardFor(id, choices, budgetId)]))
   const fit = Object.fromEntries(stationIds.map((id) => [id, boards[id].fit]))
   const system = stationIds.length ? stationIds.reduce((sum, id) => sum + fit[id], 0) / stationIds.length / 100 : 0.5
-  return { choices, budget: C.budgetFor(budgetId).id, boards, fit, system, penalties: penaltiesFor(boards) }
+  const seconds = Object.fromEntries(stationIds.map((id) => [id, boards[id].seconds]))
+  return { choices, budget: C.budgetFor(budgetId).id, boards, fit, seconds, secondsTotal: secondsTotal({ boards }, stationIds), system, penalties: penaltiesFor(boards) }
 }
 
 /** FIA and cost-cap penalties the race stewards may hand out, with the chance of being caught. */
@@ -293,6 +367,11 @@ export function effectiveTeam(team, stationIds = C.STATIONS.map((s) => s.id)) {
   const pending = stationIds.filter((id) => !done.has(id))
   const tried = (id) => Boolean(team?.plans?.[id] || team?.submitted?.[id] || team?.reviews?.[id])
   return { ...team, choices, approved: [...done], missed: pending.filter((id) => !tried(id)), notApproved: pending.filter(tried) }
+}
+
+/** The seconds per lap the race will use for a team: approved tables as tuned, the rest on today's setup. */
+export function raceSeconds(team, budgetId = C.DEFAULT_BUDGET, stationIds = C.STATIONS.map((s) => s.id)) {
+  return evaluate(effectiveTeam(team, stationIds), budgetId, stationIds).secondsTotal
 }
 
 /** Every combination of one table's three dials, scored (for the tests and the demo). */

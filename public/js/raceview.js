@@ -5,6 +5,8 @@ import { readoutCard } from "/js/readoutview.js"
 import { miniFit } from "/js/board.js"
 import { podiumGraphic } from "/js/podium.js"
 import { approvedStations } from "/js/approval.js"
+import { raceSeconds } from "/js/model.js"
+import { CAR_PATH, CAR_VIEWBOX } from "/js/scene.js"
 import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
 import { COTA_PATH_D, COTA_VIEWBOX, COTA_TURNS, COTA_FACTS } from "/js/cota.js"
 import { el, clock, post, watchState, gameClock, installErrorLogging, instructionsButton, button, confirmDialog, WORDS } from "/js/ui.js"
@@ -108,8 +110,62 @@ function liveRows() {
     const points = approved.reduce((sum, id) => sum + (t.pitch?.[id] || 0), 0)
     const waiting = ids.filter((id) => t.plans?.[id] && !approved.includes(id)).length
     const fits = ids.map((id) => ({ id, approved: approved.includes(id), fit: t.plans?.[id]?.fit, status: t.plans?.[id]?.status }))
-    return { t, approved: approved.length, waiting, points, fits }
-  }).sort((a, b) => b.points - a.points || b.approved - a.approved || a.t.name.localeCompare(b.t.name))
+    const seconds = raceSeconds(t, state.settings.budget, ids)
+    return { t, approved: approved.length, waiting, points, fits, seconds }
+  }).sort((a, b) => b.seconds - a.seconds || b.points - a.points || a.t.name.localeCompare(b.t.name))
+}
+
+/* The lap-time ladder: one car per team, as far right as the seconds its approved tables found. */
+const LADDER_MAX = 1.4
+const LANE_PX = 46
+let ladder = null
+
+function carIcon(color) {
+  const icon = svgNode("svg", { viewBox: CAR_VIEWBOX, class: "lane-car-svg", "aria-hidden": "true" })
+  icon.append(svgNode("path", { d: CAR_PATH, fill: color, stroke: "#000", "stroke-width": 4 }))
+  for (const [cx, cy, r] of [[300, 190, 18], [532, 188, 22]]) icon.append(svgNode("circle", { cx, cy, r, fill: "#111", stroke: "#ddd", "stroke-width": 4 }))
+  return icon
+}
+
+function buildLadder(rows) {
+  const lanes = new Map()
+  const body = el("div", { class: "ladder-body", style: `height:${rows.length * LANE_PX}px` })
+  for (const r of rows) {
+    const sec = el("b", { class: "lane-sec" })
+    const car = el("div", { class: "lane-car" }, carIcon(r.t.color))
+    const pos = el("span", { class: "lane-pos" })
+    const name = el("span", { class: "lane-name" })
+    const gauges = el("span", { class: "fits lane-gauges", "data-team": r.t.id })
+    const points = el("b", { class: "lane-pts" })
+    const lane = el("div", { class: "lane", "data-team": r.t.id, style: `--c:${r.t.color}` }, pos, name, el("div", { class: "lane-track" }, car), sec, gauges, points)
+    body.append(lane)
+    lanes.set(r.t.id, { lane, car, sec, pos, name, gauges, points, gaugeKey: "" })
+  }
+  const axis = el("div", { class: "ladder-axis" }, el("span", {}), el("span", {}),
+    el("div", { class: "axis-track" }, [0, 0.35, 0.7, 1.05, 1.4].map((v) => el("span", { style: `--p:${v / LADDER_MAX}` }, `${v.toFixed(2)} s`))), el("span", {}, "Found"), el("span", {}, "Tables"), el("span", {}, "Pts"))
+  const node = el("div", { class: "ladder", id: "lapLadder" }, axis, body)
+  ladder = { node, lanes }
+  updateLadder(rows)
+  return node
+}
+
+function updateLadder(rows) {
+  rows.forEach((r, i) => {
+    const l = ladder.lanes.get(r.t.id)
+    if (!l) return
+    l.lane.style.transform = `translateY(${i * LANE_PX}px)`
+    l.pos.textContent = String(i + 1)
+    l.name.replaceChildren(r.t.name, r.waiting ? el("small", {}, ` +${r.waiting} waiting`) : "")
+    l.car.style.setProperty("--p", Math.min(1, r.seconds / LADDER_MAX).toFixed(3))
+    l.car.dataset.seconds = r.seconds.toFixed(2)
+    l.sec.textContent = r.seconds > 0 ? `−${r.seconds.toFixed(2)} s` : "0.00 s"
+    const gaugeKey = JSON.stringify(r.fits)
+    if (gaugeKey !== l.gaugeKey) {
+      l.gaugeKey = gaugeKey
+      l.gauges.replaceChildren(...r.fits.map((f) => miniFit(f.fit, { status: f.status, grey: !f.approved, size: 30, title: `${C.byId(C.STATIONS, f.id).name}: ${Number.isFinite(f.fit) ? `FIT ${f.fit}` : "not locked in"}${f.approved ? "" : " · not approved"}` })))
+    }
+    l.points.textContent = String(r.points)
+  })
 }
 
 function runRacePanel() {
@@ -134,21 +190,17 @@ function renderWaiting() {
   sub.dataset.phase = info.id
   sub.textContent = state.teams.length ? info.line : "Waiting for the host"
   const rows = liveRows()
-  const ids = state.settings.stations
-  const key = JSON.stringify(["wait", info.id, rows.map((r) => [r.t.id, r.t.name, r.approved, r.waiting, r.points, r.fits])])
-  if (key === viewKey) return
+  const skeleton = JSON.stringify(["wait", info.id, state.teams.map((t) => [t.id, t.name, t.color])])
+  if (skeleton === viewKey && ladder && document.getElementById("lapLadder")) return updateLadder(rows)
   if (document.activeElement?.id === "racePassword") return
-  viewKey = key
-  const standings = el("div", { class: `standings-grid${rows.length > 5 ? " two" : ""}`, id: "liveStandings" }, rows.map((r, i) => el("div", { class: "standing" },
-    el("span", { class: "pos" }, i + 1), el("i", { style: `background:${r.t.color}` }),
-    el("span", { class: "name" }, r.t.name, r.waiting ? el("small", {}, ` +${r.waiting} waiting`) : null),
-    el("span", { class: "fits", "data-team": r.t.id }, r.fits.map((f) => miniFit(f.fit, { status: f.status, grey: !f.approved, size: 30, title: `${C.byId(C.STATIONS, f.id).name}: ${Number.isFinite(f.fit) ? `FIT ${f.fit}` : "not locked in"}${f.approved ? "" : " · not approved"}` }))),
-    el("b", {}, r.points))))
+  viewKey = skeleton
+  ladder = null
+  const standings = rows.length ? buildLadder(rows) : null
   app.replaceChildren(el("div", { class: "projector" },
     el("div", { class: "panel phase-panel" }, el("div", { class: "phase-name" }, info.name), el("div", { class: "phase-clock", id: "phaseClock" }, lapBox.textContent), el("p", { class: "muted" }, info.line),
       el("div", { class: "phase-steps" }, ["brief", "play", "race", "readout"].map((id) => el("div", { class: `phase-step${info.id === id || (id === "brief" && info.id === "briefDone") || (id === "race" && info.id === "ended") ? " on" : ""}` }, el("b", {}, phaseInfo(id).name))))),
-    el("div", { class: "panel" }, el("h2", {}, "Live standings"), el("p", { class: "small muted" }, "Four FIT gauges per team, one per table (grey until approved), and table points. The race adds race points × 4, minus penalties."),
-      state.teams.length ? standings : el("p", { class: "muted" }, "No teams yet.")),
+    el("div", { class: "panel" }, el("h2", {}, "Lap-time ladder"), el("p", { class: "small muted" }, `Each car sits at the seconds per lap its approved tables have found (${WORDS.todaySetup.toLowerCase()} finds 0.00 s). Four FIT gauges per team, grey until approved. The race runs on these seconds plus incidents.`),
+      standings || el("p", { class: "muted" }, "No teams yet.")),
     info.id === "ended" || info.id === "play" ? runRacePanel() : null))
 }
 

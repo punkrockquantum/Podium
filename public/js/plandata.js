@@ -19,6 +19,9 @@ export function buildPlan(team, station, { id, at, budget = C.DEFAULT_BUDGET }) 
     status: board.status,
     inZone: board.inZone,
     sentence: board.sentence,
+    seconds: board.seconds,
+    allowed: board.allowed,
+    outcome: board.outcome,
     board,
   }
 }

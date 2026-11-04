@@ -8,6 +8,7 @@
  */
 import * as C from "./catalog.js"
 import { boardFor } from "./model.js"
+import { createScene, sceneThumb } from "./scene.js"
 import { el, WORDS } from "./ui.js"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
@@ -129,9 +130,11 @@ function dial(d, { interactive, onDial }) {
  * Build a board for one table. `interactive` boards call onDial(decisionId, optionId); read-only
  * boards (Architect, plan page, demo) show the same gauges with the dials disabled.
  */
-export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive = false, onDial = null, showProblem = true, showDials = true, id = null }) {
+export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive = false, onDial = null, showProblem = true, showDials = true, id = null, scene = "live", sticky = false }) {
   const station = C.byId(C.STATIONS, stationId)
   const first = boardFor(stationId, {}, budget)
+  const sceneView = scene ? createScene(stationId, { still: scene === "still" }) : null
+  if (sceneView && sticky) sceneView.el.classList.add("scene-sticky")
   const ring = ringSvg(112, 12)
   const fitBox = el("div", { class: "fit-box" })
   const status = el("b", { class: "fit-status" })
@@ -144,7 +147,8 @@ export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive 
   const notes = el("p", { class: "board-notes small" })
   const dials = C.decisionsFor(stationId).map((d) => dial(d, { interactive, onDial }))
   const node = el("div", { class: "board", id, "data-station": stationId, style: `--table:${station.color}` },
-    showProblem ? el("div", { class: "board-problem" }, el("span", { class: "problem-tag" }, `${WORDS.problem} · ${station.name}`), el("p", {}, station.problem)) : null,
+    sceneView ? sceneView.el : null,
+    showProblem && !sceneView ? el("div", { class: "board-problem" }, el("span", { class: "problem-tag" }, `${WORDS.problem} · ${station.name}`), el("p", {}, station.problem)) : null,
     el("div", { class: "board-grid" },
       el("div", { class: "board-readings" },
         fitBox,
@@ -156,6 +160,7 @@ export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive 
   let current = first
   const update = (choices, { locked = false, board = null } = {}) => {
     current = board || boardFor(stationId, choices, budget)
+    sceneView?.update(current)
     ring.set(current.fit)
     fitBox.className = `fit-box tone-${fitTone(current.fit, current.status)}`
     status.textContent = STATUS_WORD[current.status]
@@ -189,9 +194,10 @@ export function learningCard(stationId, { onClose = null, id = "learnCard" } = {
     onClose ? el("button", { class: "btn small-btn", onclick: onClose }, "Got it") : null)
 }
 
-/** A readout thumbnail: the table, its FIT and three target ticks. */
+/** A readout thumbnail: the final scene with its seconds, the table's FIT and three target ticks. */
 export function boardThumb(rb) {
   return el("div", { class: `thumb${rb.raced === "today" ? " today" : ""}`, style: `--table:${rb.color}`, "data-station": rb.station },
+    rb.board ? sceneThumb(rb.board) : null,
     el("div", { class: "thumb-head" }, miniFit(rb.fit, { status: rb.status, grey: rb.raced === "today", size: 44 }), el("div", {}, el("b", {}, rb.name), el("span", { class: "small muted" }, rb.raced === "today" ? `Not approved: raced on ${WORDS.todaySetup.toLowerCase()}` : rb.inZone ? `Approved · ${WORDS.inZone}` : "Approved, outside the zone"))),
     el("ul", {}, rb.targets.map((t) => el("li", { class: t.ok ? "ok" : "bad" }, `${t.ok ? "✓" : "✗"} ${t.name}: ${t.display}`))))
 }
