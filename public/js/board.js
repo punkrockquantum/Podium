@@ -1,5 +1,5 @@
 /**
- * The tuning board: one component on every table, the Architect's screen, the plan page, demo mode
+ * The tuning board: one component on every table, the SA's screen, the plan page, demo mode
  * and the readout. Problem, gauges with a green target zone and a grey "today" needle, cap-line
  * bars, FIA chips, the FIT ring and three dials. SVG and CSS only.
  *
@@ -89,21 +89,28 @@ function capBar(c) {
     consequence)
   return {
     node,
-    set: (x) => {
+    /** `deciding`: choices are still open, so the consequence shows without the setting that fixes it. */
+    set: (x, { deciding = false } = {}) => {
       node.classList.toggle("over", x.over > 0)
       fill.style.width = `${(clamp(x.used / scale) * 100).toFixed(1)}%`
       text.textContent = x.unit === "kW" ? `${Math.round(x.used)} of ${Math.round(x.cap)} kW` : `${money(x.used)} of ${money(x.cap)}`
-      consequence.textContent = x.over > 0 ? x.consequence : ""
+      consequence.textContent = x.over > 0 ? (deciding && x.fix ? x.consequence.replace(/\s[^.]*would bring it back\.$/, "") : x.consequence) : ""
     },
   }
 }
 
 /* ------------------------------------------------------------ dials */
 
+/**
+ * One dial. On a table the first tap locks it (one-shot): the chosen setting shows a padlock, the
+ * others go quiet, and an open dial reads "Tap once to lock". After a rejection the previous pick
+ * shows as a "last time" ghost.
+ */
 function dial(d, { interactive, onDial }) {
   const setting = el("span", { class: "dial-setting" })
-  const buttons = d.options.map((o) => el("button", { class: "seg-btn", "data-option": o.id, role: "radio", type: "button", onclick: () => interactive && onDial?.(d.id, o.id) },
-    el("span", {}, o.name), o.id === d.today ? el("small", { class: "seg-today" }, "today") : null, o.fia ? el("small", { class: "seg-fia" }, o.illegal ? `Breaks FIA ${o.fia}` : `FIA ${o.fia}`) : null))
+  const buttons = d.options.map((o) => el("button", { class: "seg-btn", "data-option": o.id, role: "radio", type: "button", onclick: (e) => interactive && !e.currentTarget.disabled && onDial?.(d.id, o.id) },
+    el("span", {}, o.name), o.id === d.today ? el("small", { class: "seg-today" }, "today") : null, o.fia ? el("small", { class: "seg-fia" }, o.illegal ? `Breaks FIA ${o.fia}` : `FIA ${o.fia}`) : null,
+    el("small", { class: "seg-ghost" }, WORDS.lastTime), el("small", { class: "seg-lock", "aria-label": WORDS.locked }, "🔒")))
   const node = el("div", { class: "dial", "data-dial": d.id },
     el("div", { class: "dial-head" }, el("b", {}, d.name), setting),
     el("div", { class: "seg", role: "radiogroup", "aria-label": d.name }, buttons),
@@ -111,30 +118,88 @@ function dial(d, { interactive, onDial }) {
     el("p", { class: "dial-how" }, el("b", {}, `${WORDS.howProviderHelps}: `), d.how))
   return {
     node,
-    set: (value, locked) => {
+    /** `chosen`: the team has locked this dial (false shows no selection); `ghost`: last time's option id. */
+    set: (value, locked, { chosen = true, ghost = null } = {}) => {
       const o = d.options.find((x) => x.id === value)
-      setting.textContent = o?.text || ""
+      const open = interactive && !locked && !chosen
+      node.classList.toggle("chosen", chosen)
+      node.classList.toggle("open", open)
+      setting.textContent = chosen ? `🔒 ${o?.text || ""}` : open ? WORDS.tapToLock : ""
       for (const b of buttons) {
-        const on = b.dataset.option === value
+        const on = chosen && b.dataset.option === value
         b.classList.toggle("on", on)
+        b.classList.toggle("muted", chosen && !on)
+        b.classList.toggle("ghost", !chosen && ghost === b.dataset.option)
         b.setAttribute("aria-checked", String(on))
-        b.disabled = !interactive || locked
+        b.disabled = !interactive || locked || chosen
       }
     },
   }
+}
+
+/* ------------------------------------------------------------ the sticky scene */
+
+const COMPACT_AT = 220
+const EXPAND_AT = 40
+
+/**
+ * The scene on a table shrinks to a strip on scroll. It sits in a sticky dock whose height is fixed
+ * at the expanded scene's height once measured (the scene then floats inside it), so compacting
+ * changes what the strip looks like but never the height of the document: the page cannot jump or
+ * clamp under the reader's finger. The dock sticks for the whole board; its empty part lets taps through.
+ */
+function dockScene(sceneNode) {
+  const dock = el("div", { class: "scene-dock" }, sceneNode)
+  let measured = 0
+  const measure = () => {
+    if (!dock.isConnected) return
+    const wasCompact = sceneNode.classList.contains("compact")
+    sceneNode.classList.remove("compact")
+    dock.classList.remove("docked")
+    dock.style.height = ""
+    measured = dock.offsetHeight
+    if (measured) {
+      dock.style.height = `${measured}px`
+      dock.classList.add("docked")
+    }
+    if (wasCompact) sceneNode.classList.add("compact")
+  }
+  const sync = () => {
+    if (!dock.isConnected) return
+    if (!measured) measure()
+    const compact = sceneNode.classList.contains("compact")
+    const next = compact ? window.scrollY > EXPAND_AT : window.scrollY > COMPACT_AT
+    if (next !== compact) sceneNode.classList.toggle("compact", next)
+  }
+  const onResize = () => {
+    measured = 0
+    sync()
+  }
+  window.addEventListener("scroll", sync, { passive: true })
+  window.addEventListener("resize", onResize)
+  /* Measure once the dock is in the document; a board built while scrolled down compacts at once. */
+  requestAnimationFrame(sync)
+  /* Stop listening once the board leaves the page (a rebuilt view or a new team). */
+  const gone = setInterval(() => {
+    if (dock.isConnected) return
+    clearInterval(gone)
+    window.removeEventListener("scroll", sync)
+    window.removeEventListener("resize", onResize)
+  }, 2000)
+  return dock
 }
 
 /* ------------------------------------------------------------ the board */
 
 /**
  * Build a board for one table. `interactive` boards call onDial(decisionId, optionId); read-only
- * boards (Architect, plan page, demo) show the same gauges with the dials disabled.
+ * boards (SA, plan page, demo) show the same gauges with the dials disabled.
  */
 export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive = false, onDial = null, showProblem = true, showDials = true, id = null, scene = "live", sticky = false }) {
   const station = C.byId(C.STATIONS, stationId)
   const first = boardFor(stationId, {}, budget)
   const sceneView = scene ? createScene(stationId, { still: scene === "still" }) : null
-  if (sceneView && sticky) sceneView.el.classList.add("scene-sticky")
+  const sceneNode = sceneView ? (sticky ? dockScene(sceneView.el) : sceneView.el) : null
   const ring = ringSvg(112, 12)
   const fitBox = el("div", { class: "fit-box" })
   const status = el("b", { class: "fit-status" })
@@ -146,8 +211,9 @@ export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive 
   const chips = el("div", { class: "chips" })
   const notes = el("p", { class: "board-notes small" })
   const dials = C.decisionsFor(stationId).map((d) => dial(d, { interactive, onDial }))
+  const lockCount = el("div", { class: "lock-count", role: "status", "aria-live": "polite" })
   const node = el("div", { class: "board", id, "data-station": stationId, style: `--table:${station.color}` },
-    sceneView ? sceneView.el : null,
+    sceneNode,
     showProblem && !sceneView ? el("div", { class: "board-problem" }, el("span", { class: "problem-tag" }, `${WORDS.problem} · ${station.name}`), el("p", {}, station.problem)) : null,
     el("div", { class: "board-grid" },
       el("div", { class: "board-readings" },
@@ -156,28 +222,42 @@ export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive 
         el("div", { class: "caps" }, bars.map((b) => b.node)),
         chips, notes,
         el("p", { class: "legend small" }, el("i", { class: "lg-zone" }), " target zone ", el("i", { class: "lg-ghost" }), ` ${WORDS.today} `, el("i", { class: "lg-cap" }), " cap line")),
-      showDials ? el("div", { class: "board-dials" }, dials.map((d) => d.node)) : null))
+      showDials ? el("div", { class: "board-dials" }, interactive ? lockCount : null, dials.map((d) => d.node)) : null))
   let current = first
-  const update = (choices, { locked = false, board = null } = {}) => {
+  /**
+   * `chosen`: the dial ids the team has locked (omit on read-only boards, where every dial shows
+   * its setting); `ghosts`: dial id → last time's option, shown after a rejection.
+   */
+  const update = (choices, { locked = false, board = null, chosen = null, ghosts = null } = {}) => {
     current = board || boardFor(stationId, choices, budget)
     sceneView?.update(current)
     ring.set(current.fit)
     fitBox.className = `fit-box tone-${fitTone(current.fit, current.status)}`
     status.textContent = STATUS_WORD[current.status]
     sentence.textContent = current.sentence
-    hint.textContent = current.status === "zone" && !current.hint.startsWith("In the zone.") ? "" : current.hint
+    /* The fix-it hint names a dial setting, so it waits until every dial is locked: the brief is the guide while choices are open. */
+    const deciding = Boolean(chosen) && chosen.length < dials.length
+    hint.textContent = deciding ? WORDS.hintWaits : current.status === "zone" && !current.hint.startsWith("In the zone.") ? "" : current.hint
     current.targets.forEach((t, i) => gauges[i].set(t))
-    current.caps.forEach((c, i) => bars[i].set(c))
+    current.caps.forEach((c, i) => bars[i].set(c, { deciding }))
     chips.replaceChildren(...current.breaches.filter((b) => b.kind === "fia").map((b) => el("span", { class: "chip fia" }, el("b", {}, `FIA ${b.rule}`), ` ${b.text.replace(/^FIA [\d.]+:?\s*/, "")}`)))
     notes.textContent = current.notes.join(" ")
     node.classList.toggle("in-zone", current.inZone)
-    for (const d of dials) d.set(current.choices[d.node.dataset.dial], locked)
+    for (const d of dials) {
+      const id = d.node.dataset.dial
+      d.set(current.choices[id], locked, { chosen: chosen ? chosen.includes(id) : true, ghost: ghosts?.[id] ?? null })
+    }
+    if (chosen) {
+      const n = chosen.length
+      lockCount.textContent = n >= dials.length ? `🔒 ${WORDS.allLocked}` : WORDS.lockedCount(n, dials.length)
+      lockCount.classList.toggle("all", n >= dials.length)
+    }
     return current
   }
   return { el: node, update, board: () => current }
 }
 
-/** A read-only board for a frozen plan (the plan page, the Architect, demo mode). */
+/** A read-only board for a frozen plan (the plan page, the SA, demo mode). */
 export function staticBoard(stationId, choices, budget, opts = {}) {
   const view = createBoard({ stationId, budget, interactive: false, ...opts })
   view.update(choices, { locked: true })
@@ -198,6 +278,6 @@ export function learningCard(stationId, { onClose = null, id = "learnCard" } = {
 export function boardThumb(rb) {
   return el("div", { class: `thumb${rb.raced === "today" ? " today" : ""}`, style: `--table:${rb.color}`, "data-station": rb.station },
     rb.board ? sceneThumb(rb.board) : null,
-    el("div", { class: "thumb-head" }, miniFit(rb.fit, { status: rb.status, grey: rb.raced === "today", size: 44 }), el("div", {}, el("b", {}, rb.name), el("span", { class: "small muted" }, rb.raced === "today" ? `Not approved: raced on ${WORDS.todaySetup.toLowerCase()}` : rb.inZone ? `Approved · ${WORDS.inZone}` : "Approved, outside the zone"))),
+    el("div", { class: "thumb-head" }, miniFit(rb.fit, { status: rb.status, grey: rb.raced === "today", size: 44 }), el("div", {}, el("b", {}, rb.name), el("span", { class: "small muted" }, rb.story || (rb.raced === "today" ? `Not approved: raced on ${WORDS.todaySetup.toLowerCase()}` : rb.inZone ? `Approved · ${WORDS.inZone}` : "Approved, outside the zone")))),
     el("ul", {}, rb.targets.map((t) => el("li", { class: t.ok ? "ok" : "bad" }, `${t.ok ? "✓" : "✗"} ${t.name}: ${t.display}`))))
 }

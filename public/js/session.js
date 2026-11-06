@@ -5,9 +5,9 @@
 
 export const PHASES = [
   { id: "lobby", name: "Getting ready", line: "Teams choose their table. The host starts the brief." },
-  { id: "brief", name: "Brief", line: "Listen to the brief. Choices open when play starts." },
+  { id: "brief", name: "Brief", line: "Read your table's brief together. Choices open when play starts." },
   { id: "briefDone", name: "Brief over", line: "The brief is over. Play starts in a moment." },
-  { id: "play", name: "Play", line: "Tune each board into the zone, lock in and pitch to your Architect." },
+  { id: "play", name: "Play", line: "Read the brief, lock your three choices (one tap each) and pitch to your Solutions Architect." },
   { id: "ended", name: "Play over", line: "Time is up: every table is locked. The race is next." },
   { id: "race", name: "Race", line: "The Austin Grand Prix: 56 laps in 30 seconds." },
   { id: "readout", name: "Readouts", line: "Each team's result, what went well and what to do differently." },

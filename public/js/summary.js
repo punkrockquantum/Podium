@@ -1,5 +1,5 @@
 /**
- * Plain-English wording shared by the Architect's review, the plan page, demo mode and the readout,
+ * Plain-English wording shared by the SA's review, the plan page, demo mode and the readout,
  * so every screen describes a board the same way. Pure.
  */
 import * as C from "./catalog.js"
@@ -29,7 +29,7 @@ export function capLines(board) {
   ]
 }
 
-/** Everything the Architect needs in one block: the dials, the gauges, the caps and the FIT. */
+/** Everything the SA needs in one block: the dials, the gauges, the caps and the FIT. */
 export function designSummary(choices, stationId, budgetId) {
   const board = boardFor(stationId, choices, budgetId)
   return {

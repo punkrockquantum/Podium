@@ -8,30 +8,34 @@ import { runRace, systemScore } from "./race.js"
 import { buildPlan } from "./plandata.js"
 
 export const DEMO_STEPS = [
-  { id: "brief", screen: "problem", title: "1. Brief: the scenario (5 min)", narration: "Each table opens on its scenario: a live picture of the customer's problem (here, the F1 car in the CFD wind tunnel), the targets as gauges with a green zone, and the cap lines. On today's setup it finds 0.00 s per lap." },
-  { id: "tune", screen: "tuneOff", title: "2. Scenario & Tune (35 min)", narration: "Teams turn three dials and the scene reacts at once: more streamlines, bigger downforce arrows, a new lap time. Tap a dial below, or Turn a dial for me, and watch the seconds found per lap change. This board is still out of the zone." },
-  { id: "zone", screen: "tuneOn", title: "3. In the zone", narration: "Every gauge is green and every bar is under its cap line: the airflow is smooth and the tunnel shows the lap time found. In the zone is worth 0.25–0.35 s per lap; a cap or FIA breach is not allowed and finds nothing." },
-  { id: "pitch", screen: "plan", title: "4. Lock in and pitch", narration: "The team locks in, takes a screenshot of the snapshot (the scene and its seconds found), and taps Call the Architect. Their iPad shows Waiting for Architect." },
-  { id: "approve", screen: "architect", title: "5. The Architect approves", narration: "The Architect sees the same scene and board the team tuned, starts a 30-second pitch, then approves or sends it back with a reason. The approvals grid adds up each team's seconds found." },
-  { id: "race", screen: "race", title: "6. The race (30 s)", narration: "Each team's pace is the seconds it found per lap across its approved tables, plus race incidents. Every other table races on the customer's existing setup, and the incidents name the dial that caused them." },
-  { id: "readout", screen: "readout", title: "7. Readouts (9 min)", narration: "Every team gets a readout: You found X s per lap; the race said where you finished. Then each table's final scene, the lessons and what to do differently, naming the dial and how a provider helps." },
+  { id: "brief", screen: "brief", title: "1. Brief: read it together (5 min)", narration: "Each table opens on its brief: the situation, the targets with their numbers, the FIA rules and both cost caps, what each setting does, and every term explained. Tune and Pitch stay closed until the team taps “I've read the brief”, which unlocks at the end of the brief or after 30 seconds. The warning is the point: each choice locks the moment you tap it." },
+  { id: "tune", screen: "tuneOff", title: "2. Tune: one tap locks a dial (35 min)", narration: "No Lock-in button, no confirmation, no undo. The first tap on a dial locks it: the padlock appears, the other settings go quiet and the counter reads Locked 1 of 3. The scene, the gauges, the cap bars and the seconds found per lap update at once, so the team sees the consequence immediately. Tap a dial, or Lock a dial for me." },
+  { id: "zone", screen: "tuneOn", title: "3. In the zone", narration: "Every gauge is green and every bar is under its cap line: the airflow is smooth and the tunnel shows the lap time found. In the zone is worth 0.25–0.35 s per lap; a cap or FIA breach is not allowed and finds nothing. When the third dial locks, the table locks itself." },
+  { id: "pitch", screen: "plan", title: "4. All three locked: call the Solutions Architect", narration: "With all three locked the only step left is Call the Solutions Architect. The team joins the SA's queue (the SA may be busy with another team) and pitches for 30 seconds: why each choice helps the customer and how a provider helps." },
+  { id: "reject", screen: "rejected", title: "5. Rejected: adjust and call again", narration: "The SA rejected the design with a short reason, shown on the team's iPad. Only this team's dials at this table reopen, with last time's picks shown as dashed “last time” ghosts. Each new tap locks instantly; three locks make attempt 2 and the team calls the SA again. That costs time, which is the lesson." },
+  { id: "approve", screen: "architect", title: "6. The Solutions Architect approves", narration: "The SA sees the board exactly as the team locked it, which attempt this is, and the table's brief; starts the 30-second pitch; then taps Approve or Reject. The approvals grid shows every team's status, attempt and seconds found." },
+  { id: "race", screen: "race", title: "7. The race (30 s)", narration: "Each team's pace is the seconds it found per lap across its approved tables, plus race incidents. Anything not approved when time ran out, including a table still adjusting after a rejection, races on the customer's existing setup, and the incidents name the dial that caused them." },
+  { id: "readout", screen: "readout", title: "8. Readouts (9 min)", narration: "Every team gets a readout: You found X s per lap; the race said where you finished. Then each table's final scene with its story (Approved on the second attempt), the lessons and what to do differently, naming the dial and how a provider helps." },
 ]
 
 const IDS = C.STATIONS.map((s) => s.id)
 const STATION = "compute"
 /** A CFD board one dial short of the zone: sized to the FIA cap, but the office NAS starves the nodes. */
 export const NEARLY = { size: "medium", chips: "cpu", storage: "basic" }
+const REJECT_REASON = "Storage starves the nodes: the cluster waits for data"
 
-const approved = (team, ids) => Object.fromEntries(ids.map((id) => [id, { status: "approved", by: C.byId(C.STATIONS, id).architect, at: 0, points: C.tablePoints(evaluate(team, C.DEFAULT_BUDGET, IDS).fit[id], true) }]))
+const approved = (team, ids, attempt = 1) => Object.fromEntries(ids.map((id) => [id, { status: "approved", by: C.byId(C.STATIONS, id).architect, at: 0, attempt, points: C.tablePoints(evaluate(team, C.DEFAULT_BUDGET, IDS).fit[id], true) }]))
 
 function pretendTeams() {
-  const base = (i, name, choices) => ({ id: `d${i}`, name, color: C.TEAM_COLORS[i - 1], choices, touched: {}, submitted: {}, scores: {}, pitch: {}, visits: {}, sims: {}, plans: {}, reviews: {} })
+  const base = (i, name, choices) => ({ id: `d${i}`, name, color: C.TEAM_COLORS[i - 1], choices, touched: {}, submitted: {}, scores: {}, pitch: {}, visits: {}, sims: {}, plans: {}, reviews: {}, briefRead: Object.fromEntries(IDS.map((id) => [id, 1])), attempts: {}, previous: {} })
   return [
     base(1, "Demo Racing", { ...C.REFERENCE_BUILD }),
     base(2, "Pretend GP", { ...C.REFERENCE_BUILD, link: "single", cooling: "air", power: "boost" }),
     base(3, "Sample Motorsport", {}),
   ]
 }
+
+const stationChoices = (choices, id) => Object.fromEntries(C.decisionsFor(id).map((d) => [d.id, choices[d.id]]).filter(([, v]) => v !== undefined))
 
 export function buildDemo(index) {
   const i = Math.max(0, Math.min(DEMO_STEPS.length - 1, Number(index) || 0))
@@ -54,20 +58,37 @@ export function buildDemo(index) {
     teams,
     race: null,
   }
-  const at = DEMO_STEPS.findIndex((x) => x.id === "pitch")
-  if (i >= at) {
+  const at = (id) => DEMO_STEPS.findIndex((x) => x.id === id)
+  if (step.id === "pitch") {
     focus.plans[STATION] = buildPlan(focus, STATION, { id: "DEMO1", at: Date.now(), budget: C.DEFAULT_BUDGET })
+    focus.attempts[STATION] = 1
     state.queues[STATION] = [{ team: focus.id, at: Date.now() - 45_000 }]
   }
+  if (step.id === "reject") {
+    /* The first design (the office NAS starving the nodes) was rejected: the dials are open again with ghosts. */
+    focus.previous[STATION] = { ...NEARLY }
+    focus.reviews[STATION] = { status: "rejected", by: C.byId(C.STATIONS, STATION).architect, at: Date.now() - 60_000, reason: REJECT_REASON, attempt: 1 }
+    focus.attempts[STATION] = 1
+    for (const key of Object.keys(stationChoices(focus.choices, STATION))) delete focus.choices[key]
+  }
   if (step.id === "approve") {
-    state.pitches[STATION] = { team: focus.id, startedAt: Date.now(), endsAt: Date.now() + 30_000, by: C.byId(C.STATIONS, STATION).architect }
+    focus.previous[STATION] = { ...NEARLY }
+    focus.plans[STATION] = buildPlan(focus, STATION, { id: "DEMO2", at: Date.now(), budget: C.DEFAULT_BUDGET })
+    focus.attempts[STATION] = 2
+    state.pitches[STATION] = { team: focus.id, startedAt: Date.now(), endsAt: Date.now() + 30_000, by: C.byId(C.STATIONS, STATION).architect, attempt: 2 }
     state.architects[STATION] = { available: false, busyWith: focus.id }
     focus.reviews = approved(focus, ["oem", "dc"])
+    focus.attempts.oem = 1
+    focus.attempts.dc = 1
     second.reviews = approved(second, ["compute"])
+    second.attempts.compute = 1
   }
-  if (i >= DEMO_STEPS.findIndex((x) => x.id === "race")) {
-    focus.reviews = approved(focus, IDS)
+  if (i >= at("race")) {
+    focus.reviews = { ...approved(focus, IDS), [STATION]: approved(focus, [STATION], 2)[STATION] }
+    focus.attempts = { ...Object.fromEntries(IDS.map((id) => [id, 1])), [STATION]: 2 }
+    focus.previous[STATION] = { ...NEARLY }
     second.reviews = approved(second, ["network", "compute"])
+    second.attempts = { network: 1, compute: 1 }
     for (const t of [focus, second]) {
       for (const id of Object.keys(t.reviews)) {
         t.pitch[id] = t.reviews[id].points

@@ -1,4 +1,4 @@
-/** The board snapshot a team gets when it locks in a table (station, host and demo mode). */
+/** The board snapshot a team gets when its three choices lock a table (station, host and demo mode). */
 import * as C from "./catalog.js"
 import { boardFor } from "./model.js"
 import { createBoard, miniFit, STATUS_WORD } from "./board.js"
@@ -14,7 +14,7 @@ export function frozenBoard(plan, opts = {}) {
 /** The board a plan was scored on (plans locked before seconds existed are re-scored). */
 const planBoard = (plan) => (plan.board?.values ? plan.board : boardFor(plan.station, plan.choices, plan.budget))
 
-/** The one-page plan. `review` is the Architect's decision for this table, if any. */
+/** The one-page plan. `review` is the Solutions Architect's decision for this table, if any. */
 export function planSheet(team, plan, { review = null, screenshotPrompt = true } = {}) {
   const station = C.byId(C.STATIONS, plan.station)
   const approved = review?.status === "approved"
@@ -29,11 +29,11 @@ export function planSheet(team, plan, { review = null, screenshotPrompt = true }
     el("table", {}, el("tbody", {}, plan.decisions.map((d) => el("tr", {}, el("td", {}, d.name), el("td", {}, el("b", {}, d.label), el("div", { class: "small" }, d.text)))))),
     frozenBoard(plan, { showDials: false, id: null }),
     el("div", { class: "meta" },
-      el("span", {}, approved ? `Approved by ${review.by}` : `Not approved yet: until the Architect approves it, this table races on ${WORDS.todaySetup.toLowerCase()}`),
+      el("span", {}, approved ? `Approved by ${review.by}` : `Not approved yet: until the Solutions Architect approves it, this table races on ${WORDS.todaySetup.toLowerCase()}`),
       el("span", {}, `Table points: ${C.tablePoints(plan.fit, approved)} / ${C.PITCH_MAX}`)))
 }
 
-/** Plain-English summary block for the Architect: the dials, the gauges, the caps and the FIT. */
+/** Plain-English summary block for the SA: the dials, the gauges, the caps and the FIT. */
 export function summaryBlock(summary) {
   return el("div", { class: "summary-block" },
     el("ul", { class: "choices-list" }, summary.sentences.map((line) => el("li", {}, line))),
@@ -41,7 +41,7 @@ export function summaryBlock(summary) {
     el("div", { class: "score-line" }, el("b", {}, `${WORDS.fit} ${summary.fit}`), ` ${STATUS_WORD[summary.status]}. ${summary.sentence}`))
 }
 
-/** "Your Architect is free: go and pitch now" or "Queue position N". */
+/** "Your Solutions Architect is free: go and pitch now" or "Queue position N". */
 export function queueStatus(state, teamId, stationId) {
   const list = state?.queues?.[stationId] || []
   const at = list.findIndex((entry) => entry.team === teamId)

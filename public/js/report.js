@@ -6,6 +6,7 @@
  */
 import * as C from "./catalog.js"
 import { boardFor, choicesOf, pickedOption } from "./model.js"
+import { attemptWord } from "./approval.js"
 
 const stationOf = (id) => C.byId(C.STATIONS, id)
 
@@ -16,6 +17,23 @@ export function podium(race) {
 }
 
 const isApproved = (team, id) => team?.reviews?.[id]?.status === "approved"
+
+/**
+ * What happened at one table, for the readout: how many designs the team completed (attempts) and
+ * why the race used the approved board or today's setup.
+ */
+export function tableStory(team, id) {
+  const review = team?.reviews?.[id]
+  const attempts = Number(team?.attempts?.[id]) || 0
+  const plan = team?.plans?.[id]
+  const locked = C.decisionsFor(id).filter((d) => team?.choices?.[d.id] !== undefined).length
+  const nth = attemptWord(Math.max(1, attempts))
+  if (review?.status === "approved") return { attempts, status: "approved", text: attempts > 1 ? `Approved on the ${nth}: the SA rejected the earlier design and you adjusted it.` : "Approved on the first attempt." }
+  if (plan) return { attempts, status: "locked", text: `All three choices were locked (${nth}) but the SA had not approved them when time ran out, so this table raced on today's setup.` }
+  if (review?.status === "rejected") return { attempts, status: "rejected", text: `Rejected on the ${nth} ("${review.reason || "no reason given"}") and still adjusting when time ran out, so this table raced on today's setup.` }
+  if (locked) return { attempts, status: "draft", text: `Only ${locked} of 3 choices were locked when time ran out, so this table raced on today's setup.` }
+  return { attempts, status: "none", text: "Not played: this table raced on today's setup." }
+}
 
 /** The best single-dial change on one board: in the zone first, then the highest FIT. */
 function bestChange(stationId, choices, budget) {
@@ -42,7 +60,9 @@ export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id), b
     const own = boardFor(id, choices, budget)
     const approved = isApproved(team, id)
     if (!approved && own.inZone) {
-      tips.push({ station: id, decision: null, better: null, gain: 100, text: `${station.name}: your board was in the zone (${own.seconds.toFixed(2)} s per lap, FIT ${own.fit}) but not approved, so it raced on the customer's existing setup and found 0.00 s. Lock in and pitch earlier.` })
+      const story = tableStory(team, id)
+      const why = story.status === "rejected" ? "rejected by the SA and not re-pitched in time" : "not approved"
+      tips.push({ station: id, decision: null, better: null, gain: 100, text: `${station.name}: your board was in the zone (${own.seconds.toFixed(2)} s per lap, FIT ${own.fit}) but ${why}, so it raced on the customer's existing setup and found 0.00 s. Lock your three choices and call the SA earlier.` })
       continue
     }
     const change = bestChange(id, choices, budget)
@@ -59,7 +79,7 @@ export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id), b
   }
   tips.sort((a, b) => b.gain - a.gain)
   const out = tips.slice(0, 3)
-  if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Pitch earlier: an approved board with time to spare leaves room to tune further if you are sent back." })
+  if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Call the SA earlier: a rejection costs time, and the SA may be busy with another team." })
   if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Every board was in the zone: next time, look for the setting that leaves the most budget spare." })
   return out
 }
@@ -84,7 +104,9 @@ export function positivesFor(team, row, race, stationIds = C.STATIONS.map((s) =>
     if (text && !out.includes(text)) out.push(text)
   }
   const approved = stationIds.filter((id) => isApproved(team, id))
-  if (out.length < 2 && approved.length) out.push(`${approved.length} of ${stationIds.length} boards approved by their Architects.`)
+  const recovered = approved.filter((id) => (Number(team?.attempts?.[id]) || 0) > 1)
+  if (out.length < 3 && recovered.length) out.push(`${stationOf(recovered[0]).name}: rejected, adjusted and approved on the ${attemptWord(team.attempts[recovered[0]])}.`)
+  if (out.length < 2 && approved.length) out.push(`${approved.length} of ${stationIds.length} boards approved by their Solutions Architects.`)
   if (out.length < 3 && row?.underSC) out.push("Your pit wall reacted to the Safety Car and pitted cheaply.")
   if (out.length < 3 && row && !row.caught.length) out.push("A clean FIA audit: no penalty points.")
   if (out.length < 2 && row?.position && row.position < row.grid) out.push(`Gained ${row.grid - row.position} place${row.grid - row.position === 1 ? "" : "s"} from the grid.`)
@@ -104,7 +126,8 @@ export function racedBoards(team, stationIds = C.STATIONS.map((s) => s.id), budg
   return stationIds.map((id) => {
     const approved = isApproved(team, id)
     const board = boardFor(id, approved ? choices : C.BASELINE_CHOICES, budget)
-    return { station: id, name: stationOf(id).name, color: stationOf(id).color, approved, choices: board.choices, board, seconds: board.seconds, allowed: board.allowed, fit: board.fit, status: board.status, inZone: board.inZone, raced: approved ? "approved" : "today", targets: board.targets.map((t) => ({ name: t.name, display: t.display, ok: t.ok })) }
+    const story = tableStory(team, id)
+    return { station: id, name: stationOf(id).name, color: stationOf(id).color, approved, choices: board.choices, board, seconds: board.seconds, allowed: board.allowed, fit: board.fit, status: board.status, inZone: board.inZone, raced: approved ? "approved" : "today", attempts: story.attempts, story: story.text, targets: board.targets.map((t) => ({ name: t.name, display: t.display, ok: t.ok })) }
   })
 }
 

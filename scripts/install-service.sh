@@ -4,9 +4,9 @@
 # Usage: sh scripts/install-service.sh        (re-run after moving the folder or changing Node)
 #
 # PINs: HOST_PIN, LEADER_PIN and RACE_PIN are written into the LaunchAgent's EnvironmentVariables.
-# Each is taken from the environment (HOST_PIN=... sh scripts/install-service.sh), otherwise asked for
-# interactively (hidden input); an empty answer or a non-interactive run falls back to the rehearsal
-# default with a warning. PINs: 1-64 letters, digits, "_" or "-".
+# The game uses one PIN, SKO27, for the host, the Solutions Architects and the race. Each variable is
+# taken from the environment if set (HOST_PIN=... sh scripts/install-service.sh), otherwise it is
+# SKO27. PINs: 1-64 letters, digits, "_" or "-".
 set -euo pipefail
 
 LABEL="com.podium.server"
@@ -42,17 +42,14 @@ fi
 
 mkdir -p "$LOGS" "$HOME/Library/LaunchAgents"
 
-# pin_for NAME DEFAULT LABEL: the environment value, an interactive answer, or the rehearsal default.
+# The one event PIN: host, Solutions Architects and the race all use it unless the environment says otherwise.
+EVENT_PIN="SKO27"
+
+# pin_for NAME: the environment value if set, otherwise the event PIN. Nothing is asked
+# interactively, so the installer is safe to run unattended and always gives SKO27.
 pin_for() {
-  local name="$1" fallback="$2" label="$3" value="${!1:-}"
-  if [ -z "$value" ] && [ -t 0 ]; then
-    read -r -s -p "$label (Enter for the rehearsal default): " value </dev/tty || value=""
-    echo >&2
-  fi
-  if [ -z "$value" ]; then
-    echo "WARNING: $name not set; using the rehearsal default. Set it before a real event." >&2
-    value="$fallback"
-  fi
+  local name="$1" value="${!1:-}"
+  [ -z "$value" ] && value="$EVENT_PIN"
   if ! [[ "$value" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
     echo "$name must be 1-64 letters, digits, '_' or '-'." >&2
     exit 1
@@ -60,9 +57,9 @@ pin_for() {
   printf '%s' "$value"
 }
 
-HOST_PIN_VALUE="$(pin_for HOST_PIN 2027 "Host PIN")"
-LEADER_PIN_VALUE="$(pin_for LEADER_PIN 1950 "Table leader PIN")"
-RACE_PIN_VALUE="$(pin_for RACE_PIN SKO27 "Race password")"
+HOST_PIN_VALUE="$(pin_for HOST_PIN)"
+LEADER_PIN_VALUE="$(pin_for LEADER_PIN)"
+RACE_PIN_VALUE="$(pin_for RACE_PIN)"
 
 if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true

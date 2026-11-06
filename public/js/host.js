@@ -1,15 +1,16 @@
 import * as C from "/js/catalog.js"
 import { boardFor, raceSeconds } from "/js/model.js"
-import { miniFit, staticBoard, learningCard, createBoard } from "/js/board.js"
+import { miniFit, learningCard, createBoard } from "/js/board.js"
 import { planSheet, summaryBlock, frozenBoard } from "/js/plan.js"
 import { designSummary } from "/js/summary.js"
-import { designStatus, approvalGrid, STATUS_LABEL, STATUS_ORDER, PITCH_SECONDS, SEND_BACK_REASON_MAX } from "/js/approval.js"
+import { designStatus, approvalGrid, lockedDials, ghostsAt, STATUS_LABEL, STATUS_ORDER, PITCH_SECONDS, REJECT_REASON_MAX } from "/js/approval.js"
 import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
 import { DEMO_STEPS, buildDemo } from "/js/demo.js"
 import { readoutFor } from "/js/report.js"
 import { readoutCard } from "/js/readoutview.js"
 import { podiumGraphic } from "/js/podium.js"
-import { el, clock, post, login, logout, session, watchState, gameClock, installErrorLogging, instructionsButton, confirmDialog, button, teamChip, stateBanner, WORDS } from "/js/ui.js"
+import { briefView } from "/js/briefview.js"
+import { el, clock, post, login, logout, session, watchState, gameClock, installErrorLogging, instructionsButton, confirmDialog, button, teamChip, stateBanner, WORDS, patchSlot, replaceKeepingScroll, setText } from "/js/ui.js"
 
 installErrorLogging("host")
 
@@ -18,11 +19,12 @@ const FEED_POLL_MS = 2000
 let state = null
 let offset = 0
 let setupDraft = null
-let lastKey = ""
+/** Which screen the page currently shows: login, demo, control, architect or reconnecting. */
+let screen = ""
 let presence = { now: Date.now(), presence: {} }
 let demoIndex = null
 let loginMode = "host"
-/** The host can act as the Architect of one table; an Architect always reviews the table chosen at login. */
+/** The host can act as the Solutions Architect (SA) of one table; an SA always reviews the table chosen at login. */
 let hostLeads = null
 let selectedTeam = null
 
@@ -54,13 +56,12 @@ async function act(url, body, done) {
   try {
     const next = await post(url, body)
     if (next?.clock) state = next
-    lastKey = ""
     watcher.refresh()
     render(true)
     if (done) toast(done)
   } catch (err) {
     toast(err.message)
-    if (/Host PIN|Architect PIN/.test(err.message)) {
+    if (/Host PIN|SA PIN/.test(err.message)) {
       logout()
       render(true)
     }
@@ -71,22 +72,36 @@ const shortName = (id) => C.byId(C.STATIONS, id)?.name.split(/[ &]/)[0] || id
 const ago = (ms) => (ms < 60_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : `${Math.floor(ms / 60_000)} min`)
 const hhmm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 const panel = (cls, ...children) => el("div", { class: `panel ${cls || ""}` }, ...children)
+/** A time that keeps ticking in place ("12 s ago", "waiting 40 s") without rebuilding its panel. */
+const ticking = (since, fmt, cls = "") => el("span", { class: `tick ${cls}`, "data-since": since, "data-fmt": fmt }, tickText(since, fmt, Date.now()))
+const tickText = (since, fmt, now) => (fmt === "waiting" ? `waiting ${ago(now - since)}` : `${ago(now - since)} ago`)
+
+/**
+ * Rebuild one panel only when its content key changes, and never while the user is typing in it:
+ * polls, presence and the clock then leave the page (and its scroll position) exactly where it is.
+ */
+function slot(id, key, build) {
+  const node = document.getElementById(id)
+  if (!node) return
+  if (node.dataset.key && node.contains(document.activeElement) && document.activeElement !== document.body) return
+  patchSlot(node, JSON.stringify(key), build)
+}
 
 /* ------------------------------------------------------------ login */
 
 function renderLogin() {
   const architect = loginMode === "architect"
-  const input = el("input", { type: "password", inputmode: "numeric", placeholder: architect ? "Architect PIN" : "Host PIN", autocomplete: "off", id: "pinInput" })
+  const input = el("input", { type: "password", inputmode: "numeric", placeholder: architect ? "SA PIN" : "Host PIN", autocomplete: "off", id: "pinInput" })
   const stations = (state?.settings?.stations || C.STATIONS.map((s) => s.id)).map((id) => C.byId(C.STATIONS, id))
   const table = el("select", { class: "field", id: "architectTable" }, el("option", { value: "" }, "Pick your table"), stations.map((s) => el("option", { value: s.id }, s.name)))
   const name = el("input", { type: "text", placeholder: "Your name (optional)", maxlength: 40, id: "architectName" })
   const go = async () => {
-    if (architect && !table.value) return toast("Pick the table you are the Architect for")
+    if (architect && !table.value) return toast("Pick the table you are the Solutions Architect for")
     try {
       const role = await login(input.value, architect ? table.value : "", architect ? name.value : "")
       if (!architect && role !== "host") {
         logout()
-        return toast("That is the Architect PIN: choose Architect")
+        return toast(`That is the SA PIN: choose ${WORDS.solutionsArchitect}`)
       }
       selectedTeam = null
       render(true)
@@ -97,9 +112,9 @@ function renderLogin() {
   input.addEventListener("keydown", (e) => e.key === "Enter" && go())
   const tab = (mode, label) => el("button", { class: `btn small-btn${loginMode === mode ? " primary" : ""}`, "data-login": mode, onclick: () => { loginMode = mode; render(true) } }, label)
   app.replaceChildren(el("div", { class: "pin-box panel" },
-    el("div", { class: "row" }, tab("host", "Session host"), tab("architect", "Architect")),
-    el("h2", {}, architect ? "Architect" : "Host PIN"),
-    architect ? el("p", { class: "small muted" }, "Review, pitch and approve designs for your table. You only see your table.") : null,
+    el("div", { class: "row" }, tab("host", "Session host"), tab("architect", WORDS.solutionsArchitect)),
+    el("h2", {}, architect ? WORDS.solutionsArchitect : "Host PIN"),
+    architect ? el("p", { class: "small muted" }, "Review, hear the pitch and approve or reject designs for your table. You only see your table.") : null,
     input, architect ? table : null, architect ? name : null,
     el("button", { class: "btn primary", onclick: go, id: "loginGo" }, architect ? "Open my table" : "Enter race control"), instructionsButton(architect ? "architect" : "host")))
 }
@@ -120,10 +135,18 @@ function budgetSelect(value, onChange, id) {
 
 const budgetLines = () => el("ul", { class: "tier-lines small" }, C.BUDGET_LEVELS.map((b) => el("li", {}, el("b", {}, b.name), `: ${b.line}`)))
 
+/** The setup form's draft: the current game's teams and budget, or the defaults. */
+function ensureDraft() {
+  if (!setupDraft) {
+    setupDraft = state?.teams?.length
+      ? { ...defaultSetup(), count: state.teams.length, budget: state.settings.budget || C.DEFAULT_BUDGET, teams: [...state.teams.map((t) => ({ name: t.name })), ...defaultSetup().teams.slice(state.teams.length)], stations: [...state.settings.stations] }
+      : defaultSetup()
+  }
+  return setupDraft
+}
+
 function renderSetup() {
-  const d = setupDraft || (setupDraft = state?.teams?.length
-    ? { ...defaultSetup(), count: state.teams.length, budget: state.settings.budget || C.DEFAULT_BUDGET, teams: [...state.teams.map((t) => ({ name: t.name })), ...defaultSetup().teams.slice(state.teams.length)], stations: [...state.settings.stations] }
-    : defaultSetup())
+  const d = ensureDraft()
   const rows = d.teams.slice(0, d.count).map((t, i) => {
     const name = el("input", { type: "text", value: t.name, maxlength: 32, "data-team-name": i })
     name.addEventListener("input", () => { t.name = name.value })
@@ -223,7 +246,7 @@ function cellBoard(s, team, id, d) {
     const seconds = Number.isFinite(d.plan.board?.seconds) ? d.plan.board.seconds : boardFor(id, d.plan.choices, d.plan.budget).seconds
     return { fit: d.plan.fit, status: d.plan.status, seconds }
   }
-  if (d.status === "none") return null
+  if (d.status === "none" || d.status === "rejected") return null
   const b = boardFor(id, team.choices, s.settings.budget)
   return { fit: b.fit, status: b.status, seconds: b.seconds }
 }
@@ -233,7 +256,18 @@ function fitCell(s, team, id, d) {
   return el("div", { class: "fit-cell", "data-cell": `${team.id}-${id}` },
     miniFit(b ? b.fit : NaN, { status: b?.status, grey: d.status !== "approved", title: b ? `FIT ${b.fit}` : "Not started" }),
     el("span", { class: `cell-sec${d.status === "approved" ? " on" : ""}` }, b ? `${b.seconds.toFixed(2)} s` : "—"),
-    el("span", { class: `status-pill st-${d.status}`, title: d.label }, STATUS_LABEL[d.status]))
+    el("span", { class: `status-pill st-${d.status}`, title: d.label }, STATUS_LABEL[d.status]),
+    d.attempts ? el("span", { class: "attempt-tag", "data-attempt": d.attempts }, WORDS.attempt(d.attempts)) : null)
+}
+
+/** What the approvals grid shows, for its content key: statuses, attempts, FIT and seconds. */
+function approvalsKey(s) {
+  const grid = approvalGrid(s)
+  return grid.rows.map((row) => [row.team.id, row.team.name, ...grid.stations.map((id) => {
+    const d = row.cells[id]
+    const b = cellBoard(s, row.team, id, d)
+    return [d.status, d.attempts, d.plan?.id, b?.fit, b?.seconds]
+  })])
 }
 
 function renderApprovals(s) {
@@ -246,26 +280,36 @@ function renderApprovals(s) {
     el("td", { class: "team-seconds", "data-team": row.team.id }, el("b", {}, `${raceSeconds(row.team, s.settings.budget, grid.stations).toFixed(2)} s`))))
   const counts = STATUS_ORDER.filter((st) => grid.counts[st]).map((st) => el("span", { class: `status-pill st-${st}` }, `${STATUS_LABEL[st]} ${grid.counts[st]}`))
   return panel("wide", el("h2", {}, "Approvals"),
-    el("p", { class: "small muted" }, `Each cell shows the board's seconds found per lap and FIT (grey until approved). ${WORDS.secondsFound} adds up approved tables only: that is what the race uses; the rest race on ${WORDS.todaySetup.toLowerCase()}. ${grid.counts.approved} of ${grid.total} approved · ${C.budgetFor(s.settings.budget).name} budget.`),
+    el("p", { class: "small muted" }, `Each cell shows the board's seconds found per lap, FIT (grey until approved) and which attempt the team is on. ${WORDS.secondsFound} adds up approved tables only: that is what the race uses; the rest race on ${WORDS.todaySetup.toLowerCase()}. ${grid.counts.approved} of ${grid.total} approved · ${C.budgetFor(s.settings.budget).name} budget.`),
     el("div", { class: "row", id: "approvalCounts" }, counts),
     el("div", { class: "table-scroll", id: "approvalsGrid" }, el("table", { class: "grid approvals" }, el("thead", {}, head), el("tbody", {}, rows))))
 }
 
+/** One team's row of the live feed, minus the ticking "seen" time. */
+function feedRow(s, pres, t) {
+  const p = pres.presence?.[t.id]
+  const seat = Object.entries(s.tables || {}).find(([, x]) => x.team === t.id)
+  const where = p ? `${shortName(p.station)} · ${p.step}` : seat ? shortName(seat[0]) : "—"
+  const queued = Object.entries(s.queues || {}).filter(([, list]) => list.some((e) => e.team === t.id)).map(([id]) => shortName(id))
+  const sims = Object.entries(t.sims || {}).filter(([, r]) => Number.isFinite(r.lastFit)).sort((a, b) => b[1].lastAt - a[1].lastAt)[0]
+  const latest = sims ? `${Number.isFinite(sims[1].lastSeconds) ? `${sims[1].lastSeconds.toFixed(2)} s · ` : ""}FIT ${sims[1].lastFit}${sims[1].inZone ? " ✓" : ""} ${shortName(sims[0])}` : "—"
+  return { where, latest, queued: queued.length ? queued.join(", ") : "—", seenAt: p?.at || null }
+}
+
+const feedKey = (s, pres) => s.teams.map((t) => {
+  const r = feedRow(s, pres, t)
+  return [t.id, t.name, r.where, r.latest, r.queued, r.seenAt == null ? null : true]
+})
+
 function renderFeed(s, pres) {
-  const now = pres.now || Date.now()
   const rows = s.teams.map((t) => {
-    const p = pres.presence?.[t.id]
-    const seat = Object.entries(s.tables || {}).find(([, x]) => x.team === t.id)
-    const where = p ? `${shortName(p.station)} · ${p.step}` : seat ? shortName(seat[0]) : "—"
-    const seen = p ? now - p.at : null
-    const queued = Object.entries(s.queues || {}).filter(([, list]) => list.some((e) => e.team === t.id)).map(([id]) => shortName(id))
-    const sims = Object.entries(t.sims || {}).filter(([, r]) => Number.isFinite(r.lastFit)).sort((a, b) => b[1].lastAt - a[1].lastAt)[0]
+    const r = feedRow(s, pres, t)
     return el("tr", {},
       el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${t.color}` }), el("b", {}, t.name)),
-      el("td", { class: "small" }, where),
-      el("td", { class: "small" }, sims ? `${Number.isFinite(sims[1].lastSeconds) ? `${sims[1].lastSeconds.toFixed(2)} s · ` : ""}FIT ${sims[1].lastFit}${sims[1].inZone ? " ✓" : ""} ${shortName(sims[0])}` : "—"),
-      el("td", { class: "small" }, queued.length ? queued.join(", ") : "—"),
-      el("td", { class: `small ${seen == null ? "muted" : seen > 30_000 ? "dead" : seen > 12_000 ? "stale" : ""}` }, seen == null ? "—" : `${ago(seen)} ago`))
+      el("td", { class: "small" }, r.where),
+      el("td", { class: "small" }, r.latest),
+      el("td", { class: "small" }, r.queued),
+      el("td", { class: "small" }, r.seenAt == null ? el("span", { class: "muted" }, "—") : ticking(r.seenAt, "ago", "seen")))
   })
   return panel("", el("h2", {}, "Live feed"),
     el("div", { class: "table-scroll" }, el("table", { class: "grid feed" }, el("thead", {}, el("tr", {}, ["Team", "Now", "Latest board", "Queued", "Seen"].map((h) => el("th", {}, h)))), el("tbody", {}, rows))))
@@ -279,7 +323,7 @@ function renderQueues(s) {
     return el("div", { class: "queue-table" },
       el("h3", {}, `${C.byId(C.STATIONS, id).name} `, el("span", { class: arch?.available ? "done small" : "muted small" }, arch?.available ? "· Available" : "· Busy"),
         s.pitches?.[id] ? el("span", { class: "small warn-text" }, ` · pitching: ${s.teams.find((x) => x.id === s.pitches[id].team)?.name || ""}`) : null,
-        button("Act as Architect", () => { hostLeads = id; selectedTeam = null; render(true) }, { small: true })),
+        button(`Act as ${WORDS.sa}`, () => { hostLeads = id; selectedTeam = null; render(true) }, { small: true })),
       list.length ? el("div", { class: "queue-list" }, list.map((entry, i) => {
         const t = s.teams.find((x) => x.id === entry.team)
         return el("div", { class: "q" }, el("b", {}, `${i + 1}.`), el("span", { style: `color:${t?.color};font-weight:800` }, t?.name || entry.team), el("span", { class: "muted small" }, `since ${hhmm(entry.at)}`),
@@ -306,10 +350,37 @@ function renderLinks() {
     el("div", { style: "display:grid;gap:6px" }, C.STATIONS.filter((s) => state.settings.stations.includes(s.id)).map((s) => el("a", { href: `/station.html?station=${s.id}`, target: "_blank" }, `${s.name}: ${location.origin}/station.html?station=${s.id}`))))
 }
 
-/* ------------------------------------------------------------ Architect */
+function toolbar() {
+  return panel("row wide", instructionsButton("host"),
+    button("Demo mode", () => { demoIndex = 0; render(true) }, { small: true }),
+    button("Restart the experience", restartExperience, { small: true, kind: "danger" }),
+    button("Log out", () => { logout(); render(true) }, { small: true }),
+    el("span", { class: "muted small" }, `${DEMO_STEPS.length}-step demo · ${state.teams.length} team${state.teams.length === 1 ? "" : "s"}`))
+}
 
-/** One table's Architect view: availability, queue, the plain-English design and the 30-second pitch. */
-function renderArchitect(stationId) {
+/** Race control: one slot per panel, each rebuilt only when what it shows changes. */
+function renderControl(force) {
+  const s = state
+  if (force || screen !== "control" || !document.getElementById("raceControl")) {
+    screen = "control"
+    replaceKeepingScroll(app, el("div", { class: "host-grid", id: "raceControl" }, ["toolbarSlot", "sessionSlot", "approvalsSlot", "readoutsSlot", "feedSlot", "queuesSlot", "setupSlot", "linksSlot"].map((id) => el("div", { id, class: "slot" }))))
+  }
+  const has = s.teams.length > 0
+  ensureDraft()
+  slot("toolbarSlot", [s.teams.length], toolbar)
+  slot("sessionSlot", has ? [phaseOf(s), s.clock.status, s.settings, s.race?.seed, s.readout?.endsAt] : null, () => (has ? renderSession() : null))
+  slot("approvalsSlot", has ? [approvalsKey(s), s.settings.budget, s.settings.stations] : null, () => (has ? renderApprovals(s) : null))
+  slot("readoutsSlot", has ? [s.race?.seed, s.teams.length] : null, () => (has ? renderReadouts() : null))
+  slot("feedSlot", has ? feedKey(s, presence) : null, () => (has ? renderFeed(s, presence) : null))
+  slot("queuesSlot", has ? [s.queues, s.architects, s.pitches, s.settings.stations, s.teams.map((t) => t.name)] : null, () => (has ? renderQueues(s) : null))
+  slot("setupSlot", [s.teams.map((t) => t.name), s.settings.budget, s.settings.stations, setupDraft?.count], renderSetup)
+  slot("linksSlot", has ? [s.settings.stations] : null, () => (has ? renderLinks() : null))
+}
+
+/* ------------------------------------------------------------ Solutions Architect */
+
+/** One table's SA view: availability, the queue, the design as the team locked it, the brief and the 30-second pitch. */
+function renderArchitect(stationId, force) {
   const s = state
   const station = C.byId(C.STATIONS, stationId)
   const me = session()
@@ -322,67 +393,81 @@ function renderArchitect(stationId) {
   if (!selectedTeam || !byId(selectedTeam)) selectedTeam = pitch?.team || queue[0]?.team || null
   const go = (url, body, done) => act(url, { station: stationId, by, ...body }, done)
 
-  const header = panel("wide architect-head",
+  if (force || screen !== `architect:${stationId}` || !document.getElementById("architectView")) {
+    screen = `architect:${stationId}`
+    replaceKeepingScroll(app, el("div", { class: "host-grid architect-grid", id: "architectView" }, ["saHead", "saPitch", "saDetail", "saQueue", "saTeams", "saBrief"].map((id) => el("div", { id, class: "slot" }))))
+  }
+
+  slot("saHead", [stationId, arch.available, Boolean(pitch), by], () => panel("wide architect-head",
     el("div", { class: "row" },
       el("h2", { style: `color:${station.color};margin:0` }, `${station.name} · ${station.architect}`),
-      el("span", { class: "muted" }, me.role === "architect" ? `Signed in as ${by}` : "Host acting as Architect"),
+      el("span", { class: "muted" }, me.role === "architect" ? `Signed in as ${by}` : `Host acting as ${WORDS.solutionsArchitect}`),
       el("span", { style: "flex:1" }),
       el("button", { class: `btn ${arch.available ? "go" : ""}`, id: "availabilityToggle", disabled: Boolean(pitch), onclick: () => go("/api/architect/availability", { available: !arch.available }, arch.available ? "You are Busy" : "You are Available") }, arch.available ? "Available" : "Busy"),
       instructionsButton("architect"),
-      me.role === "host" ? button("Back to race control", () => { hostLeads = null; render(true) }, { small: true }) : button("Log out", () => { logout(); render(true) }, { small: true })))
+      me.role === "host" ? button("Back to race control", () => { hostLeads = null; render(true) }, { small: true }) : button("Log out", () => { logout(); render(true) }, { small: true }))))
 
-  const pitchPanel = (() => {
+  slot("saPitch", [pitch?.team, pitch?.startedAt, pitch?.attempt], () => {
     if (!pitch) return null
     const t = byId(pitch.team)
     const secs = Math.ceil((pitch.endsAt - now) / 1000)
-    const reason = el("input", { type: "text", id: "sendBackReason", maxlength: SEND_BACK_REASON_MAX, placeholder: "Short reason the team will see" })
+    const reason = el("input", { type: "text", id: "rejectReason", maxlength: REJECT_REASON_MAX, placeholder: "Short reason the team will see" })
     return panel("wide pitch-live",
-      el("div", { class: "row" }, el("h2", { style: "margin:0" }, `${WORDS.pitching}: `, teamChip(t)), el("span", { style: "flex:1" }),
+      el("div", { class: "row" }, el("h2", { style: "margin:0" }, `${WORDS.pitching}: `, teamChip(t)), el("span", { class: "status-pill st-pitching" }, WORDS.attempt(pitch.attempt || 1)), el("span", { style: "flex:1" }),
         el("div", { class: `pitch-timer${secs <= 0 ? " over" : ""}`, id: "pitchTimer", "data-ends": pitch.endsAt }, clock(pitch.endsAt - now))),
-      el("div", { class: `decide-prompt${secs <= 0 ? " show" : ""}`, id: "decidePrompt" }, "Time is up: approve the design or send it back."),
+      el("div", { class: `decide-prompt${secs <= 0 ? " show" : ""}`, id: "decidePrompt" }, "Time is up: approve the design or reject it with a reason."),
       el("div", { class: "row" },
         el("button", { class: "btn go", id: "approveBtn", onclick: () => go("/api/architect/decide", { team: t.id, decision: "approve" }, `${t.name}: ${WORDS.approved}`) }, WORDS.approve),
         reason,
-        el("button", { class: "btn danger", id: "sendBackBtn", onclick: () => go("/api/architect/decide", { team: t.id, decision: "sendBack", reason: reason.value }, `${t.name}: sent back`) }, WORDS.sendBack),
+        el("button", { class: "btn danger", id: "rejectBtn", onclick: () => go("/api/architect/decide", { team: t.id, decision: "reject", reason: reason.value }, `${t.name}: rejected`) }, WORDS.reject),
         button("Cancel pitch", () => go("/api/architect/pitch", { action: "cancel" }, "Pitch cancelled"), { small: true })))
-  })()
+  })
 
   const startButton = (t) => {
     const d = designStatus(s, t, stationId)
-    const can = arch.available && !pitch && Boolean(t.plans?.[stationId]) && d.status !== "approved"
-    const why = !t.plans?.[stationId] ? "Not locked in" : d.status === "approved" ? "Already approved" : pitch ? "A pitch is running" : !arch.available ? "Set yourself Available first" : `${PITCH_SECONDS}-second pitch`
+    const can = arch.available && !pitch && Boolean(d.plan) && d.status !== "approved"
+    const why = !d.plan ? "Not all three choices are locked" : d.status === "approved" ? "Already approved" : pitch ? "A pitch is running" : !arch.available ? "Set yourself Available first" : `${PITCH_SECONDS}-second pitch`
     return el("button", { class: "btn primary small-btn", disabled: !can, title: why, "data-start": t.id, onclick: () => go("/api/architect/pitch", { action: "start", team: t.id }, `${t.name}: pitch started`) }, WORDS.startPitch)
   }
 
-  const queuePanel = panel("", el("h2", {}, "Pitch queue"),
+  slot("saQueue", [queue.map((e) => [e.team, e.at]), selectedTeam, arch.available, Boolean(pitch), queue.map((e) => designStatus(s, byId(e.team), stationId).status)], () => panel("", el("h2", {}, "Pitch queue"),
     queue.length ? el("div", { class: "queue-list", id: "architectQueue" }, queue.map((entry, i) => {
       const t = byId(entry.team)
       if (!t) return null
-      return el("div", { class: `q${selectedTeam === t.id ? " selected" : ""}` }, el("b", {}, `${i + 1}.`), teamChip(t), el("span", { class: "muted small" }, `waiting ${ago(now - entry.at)}`),
+      const d = designStatus(s, t, stationId)
+      return el("div", { class: `q${selectedTeam === t.id ? " selected" : ""}` }, el("b", {}, `${i + 1}.`), teamChip(t), el("span", { class: "muted small" }, WORDS.attempt(d.attempts)), ticking(entry.at, "waiting", "muted small"),
         button("Review", () => { selectedTeam = t.id; render(true) }, { small: true }), startButton(t))
-    })) : el("p", { class: "muted" }, `Nobody is queued. Teams join with ${WORDS.callArchitect} after they lock in.`))
+    })) : el("p", { class: "muted" }, `Nobody is queued. Teams join with ${WORDS.callArchitect} once their three choices are locked.`)))
 
-  const teamsPanel = panel("", el("h2", {}, "Every team at this table"),
+  slot("saTeams", [selectedTeam, s.teams.map((t) => { const d = designStatus(s, t, stationId); return [t.id, t.name, d.status, d.attempts, d.label] })], () => panel("", el("h2", {}, "Every team at this table"),
     el("table", { class: "grid" }, el("tbody", {}, s.teams.map((t) => {
       const d = designStatus(s, t, stationId)
-      return el("tr", { class: selectedTeam === t.id ? "selected" : "" }, el("td", {}, teamChip(t)), el("td", {}, el("span", { class: `status-pill st-${d.status}` }, d.label)), el("td", {}, button("Review", () => { selectedTeam = t.id; render(true) }, { small: true })))
-    }))))
+      return el("tr", { class: selectedTeam === t.id ? "selected" : "" }, el("td", {}, teamChip(t)), el("td", {}, el("span", { class: `status-pill st-${d.status}` }, d.label), d.attempts ? el("span", { class: "attempt-tag" }, WORDS.attempt(d.attempts)) : null), el("td", {}, button("Review", () => { selectedTeam = t.id; render(true) }, { small: true })))
+    })))))
 
-  const detail = (() => {
-    const t = byId(selectedTeam)
+  const sel = byId(selectedTeam)
+  const selStatus = sel ? designStatus(s, sel, stationId) : null
+  slot("saDetail", [selectedTeam, selStatus?.status, selStatus?.plan?.id, selStatus?.attempts, selStatus?.review?.at, sel?.choices, s.settings.budget, arch.available, Boolean(pitch)], () => {
+    const t = sel
     if (!t) return panel("wide", el("p", { class: "muted" }, "Pick a team to read its design."))
-    const d = designStatus(s, t, stationId)
+    const d = selStatus
     const choices = d.plan ? d.plan.choices : t.choices
+    const draft = (() => {
+      if (d.plan) return null
+      const view = createBoard({ stationId, budget: s.settings.budget, interactive: false, id: "architectBoard" })
+      view.update(choices, { locked: true, chosen: lockedDials(t, stationId), ghosts: ghostsAt(t, stationId) })
+      return view.el
+    })()
     return panel("wide architect-summary",
-      el("div", { class: "row" }, el("h2", { style: "margin:0" }, teamChip(t)), el("span", { class: `status-pill st-${d.status}` }, d.label),
+      el("div", { class: "row" }, el("h2", { style: "margin:0" }, teamChip(t)), el("span", { class: `status-pill st-${d.status}` }, d.label), d.attempts ? el("span", { class: "status-pill" }, WORDS.attempt(d.attempts)) : null,
         el("span", { style: "flex:1" }), d.plan ? el("span", { class: "small muted" }, `Plan ${d.plan.id}`) : null, startButton(t)),
-      !d.plan ? el("p", { class: "small warn-text" }, d.status === "sentBack" ? "Sent back: the team is retuning. This is their current draft." : "Not locked in yet: this is their current draft.") : null,
-      d.plan ? frozenBoard(d.plan, { id: "architectBoard", scene: "live" }) : staticBoard(stationId, choices, s.settings.budget, { id: "architectBoard" }),
+      !d.plan ? el("p", { class: "small warn-text" }, d.status === "rejected" || d.status === "adjusting" ? `Rejected: the team is adjusting (${WORDS.lockedCount(lockedDials(t, stationId).length)}). Dashed settings are what they locked last time.` : `Not all three choices are locked yet (${WORDS.lockedCount(lockedDials(t, stationId).length)}): this is their board so far.`) : null,
+      d.plan ? frozenBoard(d.plan, { id: "architectBoard", scene: "live" }) : draft,
       summaryBlock(designSummary(choices, stationId, d.plan?.budget || s.settings.budget)),
-      d.review ? el("p", { class: "small muted" }, d.review.status === "approved" ? `Approved by ${d.review.by} at ${hhmm(d.review.at)}.` : `Sent back by ${d.review.by} at ${hhmm(d.review.at)}${d.review.reason ? `: "${d.review.reason}"` : ""}.`) : null)
-  })()
+      d.review ? el("p", { class: "small muted" }, d.review.status === "approved" ? `Approved by ${d.review.by} at ${hhmm(d.review.at)} (${WORDS.attempt(d.review.attempt || 1).toLowerCase()}).` : `Rejected by ${d.review.by} at ${hhmm(d.review.at)}${d.review.reason ? `: "${d.review.reason}"` : ""} (${WORDS.attempt(d.review.attempt || 1).toLowerCase()}).`) : null)
+  })
 
-  app.replaceChildren(el("div", { class: "host-grid architect-grid", id: "architectView" }, header, pitchPanel, detail, queuePanel, teamsPanel))
+  slot("saBrief", [stationId], () => panel("wide sa-brief", el("details", {}, el("summary", {}, `The ${station.name} brief the teams read`), briefView(stationId, { compact: true }))))
 }
 
 /* ------------------------------------------------------------ restart and demo */
@@ -417,37 +502,49 @@ function renderDemo() {
   const team = s.teams.find((t) => t.id === demo.focus.team)
   const st = demo.focus.station
   const station = C.byId(C.STATIONS, st)
-  const screen = []
+  const screenNodes = []
   const budget = s.settings.budget
-  if (demo.step.screen === "problem") {
-    screen.push(panel("wide", el("h2", {}, `${station.name}: the ${WORDS.scenario.toLowerCase()}`),
-      el("p", {}, el("b", {}, `${WORDS.todaySetup}: `), station.today),
-      staticBoard(st, C.BASELINE_CHOICES, budget, { showDials: false, id: "demoBoard" })))
-  } else if (demo.step.screen === "tuneOff" || demo.step.screen === "tuneOn") {
+  const oneShotBoard = (ghosts) => {
     const choices = { ...team.choices }
-    const view = createBoard({ stationId: st, budget, interactive: true, id: "demoBoard", onDial: (d, o) => { choices[d] = o; view.update(choices) } })
-    view.update(choices)
-    const nextDial = () => {
-      const d = C.decisionsFor(st).find((x) => choices[x.id] !== C.REFERENCE_BUILD[x.id])
-      const dial = d || C.decisionsFor(st)[0]
-      choices[dial.id] = d ? C.REFERENCE_BUILD[dial.id] : dial.today
-      view.update(choices)
+    const chosen = Object.keys(choices).filter((k) => C.decisionsFor(st).some((d) => d.id === k))
+    const view = createBoard({ stationId: st, budget, interactive: true, id: "demoBoard", onDial: (d, o) => { if (choices[d] !== undefined) return; choices[d] = o; chosen.push(d); view.update(choices, { chosen, ghosts }) } })
+    view.update(choices, { chosen, ghosts })
+    const lockNext = () => {
+      const d = C.decisionsFor(st).find((x) => choices[x.id] === undefined)
+      if (!d) return toast(WORDS.allLocked)
+      choices[d.id] = C.REFERENCE_BUILD[d.id]
+      chosen.push(d.id)
+      view.update(choices, { chosen, ghosts })
     }
-    screen.push(panel("wide", el("div", { class: "row" }, el("h2", { style: "margin:0" }, `${team.name} tuning ${station.name}`), el("span", { style: "flex:1" }),
-      el("button", { class: "btn primary small-btn", id: "demoTurn", onclick: nextDial }, "Turn a dial for me")),
-      demo.step.screen === "tuneOn" ? learningCard(st, { id: "demoLesson" }) : null,
+    return { view, lockNext }
+  }
+  if (demo.step.screen === "brief") {
+    screenNodes.push(panel("wide", el("h2", {}, `${station.name}: the brief`),
+      el("div", { class: "brief-gate" }, el("button", { class: "btn primary", disabled: true }, WORDS.readBrief), el("p", { class: "small muted" }, WORDS.briefGateHint), el("p", { class: "one-shot-warning" }, el("b", {}, WORDS.oneShot))),
+      briefView(st, { compact: true })))
+  } else if (demo.step.screen === "tuneOff" || demo.step.screen === "tuneOn") {
+    const { view, lockNext } = oneShotBoard(null)
+    screenNodes.push(panel("wide", el("div", { class: "row" }, el("h2", { style: "margin:0" }, `${team.name} at ${station.name}`), el("span", { style: "flex:1" }),
+      el("button", { class: "btn primary small-btn", id: "demoTurn", onclick: lockNext }, "Lock a dial for me")),
+      demo.step.screen === "tuneOff" ? el("div", { class: "state-banner warn one-shot-banner" }, el("b", {}, WORDS.oneShot)) : learningCard(st, { id: "demoLesson" }),
       view.el))
   } else if (demo.step.screen === "plan") {
-    screen.push(el("div", { class: "wide" }, planSheet(team, team.plans[st])), panel("wide", stateBanner(`${WORDS.waitingForArchitect}. ${WORDS.architectFree}.`, "good")))
+    screenNodes.push(panel("wide", stateBanner(`${WORDS.allLocked} (attempt 1): the team taps ${WORDS.callArchitect}.`, "info"), el("div", { class: "actions" }, el("span", { class: "btn primary" }, WORDS.callArchitect)), planSheet(team, team.plans[st], { screenshotPrompt: false })))
+  } else if (demo.step.screen === "rejected") {
+    const { view, lockNext } = oneShotBoard(team.previous[st])
+    screenNodes.push(panel("wide", el("div", { class: "row" }, el("h2", { style: "margin:0" }, `${team.name} at ${station.name}`), el("span", { style: "flex:1" }),
+      el("button", { class: "btn primary small-btn", id: "demoTurn", onclick: lockNext }, "Lock a dial for me")),
+      el("div", { class: "state-banner bad rejected-banner" }, el("b", {}, WORDS.rejected(team.reviews[st].reason))),
+      view.el))
   } else if (demo.step.screen === "architect") {
-    screen.push(panel("wide", el("h2", {}, `${station.architect} · ${WORDS.pitching}: ${team.name}`), el("div", { class: "pitch-timer" }, `0:${PITCH_SECONDS}`),
+    screenNodes.push(panel("wide", el("h2", {}, `${station.architect} · ${WORDS.pitching}: ${team.name} · ${WORDS.attempt(2)}`), el("div", { class: "pitch-timer" }, `0:${PITCH_SECONDS}`),
       frozenBoard(team.plans[st], { id: "demoBoard", scene: "live" }), summaryBlock(designSummary(team.plans[st].choices, st, budget)),
-      el("div", { class: "row" }, el("span", { class: "btn go" }, WORDS.approve), el("span", { class: "btn danger" }, WORDS.sendBack))))
-    screen.push(renderApprovals(s))
+      el("div", { class: "row" }, el("span", { class: "btn go" }, WORDS.approve), el("input", { type: "text", placeholder: "Short reason the team will see", disabled: true }), el("span", { class: "btn danger" }, WORDS.reject))))
+    screenNodes.push(renderApprovals(s))
   } else if (demo.step.screen === "race") {
-    screen.push(podiumGraphic(s.race.result), panel("", el("h2", {}, "Race ticker"), el("ul", { class: "small" }, s.race.result.events.filter((e) => e.team).slice(0, 6).map((e) => el("li", {}, `Lap ${e.lap}: ${e.text}`)))))
+    screenNodes.push(podiumGraphic(s.race.result), panel("", el("h2", {}, "Race ticker"), el("ul", { class: "small" }, s.race.result.events.filter((e) => e.team).slice(0, 6).map((e) => el("li", {}, `Lap ${e.lap}: ${e.text}`)))))
   } else if (demo.step.screen === "readout") {
-    screen.push(el("div", { class: "wide" }, readoutCard(readoutFor(team, s.race.result, s.settings.stations, budget))))
+    screenNodes.push(el("div", { class: "wide" }, readoutCard(readoutFor(team, s.race.result, s.settings.stations, budget))))
   }
   app.replaceChildren(el("div", { class: "host-grid" },
     panel("demo-narration wide", el("h2", {}, `Demo mode · ${demo.step.title}`), el("p", {}, demo.step.narration),
@@ -457,60 +554,59 @@ function renderDemo() {
         el("span", { class: "muted" }, `${demo.index + 1} / ${demo.total}`),
         button("Next →", () => { demoIndex += 1; render(true) }, { kind: "primary", disabled: demo.index === demo.total - 1 }),
         button("Exit demo", () => { demoIndex = null; render(true) }, { kind: "danger" }))),
-    ...screen))
+    ...screenNodes))
+  window.scrollTo({ top: 0 })
 }
 
 /* ------------------------------------------------------------ render */
-
-function toolbar() {
-  return panel("row wide", instructionsButton("host"),
-    button("Demo mode", () => { demoIndex = 0; render(true) }, { small: true }),
-    button("Restart the experience", restartExperience, { small: true, kind: "danger" }),
-    button("Log out", () => { logout(); render(true) }, { small: true }),
-    el("span", { class: "muted small" }, `${DEMO_STEPS.length}-step demo · ${state.teams.length} team${state.teams.length === 1 ? "" : "s"}`))
-}
 
 function render(force) {
   if (!state) return
   const me = session()
   if (me.role !== "host" && me.role !== "architect") {
-    if (force || lastKey !== "login") {
-      lastKey = "login"
+    if (force || screen !== "login") {
+      screen = "login"
       renderLogin()
     }
     return
   }
   if (me.role === "host" && demoIndex !== null) {
-    if (force) renderDemo()
+    if (force || screen !== "demo") {
+      screen = "demo"
+      renderDemo()
+    }
     return
   }
   if (!gameClock(state)) {
-    app.replaceChildren(panel("", el("h2", {}, "Reconnecting to the game server"), el("p", { class: "muted" }, "Retrying every second.")))
-    lastKey = ""
+    if (screen !== "reconnecting") app.replaceChildren(panel("", el("h2", {}, "Reconnecting to the game server"), el("p", { class: "muted" }, "Retrying every second.")))
+    screen = "reconnecting"
     return
   }
   const leads = me.role === "architect" ? me.station : hostLeads
-  const key = JSON.stringify([state.version, setupDraft?.count, leads ? selectedTeam : presence, leads, Math.floor(Date.now() / 15_000)])
-  if (!force && key === lastKey) return
-  const typing = document.activeElement && ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)
-  if (!force && typing) return
-  lastKey = key
-  if (leads) return renderArchitect(leads)
-  app.replaceChildren(el("div", { class: "host-grid" }, state.teams.length
-    ? [toolbar(), renderSession(), renderApprovals(state), renderReadouts(), renderFeed(state, presence), renderQueues(state), renderSetup(), renderLinks()]
-    : [toolbar(), renderSetup()]))
+  if (leads) return renderArchitect(leads, force)
+  renderControl(force)
 }
 
 setInterval(() => {
   try {
+    const now = Date.now()
     const node = document.getElementById("bigTimer")
-    if (node && state && demoIndex === null) node.textContent = phaseClock(state)
+    if (node && state && demoIndex === null) setText(node, phaseClock(state))
     const timer = document.getElementById("pitchTimer")
     if (timer) {
-      const ms = Number(timer.dataset.ends) - (Date.now() + offset)
-      timer.textContent = clock(ms)
+      const ms = Number(timer.dataset.ends) - (now + offset)
+      setText(timer, clock(ms))
       timer.classList.toggle("over", ms <= 0)
       document.getElementById("decidePrompt")?.classList.toggle("show", ms <= 0)
+    }
+    for (const tick of document.querySelectorAll(".tick[data-since]")) {
+      const since = Number(tick.dataset.since)
+      setText(tick, tickText(since, tick.dataset.fmt, now))
+      if (tick.classList.contains("seen")) {
+        const seen = now - since
+        tick.classList.toggle("dead", seen > 30_000)
+        tick.classList.toggle("stale", seen > 12_000 && seen <= 30_000)
+      }
     }
   } catch (err) {
     console.error("[podium] host timer", err)

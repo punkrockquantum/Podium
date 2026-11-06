@@ -1,7 +1,7 @@
 /**
  * The tuning model: from a table's three dials to its gauges, cap bars, FIA chips and FIT score.
  * Pure and deterministic; the iPads, the host, the server, the race and the tests share it, so the
- * board a team sees is exactly the board the Architect approves and the race uses.
+ * board a team sees is exactly the board the SA approves and the race uses.
  *
  * FIT (0–100): every target in its zone and inside every cap scores 80–100 (more spare budget,
  * higher FIT). Otherwise FIT is 70 × the mean closeness to each target. Any cap or FIA breach caps
@@ -348,7 +348,7 @@ function penaltiesFor(boards) {
   return out
 }
 
-/** A table counts only once its Architect approved the pitched board. */
+/** A table counts only once its SA approved the pitched board. */
 export function completedStations(team, stationIds = C.STATIONS.map((s) => s.id)) {
   return stationIds.filter((id) => team?.reviews?.[id]?.status === "approved")
 }

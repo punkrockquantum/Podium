@@ -250,7 +250,11 @@ svg.cota { width: 100%; height: auto; display: block; background: #0b0d12; borde
 .status-pill.st-pitching { background: #3b2f07; color: #fde68a; }
 .status-pill.st-waiting { background: #10314a; color: #7dd3fc; }
 .status-pill.st-locked { background: #1f2a3d; color: #c7d2fe; }
-.status-pill.st-sentBack { background: #3d1414; color: #fca5a5; }
+.status-pill.st-rejected { background: #3d1414; color: #fca5a5; }
+.status-pill.st-adjusting { background: #3b2a12; color: #fdba74; }
+.status-pill.st-none { background: #181b21; color: #6b7280; }
+.attempt-tag { display: block; font-size: 11px; font-weight: 800; color: var(--muted); letter-spacing: 0.04em; }
+.fit-cell .attempt-tag { display: inline; }
 .status-pill.st-draft { background: #22262e; color: #cbd5e1; }
 #approvalCounts { margin-bottom: 8px; }
 .grid.approvals td { text-align: center; }
@@ -263,7 +267,7 @@ svg.cota { width: 100%; height: auto; display: block; background: #0b0d12; borde
 @keyframes pulse { 50% { opacity: 0.45; } }
 .decide-prompt { display: none; font-size: 18px; font-weight: 800; color: var(--amber); margin: 6px 0; }
 .decide-prompt.show { display: block; }
-#sendBackReason { flex: 1; min-width: 220px; }
+#rejectReason { flex: 1; min-width: 220px; }
 .summary-block { display: grid; gap: 8px; }
 .plain-summary { font-size: 17px; line-height: 1.5; margin: 0; }
 .plan-sheet .plain-summary { font-size: 15px; color: #222; }
@@ -449,9 +453,10 @@ svg.cota { width: 100%; height: auto; display: block; background: #0b0d12; borde
 
 .board-dials { display: grid; gap: 10px; }
 .dial { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 6px; }
-.dial-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+/* The dial head keeps one height whatever the setting line says, so a lock never moves the dials. */
+.dial-head { display: grid; gap: 2px; align-items: baseline; }
 .dial-head b { font-size: 15px; }
-.dial-setting { font-size: 13px; color: #cbd5e1; }
+.dial-setting { font-size: 13px; color: #cbd5e1; display: block; min-height: 17px; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; background: #0f131a; border-radius: 12px; padding: 4px; }
 .seg-btn { min-height: 52px; border-radius: 9px; border: 2px solid transparent; background: transparent; color: var(--text); font-weight: 800; font-size: 14px; display: grid; place-items: center; align-content: center; gap: 1px; padding: 4px; line-height: 1.15; transition: background 0.2s, border-color 0.2s; }
 .seg-btn.on { background: color-mix(in srgb, var(--table) 30%, var(--panel2)); border-color: var(--table); }
@@ -510,7 +515,11 @@ svg.cota { width: 100%; height: auto; display: block; background: #0b0d12; borde
 .scene.in-zone .scene-line { color: #86efac; }
 .scene.not-allowed .scene-line { color: #fca5a5; }
 
-.scene-sticky { position: sticky; top: 132px; z-index: 8; }
+/* The scene dock sticks for the whole board. Once measured it keeps the expanded scene's height
+   while the scene floats inside it, so compacting never changes the document's height. */
+.scene-dock { position: sticky; top: 132px; z-index: 8; }
+.scene-dock.docked { pointer-events: none; }
+.scene-dock.docked > .scene { position: absolute; left: 0; right: 0; top: 0; pointer-events: auto; }
 .scene.compact { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "stage head" "stage line"; align-items: center; padding: 6px 12px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55); }
 .scene.compact .scene-stage { grid-area: stage; }
 .scene.compact .scene-stage svg { height: 78px; }
@@ -662,3 +671,50 @@ svg.cota { width: 100%; height: auto; display: block; background: #0b0d12; borde
 .lane-sec { font-size: 19px; font-weight: 900; font-variant-numeric: tabular-nums; color: #e2e8f0; white-space: nowrap; text-align: right; }
 .lane-gauges { display: inline-flex; gap: 4px; }
 .lane-pts { text-align: right; font-size: 20px; }
+
+/* ----------------------------------------------------------- the brief, the gate and one-shot dials */
+.brief { display: grid; gap: 14px; font-size: 17px; line-height: 1.5; }
+.brief-title { margin: 0; font-size: 26px; }
+.brief-section { display: grid; gap: 6px; }
+.brief-section h3 { margin: 0; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.brief-section p { margin: 0; }
+.brief-section ul { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+dl.brief-words, .brief-words dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font-size: 15px; }
+.brief-words dt { font-weight: 800; }
+.brief-words dd { margin: 0; color: #cbd5e1; }
+.brief-head { display: grid; gap: 4px; }
+.brief-head h2 { margin: 0; font-size: 26px; }
+.brief-problem { margin: 0; color: #cbd5e1; }
+.brief-decision { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); }
+.brief-decision h4 { margin: 0; font-size: 16px; }
+.brief-decision ul { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.brief-balance { color: #fde68a; }
+.brief.compact { font-size: 14px; gap: 10px; }
+.brief.compact .brief-words dl { font-size: 13px; }
+.brief-end { padding-top: 8px; border-top: 1px dashed var(--line); }
+.brief-end p { margin: 0; }
+.brief.compact .brief-decision { padding: 8px 10px; }
+dl.brief-words { font-size: 15px; }
+.brief.compact dl.brief-words { font-size: 13px; }
+.brief-gate { display: grid; gap: 10px; }
+.brief-gate .btn.primary:disabled { opacity: 0.45; }
+.one-shot-warning { margin: 0; font-size: 17px; color: var(--amber); }
+.one-shot-banner, .rejected-banner { font-size: 17px; }
+.rejected-banner b { color: #fca5a5; }
+.lock-count { font-size: 15px; font-weight: 800; padding: 8px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); color: #cbd5e1; }
+.lock-count.all { background: #12391f; color: #86efac; border-color: #166534; }
+.seg-btn { position: relative; }
+.seg-btn .seg-lock, .seg-btn .seg-ghost { display: none; }
+/* The padlock sits in the corner so the button keeps its size when it locks. */
+.dial.chosen .seg-btn.on .seg-lock { display: block; position: absolute; top: 2px; right: 4px; font-size: 12px; line-height: 1; }
+.seg-btn.ghost .seg-ghost { display: inline; color: #fdba74; font-style: italic; }
+.seg-btn.ghost { border-style: dashed; border-color: #6b7280; }
+.seg-btn.muted { opacity: 0.3; }
+.seg-btn.muted:disabled { opacity: 0.3; }
+.dial.open .seg-btn:not(:disabled) { border-color: #2a3650; background: #141a24; cursor: pointer; }
+.dial.open .seg-btn:not(:disabled):active { border-color: var(--table); }
+.dial.open .dial-setting { color: var(--amber); }
+.dial.chosen .dial-setting { color: #86efac; }
+.call-sa { display: grid; gap: 6px; justify-items: start; }
+.call-sa p { margin: 0; }
+.sa-brief summary { cursor: pointer; font-weight: 800; }

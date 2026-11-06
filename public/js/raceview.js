@@ -162,7 +162,7 @@ function updateLadder(rows) {
     const gaugeKey = JSON.stringify(r.fits)
     if (gaugeKey !== l.gaugeKey) {
       l.gaugeKey = gaugeKey
-      l.gauges.replaceChildren(...r.fits.map((f) => miniFit(f.fit, { status: f.status, grey: !f.approved, size: 30, title: `${C.byId(C.STATIONS, f.id).name}: ${Number.isFinite(f.fit) ? `FIT ${f.fit}` : "not locked in"}${f.approved ? "" : " · not approved"}` })))
+      l.gauges.replaceChildren(...r.fits.map((f) => miniFit(f.fit, { status: f.status, grey: !f.approved, size: 30, title: `${C.byId(C.STATIONS, f.id).name}: ${Number.isFinite(f.fit) ? `FIT ${f.fit}` : "not all locked"}${f.approved ? "" : " · not approved"}` })))
     }
     l.points.textContent = String(r.points)
   })

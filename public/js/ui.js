@@ -45,7 +45,7 @@ let role = sessionStorage.getItem("podium-role") || ""
 let station = sessionStorage.getItem("podium-station") || ""
 let architectName = sessionStorage.getItem("podium-architect-name") || ""
 
-/** The signed-in role; an Architect also has the one table they review (and an optional name). */
+/** The signed-in role; a Solutions Architect also has the one table they review (and an optional name). */
 export function session() {
   return { pin, role, station, name: architectName }
 }
@@ -164,35 +164,35 @@ export function installErrorLogging(screen) {
   window.addEventListener("unhandledrejection", (e) => notice(e.reason))
 }
 
-const INSTRUCTIONS = {
+export const INSTRUCTIONS = {
   team: {
     title: "Teams",
     steps: [
       "Tap your team on the table's iPad. Move between the four tables freely.",
-      "Scenario & Tune: the picture at the top is the customer's problem. Every dial changes it straight away.",
-      "The big number is seconds found per lap: 0.00 s on today's setup, up to about 0.35 s in the zone.",
-      "Turn the three dials until every gauge sits in the green zone without crossing a cap line.",
-      "Over a cap or breaking an FIA rule is not allowed: no seconds count. FIT 80+ means in the zone.",
-      "Pitch: Lock in, take a screenshot of your board, then Call the Architect.",
-      "Only approved boards count; the rest race on today's setup. Sent back? Retune and call again.",
-      "The race adds up every approved table's seconds. After it, open your readout: seconds found, lessons and what to do differently.",
+      "1 · Brief: read the whole brief together. It holds the targets, the rules, both cost caps and what every setting does. Then tap “I've read the brief. Take me to the decisions.” (it unlocks once you reach the end, or after 30 seconds).",
+      "2 · Tune: each choice locks the moment you tap it. There is no undo and no confirmation, so decide as a team first. The scene, the gauges, the cap bars and the seconds found per lap update at once, so you see the consequence.",
+      "The counter shows Locked 1 of 3. When all three are locked the table locks itself and the only step left is Call the Solutions Architect.",
+      "3 · Pitch: wait for the SA (they may be busy with another team), then pitch for 30 seconds: why each choice helps the customer and how a provider helps.",
+      "Approved: this table counts in the race. Rejected: the SA's reason is shown, all three dials reopen with your last picks shown as “last time” ghosts, and you choose again and call the SA again. That takes time.",
+      "Over a cap or breaking an FIA rule is not allowed: 0.00 s counts. FIT 80+ means in the zone.",
+      "When time is up, any table not approved (including one still adjusting after a rejection) races on today's setup. After the race, open your readout: seconds found, attempts, lessons and what to do differently.",
     ],
   },
   architect: {
-    title: "Architects",
+    title: "Solutions Architects (SA)",
     steps: [
-      "On the host screen choose Architect, enter the Architect PIN and pick your table.",
-      "Set yourself Available. Tap a team in the queue: you see its board exactly as the team does.",
-      "Start pitch: 30 seconds. Ask why each dial helps the customer and how a provider helps.",
-      "Approve, or Send back with a short reason the team will see.",
+      "On the host screen choose Solutions Architect, enter the SA PIN (SKO27) and pick your table.",
+      "Set yourself Available. Tap a team in the queue: you see its board exactly as the team locked it, which attempt this is, and the table's brief.",
+      "Start pitch: 30 seconds. Ask why each choice helps the customer and how a provider helps.",
+      "Approve, or Reject with a short reason the team will see. Rejecting reopens that team's three dials at your table only; they choose again and call you again.",
     ],
   },
   host: {
     title: "Session host",
     steps: [
-      "Set up 1–10 teams (name and colour) and one budget level for everyone: Tight, Standard or Generous.",
-      "Start brief (5 min). Start play when it ends (35 min). Use +/− to adjust the clock.",
-      "Watch the approvals grid fill with seconds found and FIT gauges. End play, then Run race with the race password (30 s).",
+      "Sign in with the host PIN (SKO27). Set up 1–10 teams and one budget level for everyone: Tight, Standard or Generous.",
+      "Start brief (5 min): the iPads show the briefs; choices stay closed. Start play when it ends (35 min). Use +/− to adjust the clock.",
+      "Watch the approvals grid: locks, attempts, pitches, seconds found and FIT. End play, then Run race with the race password (SKO27).",
       "Show readouts: the projector cycles through every team's readout (about 9 min).",
     ],
   },
@@ -254,21 +254,37 @@ export const WORDS = {
   todaySetup: "Today's setup",
   howProviderHelps: "How a provider helps",
   learned: "What you just learned",
-  lockIn: "Lock in",
-  callArchitect: "Call the Architect",
-  architectFree: "Your Architect is free: go and pitch now",
-  queuePosition: (n) => `Queue position ${n}: your Architect will call you`,
+  brief: "Brief",
+  readBrief: "I've read the brief. Take me to the decisions.",
+  briefGateHint: "Unlocks when you reach the end of the brief, or after 30 seconds.",
+  goToDecisions: "Go to the decisions",
+  oneShot: "Each choice locks the moment you tap it. Decide as a team first.",
+  tapToLock: "Tap once to lock",
+  hintWaits: "The brief has every figure you need. The board's own advice appears once all three are locked.",
+  locked: "Locked",
+  lockedCount: (n, of = 3) => `Locked ${n} of ${of}`,
+  allLocked: "All three locked",
+  lastTime: "last time",
+  goToPitch: "Go to Pitch",
+  goToTune: "Go to Tune",
+  solutionsArchitect: "Solutions Architect",
+  sa: "SA",
+  callArchitect: "Call the Solutions Architect",
+  architectFree: "Your Solutions Architect is free: go and pitch now",
+  queuePosition: (n) => `Queue position ${n}: your Solutions Architect will call you`,
+  rejected: (reason) => `Rejected: ${reason || "no reason given"}. Adjust your choices and call the SA again. This takes time and the SA may be busy.`,
+  attempt: (n) => `Attempt ${n}`,
   returnHome: "Return to home",
   instructions: "Instructions",
   startPitch: "Start pitch",
   approve: "Approve",
-  sendBack: "Send back",
-  waitingForArchitect: "Waiting for Architect",
+  reject: "Reject",
+  waitingForArchitect: "Waiting for the SA",
   pitching: "Pitching",
   approved: "Approved",
   runRace: "Run race",
   racePassword: "Race password",
-  listen: "Listen to the brief",
+  readTheBrief: "Read the brief",
   screenshot: "Take a screenshot now",
 }
 
@@ -300,10 +316,44 @@ export function teamChip(team) {
   return el("span", { class: "team-chip" }, el("i", { style: `background:${team.color}` }), team.name)
 }
 
-/** The fixed two-step tab bar used on every table. */
-export const STATION_TABS = [["tune", "1 · Scenario & Tune"], ["pitch", "2 · Pitch"]]
-export function tabBar(active, onSelect) {
+/** The fixed three-step tab bar used on every table. Tune and Pitch stay disabled until the brief is read. */
+export const STATION_TABS = [["brief", "1 · Brief"], ["tune", "2 · Tune"], ["pitch", "3 · Pitch"]]
+export function tabBar(active, onSelect, { disabled = [] } = {}) {
   return el("nav", { class: "tabs", role: "tablist" }, STATION_TABS.map(([id, label]) =>
-    el("button", { class: `tab${id === active ? " active" : ""}`, "data-tab": id, role: "tab", "aria-selected": String(id === active), onclick: () => onSelect(id) }, label)))
+    el("button", { class: `tab${id === active ? " active" : ""}`, "data-tab": id, role: "tab", "aria-selected": String(id === active), disabled: disabled.includes(id), title: disabled.includes(id) ? "Read the brief first" : undefined, onclick: () => onSelect(id) }, label)))
+}
+
+/**
+ * Replace a container's children without moving the page: the scroll position is captured before
+ * and restored after, in the same frame, so an unavoidable rebuild never snaps the reader back to
+ * the top. If the new content is shorter the browser clamps, which is the best any rebuild can do.
+ */
+export function replaceKeepingScroll(container, ...children) {
+  const x = window.scrollX
+  const y = window.scrollY
+  const active = document.activeElement
+  const focusId = active && active !== document.body ? active.id : ""
+  container.replaceChildren(...children.flat().filter(Boolean))
+  if (focusId) document.getElementById(focusId)?.focus?.({ preventScroll: true })
+  if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y)
+}
+
+/** Set a node's text only when it changed, so live updates never disturb layout or selection. */
+export function setText(node, text) {
+  if (node && node.textContent !== String(text)) node.textContent = String(text)
+}
+
+/**
+ * Rebuild one region of a page only when its content key changes. `build()` returns the new
+ * children; the region keeps its node (and the page its scroll position) when the key matches.
+ * Returns true when the region was rebuilt.
+ */
+export function patchSlot(slot, key, build) {
+  if (!slot) return false
+  const next = String(key)
+  if (slot.dataset.key === next) return false
+  slot.dataset.key = next
+  replaceKeepingScroll(slot, build())
+  return true
 }
 
