@@ -69,6 +69,9 @@ const TYPES = {
   ".webmanifest": "application/manifest+json",
 }
 
+/** A number from a request body: a JSON number or a numeric string, nothing else. */
+const numberOf = (value) => (typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN)
+
 const budgetOf = (value) => (BUDGET_LEVELS.some((b) => b.id === value) ? value : DEFAULT_BUDGET)
 
 /** The timer when nothing is running: play is open and nothing expires. */
@@ -403,7 +406,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       const maxMs = SESSION.maxMinutes * 60_000
       if (state.race) return send(res, 409, { error: "The race has run: clear the race to use the timer again" })
       if (action === "start") {
-        const minutes = body?.minutes === undefined || body?.minutes === null || body?.minutes === "" ? SESSION.timerMinutes : Number(body.minutes)
+        const minutes = body?.minutes === undefined || body?.minutes === null || body?.minutes === "" ? SESSION.timerMinutes : numberOf(body.minutes)
         if (!Number.isInteger(minutes) || minutes < 1 || minutes > SESSION.maxMinutes) return send(res, 400, { error: `Set the timer to a whole number of minutes from 1 to ${SESSION.maxMinutes}` })
         state.clock = { ...openClock(), status: "running", totalMs: minutes * 60_000, endsAt: now + minutes * 60_000 }
       } else if (action === "reset") {
@@ -416,7 +419,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
         for (const seat of Object.values(state.tables)) seat.since += now - (clock.pausedAt || now)
         Object.assign(clock, { status: "running", endsAt: now + (clock.remainingMs || 0), remainingMs: null, pausedAt: null })
       } else if (action === "add") {
-        const minutes = Number(body?.minutes)
+        const minutes = numberOf(body?.minutes)
         if (!Number.isInteger(minutes) || minutes === 0 || Math.abs(minutes) > SESSION.maxMinutes) return send(res, 400, { error: "Add or remove whole minutes" })
         const ms = minutes * 60_000
         if (phase === "play") {
