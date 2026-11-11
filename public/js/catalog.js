@@ -11,8 +11,9 @@ export const byId = (list, id) => list.find((item) => item.id === id) || null
 
 /* ------------------------------------------------------------ teams and the session budget */
 
+/** Teams add themselves on a table iPad: a game starts with none and holds up to ten. */
 export const MAX_TEAMS = 10
-export const MIN_TEAMS = 1
+export const TEAM_NAME_MAX = 32
 
 /** Ten distinct colours that stay readable on the dark theme and on a projector. */
 export const TEAM_COLORS = ["#e10600", "#00a3ff", "#ffd60a", "#22c55e", "#ff7a00", "#c084fc", "#00e5d4", "#ff4fa3", "#f5f5f5", "#a3e635"]
@@ -287,14 +288,10 @@ export const APPROVAL_BONUS = 1.1
 export const tablePoints = (fit, approved) => (approved ? Math.round((Math.max(0, Math.min(100, fit)) * APPROVAL_BONUS) / 4) : 0)
 export const PITCH_MAX = tablePoints(100, true)
 
-/** A 50-minute session: brief, play, race, readout. Every phase is editable on the host screen. */
+/** The session runs untimed unless the host starts the timer: 35 minutes by default, 120 at most. */
 export const SESSION = {
-  briefMinutes: 5,
-  playMinutes: 35,
-  raceMinutes: 1,
-  readoutMinutes: 9,
+  timerMinutes: 35,
   maxMinutes: 120,
 }
-export const sessionTotal = (s = SESSION) => s.briefMinutes + s.playMinutes + s.raceMinutes + s.readoutMinutes
 
 export const FINALE = { race: "Austin, Texas 2027 Grand Prix", circuit: "Circuit of the Americas", laps: 56, lapKm: 5.513, turns: 20 }

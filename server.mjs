@@ -3,7 +3,11 @@
  * No dependencies. `node server.mjs` (localhost) or `node server.mjs --lan` (every iPad on the Wi-Fi).
  *
  * Env: PORT (8080), HOST_PIN, LEADER_PIN (the Solutions Architect PIN), RACE_PIN, DATA_DIR (./data).
- * Every PIN defaults to SKO27; PIN values are never logged.
+ * Every PIN defaults to the one event PIN in DEFAULT_PINS below. PIN values are never logged, never
+ * sent to a client and never written to the saved game.
+ *
+ * The game needs no setup: it is open for play the moment the server runs. Teams add themselves on
+ * a table iPad; the timer is optional and, like the race and every other host control, needs the PIN.
  */
 import { createServer } from "node:http"
 import { spawn } from "node:child_process"
@@ -13,12 +17,12 @@ import { join, normalize, extname, dirname, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { networkInterfaces } from "node:os"
 import { randomUUID, randomInt, timingSafeEqual, createHash } from "node:crypto"
-import { STATIONS, TEAM_COLORS, SESSION, BUDGET_LEVELS, DEFAULT_BUDGET, MAX_TEAMS, MIN_TEAMS, validChoice, decision, decisionsFor, tablePoints } from "./public/js/catalog.js"
+import { STATIONS, TEAM_COLORS, SESSION, BUDGET_LEVELS, DEFAULT_BUDGET, MAX_TEAMS, TEAM_NAME_MAX, budgetFor, validChoice, decision, decisionsFor, tablePoints } from "./public/js/catalog.js"
 import { evaluate, effectiveTeam, boardFor, choicesOf } from "./public/js/model.js"
 import { runRace, systemScore } from "./public/js/race.js"
 import { buildPlan } from "./public/js/plandata.js"
 import { PITCH_MS, REJECT_REASON_MAX, lockedDials } from "./public/js/approval.js"
-import { phaseOf } from "./public/js/session.js"
+import { phaseOf, playOpen } from "./public/js/session.js"
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const PUBLIC = join(ROOT, "public")
@@ -36,6 +40,9 @@ export const resolvePins = (env = process.env) => Object.fromEntries(Object.entr
 export const pinSummary = (env = process.env) => Object.entries(PIN_NAMES).map(([key, name]) => `${name} (${env[name] ? "from the environment" : "default"})`).join(", ")
 const PIN_FAILURE_LIMIT = 10
 const PIN_FAILURE_WINDOW_MS = 5 * 60_000
+/** Teams join without a PIN, so one address may only add so many (the ten-team limit is the main guard). */
+const TEAM_CREATE_LIMIT = 30
+const TEAM_CREATE_WINDOW_MS = 10 * 60_000
 
 /** Constant-time comparison of two short secrets (hashed first so lengths never leak). */
 function sameSecret(given, expected) {
@@ -47,6 +54,11 @@ function sameSecret(given, expected) {
 /** A short single line of free text from a request: no control characters, trimmed, capped. */
 const oneLine = (value, max) => String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max)
 
+/** A team name as typed: control and invisible characters out, runs of spaces collapsed, trimmed. Not a string: empty. */
+const cleanTeamName = (value) => (typeof value === "string" ? value.normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]+/g, " ").replace(/\s+/g, " ").trim() : "")
+/** Two names are the same team name when they match ignoring case. */
+const nameKey = (name) => name.normalize("NFKC").toLowerCase()
+
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -57,34 +69,26 @@ const TYPES = {
   ".webmanifest": "application/manifest+json",
 }
 
-const PHASE_KEYS = ["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"]
-/** Whole or half minutes from 0.5 to the session maximum. */
-const clampMinutes = (value, fallback) => {
-  const n = Number(value)
-  return Math.min(SESSION.maxMinutes, Math.max(0.5, Math.round((Number.isFinite(n) && n > 0 ? n : fallback) * 2) / 2))
-}
-
 const budgetOf = (value) => (BUDGET_LEVELS.some((b) => b.id === value) ? value : DEFAULT_BUDGET)
 
-/** Phase lengths and the session's budget level (one budget for every team). */
-function sessionSettings(source = {}) {
-  return { ...Object.fromEntries(PHASE_KEYS.map((key) => [key, clampMinutes(source[key], SESSION[key])])), budget: budgetOf(source.budget) }
-}
+/** The timer when nothing is running: play is open and nothing expires. */
+const openClock = () => ({ status: "open", totalMs: 0, endsAt: null, remainingMs: null, endedAt: null, endedBy: null, pausedAt: null })
 
+/** A new game: no teams, the Standard budget, every table in play, no timer. Open for play at once. */
 export function blankState() {
-  const settings = { ...sessionSettings(), stations: [...STATION_IDS] }
   return {
     id: randomUUID(),
     version: 1,
-    settings,
-    brief: { status: "idle", endsAt: null },
-    clock: { status: "lobby", totalMs: settings.playMinutes * 60_000, endsAt: null, remainingMs: null, endedAt: null, endedBy: null },
+    settings: { budget: DEFAULT_BUDGET, stations: [...STATION_IDS] },
+    clock: openClock(),
     readout: null,
     tables: {},
     queues: {},
     architects: {},
     pitches: {},
     teams: [],
+    /* The last team number handed out: ids are never reused, so an iPad can never mistake a new team for a removed one. */
+    teamSeq: 0,
     race: null,
   }
 }
@@ -95,14 +99,9 @@ const STEPS = ["brief", "tune", "pitch"]
 const TEAM_KEYS = ["choices", "touched", "submitted", "scores", "pitch", "visits", "sims", "plans", "reviews", "briefRead", "attempts", "previous"]
 const dialIds = (station) => decisionsFor(station).map((d) => d.id)
 
-function makeTeams(list) {
-  return list.slice(0, MAX_TEAMS).map((item, i) => ({
-    id: `t${i + 1}`,
-    name: oneLine(item?.name, 32) || `Team ${i + 1}`,
-    color: TEAM_COLORS[i % TEAM_COLORS.length],
-    ...Object.fromEntries(TEAM_KEYS.map((key) => [key, {}])),
-  }))
-}
+const blankTeam = (id, name, color) => ({ id, name, color, ...Object.fromEntries(TEAM_KEYS.map((key) => [key, {}])) })
+/** The first of the ten colours no team is using (in order, so the first ten teams get them in order). */
+const freeColor = (teams) => TEAM_COLORS.find((c) => !teams.some((t) => t.color === c)) || TEAM_COLORS[teams.length % TEAM_COLORS.length]
 
 /**
  * Bring a saved team up to the one-shot model: every choice is a lock, three locks make a plan
@@ -134,6 +133,33 @@ function migrateTeam(team, budget) {
   delete team.tier
 }
 
+/**
+ * Bring a saved clock up to the optional timer. The old lobby and brief phases (and anything
+ * unreadable) become open, untimed play; a running or paused timer carries on; a game whose time
+ * was up, or whose race has run, stays ended.
+ */
+function migrateClock(saved, raced) {
+  const c = saved && typeof saved === "object" ? saved : {}
+  const totalMs = Number.isFinite(c.totalMs) && c.totalMs > 0 ? c.totalMs : 0
+  if (raced || c.status === "ended") return { ...openClock(), status: "ended", totalMs, remainingMs: 0, endedAt: Number.isFinite(c.endedAt) ? c.endedAt : Date.now(), endedBy: oneLine(c.endedBy, 24) || "time" }
+  if (c.status === "running" && Number.isFinite(c.endsAt)) return { ...openClock(), status: "running", totalMs, endsAt: c.endsAt }
+  if (c.status === "paused" && Number.isFinite(c.remainingMs)) return { ...openClock(), status: "paused", totalMs, remainingMs: Math.max(0, c.remainingMs), pausedAt: Number.isFinite(c.pausedAt) ? c.pausedAt : null }
+  return openClock()
+}
+
+/** Saved teams keep their id, name and colour; anything missing or repeated is filled in. Returns the last team number in use. */
+function migrateTeamIdentity(teams, seq) {
+  const seen = new Set()
+  let last = Math.max(Number.isInteger(seq) && seq > 0 ? seq : 0, ...teams.map((t) => Number(/^t(\d{1,7})$/.exec(String(t.id))?.[1]) || 0))
+  teams.forEach((team, i) => {
+    if (typeof team.id !== "string" || !/^[a-z0-9]{1,8}$/.test(team.id) || seen.has(team.id)) team.id = `t${++last}`
+    seen.add(team.id)
+    team.name = cleanTeamName(team.name).slice(0, TEAM_NAME_MAX) || `Team ${i + 1}`
+    if (typeof team.color !== "string" || !/^#[0-9a-f]{3,8}$/i.test(team.color)) team.color = TEAM_COLORS[i % TEAM_COLORS.length]
+  })
+  return last
+}
+
 /** Load the saved game; a damaged file is kept aside rather than silently replaced. */
 function loadState(file) {
   if (!existsSync(file)) return blankState()
@@ -143,20 +169,22 @@ function loadState(file) {
     const base = blankState()
     const stations = (saved.settings?.stations || []).filter((id) => STATION_IDS.includes(id))
     /* Only the game's own keys are loaded: a stray key in the file (say `pins`) never reaches the state or the clients. */
+    const race = saved.race && typeof saved.race === "object" ? saved.race : null
     const loaded = {
       id: typeof saved.id === "string" && saved.id ? saved.id : base.id,
       version: Number.isInteger(saved.version) && saved.version > 0 ? saved.version : base.version,
-      settings: { ...sessionSettings(saved.settings), stations: stations.length ? stations : [...STATION_IDS] },
-      brief: saved.brief || base.brief,
-      clock: { ...base.clock, ...saved.clock },
-      readout: saved.readout || null,
+      settings: { budget: budgetOf(saved.settings?.budget), stations: stations.length ? stations : [...STATION_IDS] },
+      clock: migrateClock(saved.clock, Boolean(race)),
+      readout: race && saved.readout ? { startedAt: Number(saved.readout.startedAt) || Date.now() } : null,
       tables: saved.tables || {},
       queues: saved.queues || {},
       architects: saved.architects || {},
       pitches: saved.pitches || {},
       teams: saved.teams.filter((team) => team && typeof team === "object"),
-      race: saved.race || null,
+      teamSeq: 0,
+      race,
     }
+    loaded.teamSeq = migrateTeamIdentity(loaded.teams, saved.teamSeq)
     for (const team of loaded.teams) migrateTeam(team, loaded.settings.budget)
     return loaded
   } catch (err) {
@@ -242,6 +270,33 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
   const architectTitle = (station) => STATIONS.find((s) => s.id === station)?.architect || "Solutions Architect"
   const team = (id) => state.teams.find((t) => t.id === id)
 
+  /** New teams per address, in memory: a courtesy limit on a route that needs no PIN. */
+  const teamCreates = new Map()
+  const teamCreateLimited = (req) => {
+    const entry = teamCreates.get(clientIp(req))
+    return Boolean(entry) && entry.resetAt > Date.now() && entry.count >= TEAM_CREATE_LIMIT
+  }
+  const countTeamCreate = (req) => {
+    const now = Date.now()
+    const ip = clientIp(req)
+    const entry = teamCreates.get(ip)
+    if (!entry || entry.resetAt <= now) teamCreates.set(ip, { count: 1, resetAt: now + TEAM_CREATE_WINDOW_MS })
+    else entry.count += 1
+  }
+
+  /** A usable team name from a request (`{ name }`), or why not (`{ status, error }`). `exceptId` is the team being renamed. */
+  const checkTeamName = (value, exceptId) => {
+    const name = cleanTeamName(value)
+    if (!name) return { status: 400, error: "Type a team name first" }
+    if (name.length > TEAM_NAME_MAX) return { status: 400, error: `Team names are ${TEAM_NAME_MAX} characters or fewer` }
+    const taken = state.teams.find((t) => t.id !== exceptId && nameKey(t.name) === nameKey(name))
+    if (taken) return { status: 409, error: `There is already a team called \u201c${taken.name}\u201d. Pick it from the list, or choose another name.` }
+    return { name }
+  }
+
+  /** True once any team has locked a dial: from then on the budget level is fixed, so every board is scored on the same caps. */
+  const anyLock = () => state.teams.some((t) => Object.keys(t.choices).length || Object.keys(t.plans).length || Object.keys(t.reviews).length)
+
   /** Heartbeats live in memory only: they change every few seconds and must not rewrite the save file. */
   const presence = {}
 
@@ -263,6 +318,11 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       if (station && sameSecret(pin, architectPin)) {
         if (!STATION_IDS.includes(station)) return send(res, 400, { error: "Pick the table you are the Solutions Architect for" })
         clearPinFailures(req)
+        /* Signing in is being there: the SA is Available at once, with no toggle to remember. */
+        if (!state.pitches[station] && !state.architects[station]?.available) {
+          state.architects[station] = { available: true, since: Date.now() }
+          bump()
+        }
         return send(res, 200, { role: "architect", station })
       }
       if (sameSecret(pin, hostPin)) {
@@ -273,92 +333,114 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       failedPin(req)
       return send(res, 403, { error: "Wrong PIN" })
     },
-    "POST /api/host/setup": (req, res, { body }) => {
+    /**
+     * A team adds itself from a table iPad: a name, one tap, no PIN. It gets the next free colour
+     * and shows up in the team list on every other iPad.
+     */
+    "POST /api/teams": (req, res, { body }) => {
+      const closed = lockReason()
+      if (closed) return send(res, 409, { error: closed })
+      const checked = checkTeamName(body?.name)
+      if (checked.error) return send(res, checked.status, { error: checked.error })
+      if (state.teams.length >= MAX_TEAMS) return send(res, 409, { error: `All ${MAX_TEAMS} team places are taken. Pick your team from the list, or ask the host to remove one.` })
+      if (teamCreateLimited(req)) return send(res, 429, { error: "Too many new teams from this device. Pick your team from the list, or try again in a few minutes." })
+      countTeamCreate(req)
+      state.teamSeq += 1
+      const t = blankTeam(`t${state.teamSeq}`, checked.name, freeColor(state.teams))
+      state.teams.push(t)
+      bump()
+      return send(res, 201, { ok: true, team: t, version: state.version })
+    },
+    /** Rename or remove a team (typos, a team added twice). Not once the race has run: its result names the teams. */
+    "POST /api/host/team": (req, res, { body }) => {
       if (requireHost(req, res)) return
-      const list = Array.isArray(body?.teams) ? body.teams : []
-      if (list.length < MIN_TEAMS || list.length > MAX_TEAMS) return send(res, 400, { error: `Use ${MIN_TEAMS} to ${MAX_TEAMS} teams` })
-      const stations = Array.isArray(body?.stations) ? STATION_IDS.filter((id) => body.stations.includes(id)) : [...STATION_IDS]
-      if (!stations.length) return send(res, 400, { error: "Use at least one table" })
-      const base = blankState()
-      const settings = { ...sessionSettings(body), stations }
-      state = { ...base, settings, clock: { ...base.clock, totalMs: settings.playMinutes * 60_000 }, teams: makeTeams(list) }
-      for (const key of Object.keys(presence)) delete presence[key]
+      const t = team(body?.team)
+      if (!t) return send(res, 404, { error: "No such team" })
+      if (state.race) return send(res, 409, { error: "Clear the race before changing the teams" })
+      if (body?.action === "rename") {
+        const checked = checkTeamName(body?.name, t.id)
+        if (checked.error) return send(res, checked.status, { error: checked.error })
+        t.name = checked.name
+      } else if (body?.action === "remove") {
+        state.teams = state.teams.filter((x) => x.id !== t.id)
+        dropFromQueues(t.id)
+        for (const [id, seat] of Object.entries(state.tables)) if (seat.team === t.id) delete state.tables[id]
+        for (const [id, pitch] of Object.entries(state.pitches)) {
+          if (pitch.team !== t.id) continue
+          delete state.pitches[id]
+          state.architects[id] = { available: true, since: Date.now() }
+        }
+        delete presence[t.id]
+      } else {
+        return send(res, 400, { error: "Rename or remove a team" })
+      }
       bump()
       return send(res, 200, publicState())
     },
-    "POST /api/host/phase": (req, res, { body }) => {
+    /** One budget level for everyone. It can change until the first dial is locked, so every board is scored on the same caps. */
+    "POST /api/host/budget": (req, res, { body }) => {
+      if (requireHost(req, res)) return
+      const level = body?.budget
+      if (!BUDGET_LEVELS.some((b) => b.id === level)) return send(res, 400, { error: `The budget level is ${BUDGET_LEVELS.map((b) => b.name).join(", ")}` })
+      if (level !== state.settings.budget) {
+        if (state.race || anyLock()) return send(res, 409, { error: `Teams have already locked choices on the ${budgetFor(state.settings.budget).name} budget. Restart the experience to change it.` })
+        state.settings.budget = level
+        bump()
+      }
+      return send(res, 200, publicState())
+    },
+    /**
+     * The optional timer. start (minutes, default 35) runs it from any point before the race, which
+     * also reopens play after time is up; pause and resume; add moves the end by whole minutes; reset
+     * goes back to open, untimed play.
+     */
+    "POST /api/host/timer": (req, res, { body }) => {
       if (requireHost(req, res)) return
       const action = body?.action
       const now = Date.now()
       const phase = phaseOf(state)
       const clock = state.clock
-      if (action === "set") {
-        if (phase !== "lobby") return send(res, 409, { error: "Set the session plan before the brief starts" })
-        Object.assign(state.settings, sessionSettings({ ...state.settings, ...body }))
-        clock.totalMs = state.settings.playMinutes * 60_000
-      } else if (action === "brief") {
-        if (phase !== "lobby") return send(res, 409, { error: "The brief has already started" })
-        state.brief = { status: "running", startedAt: now, endsAt: now + state.settings.briefMinutes * 60_000 }
-      } else if (action === "play") {
-        if (!["lobby", "brief", "briefDone"].includes(phase)) return send(res, 409, { error: "Play has already started" })
-        state.brief = { ...state.brief, status: "done", endsAt: state.brief.endsAt || now }
-        clock.status = "running"
-        clock.totalMs = state.settings.playMinutes * 60_000
-        clock.endsAt = now + clock.totalMs
-      } else if (action === "pause" && clock.status === "running") {
-        clock.status = "paused"
-        clock.remainingMs = Math.max(0, clock.endsAt - now)
-        clock.endsAt = null
-        clock.pausedAt = now
-      } else if (action === "resume" && clock.status === "paused") {
-        clock.status = "running"
-        clock.endsAt = now + (clock.remainingMs || 0)
-        clock.remainingMs = null
+      const maxMs = SESSION.maxMinutes * 60_000
+      if (state.race) return send(res, 409, { error: "The race has run: clear the race to use the timer again" })
+      if (action === "start") {
+        const minutes = body?.minutes === undefined || body?.minutes === null || body?.minutes === "" ? SESSION.timerMinutes : Number(body.minutes)
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > SESSION.maxMinutes) return send(res, 400, { error: `Set the timer to a whole number of minutes from 1 to ${SESSION.maxMinutes}` })
+        state.clock = { ...openClock(), status: "running", totalMs: minutes * 60_000, endsAt: now + minutes * 60_000 }
+      } else if (action === "reset") {
+        state.clock = openClock()
+      } else if (action === "pause") {
+        if (phase !== "play") return send(res, 409, { error: "No timer is running" })
+        Object.assign(clock, { status: "paused", remainingMs: Math.max(0, clock.endsAt - now), endsAt: null, pausedAt: now })
+      } else if (action === "resume") {
+        if (phase !== "paused") return send(res, 409, { error: "The timer is not paused" })
         for (const seat of Object.values(state.tables)) seat.since += now - (clock.pausedAt || now)
-        clock.pausedAt = null
+        Object.assign(clock, { status: "running", endsAt: now + (clock.remainingMs || 0), remainingMs: null, pausedAt: null })
       } else if (action === "add") {
-        const minutes = Math.round(Number(body?.minutes))
-        if (!Number.isFinite(minutes) || minutes === 0 || Math.abs(minutes) > SESSION.maxMinutes) return send(res, 400, { error: "Add or remove whole minutes" })
+        const minutes = Number(body?.minutes)
+        if (!Number.isInteger(minutes) || minutes === 0 || Math.abs(minutes) > SESSION.maxMinutes) return send(res, 400, { error: "Add or remove whole minutes" })
         const ms = minutes * 60_000
-        if (phase === "lobby") {
-          state.settings.playMinutes = clampMinutes(state.settings.playMinutes + minutes, SESSION.playMinutes)
-          clock.totalMs = state.settings.playMinutes * 60_000
-        } else if (phase === "brief") {
-          state.brief.endsAt = Math.max(now, state.brief.endsAt + ms)
-        } else if (phase === "play" && clock.status === "running") {
-          clock.endsAt += ms
+        if (phase === "play") {
+          clock.endsAt = Math.min(now + maxMs, clock.endsAt + ms)
           clock.totalMs += ms
           if (clock.endsAt <= now) endPlay("host")
-        } else if (phase === "play") {
-          clock.remainingMs += ms
+        } else if (phase === "paused") {
+          clock.remainingMs = Math.min(maxMs, clock.remainingMs + ms)
           clock.totalMs += ms
           if (clock.remainingMs <= 0) endPlay("host")
         } else if (phase === "ended" && minutes > 0) {
-          Object.assign(clock, { status: "running", endsAt: now + ms, totalMs: clock.totalMs + ms, endedAt: null, endedBy: null })
-        } else if (phase === "readout") {
-          state.readout.endsAt = Math.max(now, state.readout.endsAt + ms)
+          state.clock = { ...openClock(), status: "running", totalMs: clock.totalMs + ms, endsAt: now + ms }
         } else {
-          return send(res, 409, { error: "Nothing to add time to right now" })
+          return send(res, 409, { error: phase === "ended" ? "Time is up: add minutes or start the timer to reopen play" : "Start the timer before adding or removing minutes" })
         }
-      } else if (action === "end") {
-        if (phase !== "play") return send(res, 409, { error: "Play is not running" })
-        endPlay("host")
-      } else if (action === "readout") {
-        if (!state.race) return send(res, 409, { error: "Run the race before the readouts" })
-        state.readout = { startedAt: now, endsAt: now + state.settings.readoutMinutes * 60_000 }
       } else {
-        return send(res, 400, { error: `Cannot ${String(action || "do that")} in the ${phase} phase` })
+        return send(res, 400, { error: "Start, pause, resume, add to or reset the timer" })
       }
       bump()
       return send(res, 200, publicState())
     },
+    /** The host console runs the race on the host PIN alone; the projector asks for the race password. */
     "POST /api/host/race": (req, res, { body }) => {
       if (requireHost(req, res)) return
-      if (!racePasswordOk(body?.racePassword)) {
-        failedPin(req)
-        return send(res, 403, { error: "Wrong race password" })
-      }
-      clearPinFailures(req)
       return startRace(res, body, "host")
     },
     "POST /api/race/run": (req, res, { body }) => {
@@ -367,13 +449,23 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
         return send(res, 403, { error: "Wrong race password" })
       }
       clearPinFailures(req)
-      if (state.race) return send(res, 409, { error: "The race has run. The host can take it back to run it again." })
       return startRace(res, body, "race screen")
     },
+    "POST /api/host/readout": (req, res) => {
+      if (requireHost(req, res)) return
+      if (!state.race) return send(res, 409, { error: "Run the race before the readouts" })
+      if (!state.readout) {
+        state.readout = { startedAt: Date.now() }
+        bump()
+      }
+      return send(res, 200, publicState())
+    },
+    /** Clearing the race discards its result and reopens play, untimed. */
     "POST /api/host/unrace": (req, res) => {
       if (requireHost(req, res)) return
       state.race = null
       state.readout = null
+      state.clock = openClock()
       bump()
       return send(res, 200, publicState())
     },
@@ -419,7 +511,6 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       if (body?.action !== "start") return send(res, 400, { error: "Start or cancel a pitch" })
       const t = team(body?.team)
       if (!t) return send(res, 404, { error: "No such team" })
-      if (!state.architects[station]?.available) return send(res, 409, { error: "Set yourself Available before starting a pitch" })
       if (live) return send(res, 409, { error: "A pitch is already running at this table" })
       if (!t.plans[station]) return send(res, 409, { error: "This team has not locked all three choices here" })
       if (t.reviews[station]?.status === "approved") return send(res, 409, { error: "This design is already approved" })
@@ -473,6 +564,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       if (requireHost(req, res)) return
       state = blankState()
       for (const key of Object.keys(presence)) delete presence[key]
+      teamCreates.clear()
       bump()
       return send(res, 200, publicState())
     },
@@ -485,14 +577,10 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
 
   /** The race uses approved tables only: everything else races on the customer's existing setup and scores 0. */
   function startRace(res, body, by) {
-    if (!state.teams.length) return send(res, 400, { error: "Set up teams first" })
-    const phase = phaseOf(state)
-    if (phase === "play") {
-      if (!body?.endClock) return send(res, 409, { error: "Play is still running. End it first, then run the race." })
-      endPlay(by)
-    } else if (phase !== "ended") {
-      return send(res, 409, { error: "Run the race after play" })
-    }
+    if (state.race) return send(res, 409, { error: "The race has run. The host can clear it to run it again." })
+    if (!state.teams.length) return send(res, 400, { error: "No teams yet: the race needs at least one team" })
+    /* The race can run at any time, with or without a timer: running it ends play for every table. */
+    if (playOpen(state)) endPlay(by)
     const seed = oneLine(body?.seed, 64) || `${state.id}-${Date.now()}`
     const stations = state.settings.stations
     state.pitches = {}
@@ -525,13 +613,9 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
     return plan
   }
 
-  /** Expire the brief and the play clock lazily so a restart or a sleeping Mac still keeps time. */
+  /** Expire a running timer lazily so a restart or a sleeping Mac still keeps time. Untimed play never expires. */
   function tick() {
     const now = Date.now()
-    if (state.brief?.status === "running" && now >= state.brief.endsAt) {
-      state.brief.status = "done"
-      bump()
-    }
     if (state.clock.status === "running" && now >= state.clock.endsAt) {
       endPlay("time")
       bump()
@@ -540,13 +624,10 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
   const timer = setInterval(tick, 1000)
   timer.unref?.()
 
-  /** Why a team cannot change this table right now, or null. */
+  /** Why a team cannot join or change this table right now, or null. Play is open unless time is up or the race has run. */
   function lockReason(t, station) {
-    const phase = phaseOf(state)
     if (state.race) return "The race has run: decisions are locked"
-    if (phase === "brief" || phase === "briefDone") return "Read the brief: choices open when the host starts play"
-    if (phase === "lobby") return "Wait for the host to start the session"
-    if (phase === "ended") return "Time is up: this table is locked"
+    if (phaseOf(state) === "ended") return "Time is up: this table is locked"
     if (station && !state.settings.stations.includes(station)) return "That table is not in play"
     return null
   }

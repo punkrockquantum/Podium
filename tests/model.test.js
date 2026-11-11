@@ -33,11 +33,12 @@ test("four tables: a problem card, 2–3 targets, cap lines and three dials of t
   assert.equal(C.TIERS, undefined, "per-team tiers are gone")
 })
 
-test("ten distinct team colours and a 50-minute session by default", () => {
+test("ten distinct team colours, and an untimed session with a 35-minute timer on offer", () => {
   assert.equal(new Set(C.TEAM_COLORS).size, 10)
   assert.equal(C.MAX_TEAMS, 10)
-  assert.equal(C.MIN_TEAMS, 1)
-  assert.equal(C.sessionTotal(), 50)
+  assert.equal(C.MIN_TEAMS, undefined, "a game starts with no teams: they add themselves")
+  assert.equal(C.SESSION.timerMinutes, 35)
+  assert.equal(C.sessionTotal, undefined, "the fixed session plan is gone")
 })
 
 test("today's setup is coherent, and out of the zone at every table on every budget", () => {
