@@ -13,30 +13,25 @@
 <body>
   <header class="topbar"><div class="brand"><b>PODIUM</b> 2027</div><div class="station-title"><h1>F1 Infrastructure Strategy</h1><span>FIA 2027 Infrastructure Specification · Issue 01</span></div></header>
   <main class="home">
-    <section>
-      <h1>Find seconds per lap by tuning the customer's infrastructure.</h1>
-      <p class="muted">Four tables, one customer problem each. A 50-minute session: a 5-minute brief, 35 minutes of play, a 30-second race and the readouts.</p>
-      <ol class="how-to" id="howToPlay">
-        <li><b>1 · Brief:</b> choose your team, then read the table's brief: the customer's situation, what the F1 team wants (with numbers), the FIA rules and both cost caps, what each setting of the three decisions does, and how a provider helps. Everything needed to find the answer is in the brief. The decisions stay closed until you confirm you have read it.</li>
-        <li><b>2 · Tune:</b> nothing is selected when the table opens. Decide as a team, then tap one setting on each of the three dials. <b>Each choice locks the moment you tap it</b>: the counter shows <b>Locked 1 of 3</b>, and there is no undo. A live picture of the problem (the F1 car in the CFD wind tunnel, the data hall, the data path from Austin to the factory, the rack row) reacts to every lock; the grey needle on each gauge is today's setup.</li>
-        <li><b>One outcome: seconds found per lap.</b> Today's setup finds 0.00 s; a table in the zone finds 0.25–0.35 s. Over a cap or breaking an FIA rule is not allowed, so nothing counts. FIT (0–100, 80+ in the zone) is shown alongside.</li>
-        <li><b>3 · Pitch:</b> when all three are locked, <b>Call the Solutions Architect</b> and pitch the board in 30 seconds. <b>Approved</b> boards count: the race adds up their seconds found per lap. <b>Rejected</b> boards reopen for that team at that table only, with last time's picks shown as ghosts, and the team joins the queue again (every attempt is counted). Tables not approved race on the customer's existing setup at the Austin, Texas 2027 Grand Prix.</li>
-      </ol>
-      <p class="muted small">The host picks one budget level for everyone (Tight, Standard or Generous), which moves every cap line. The host, the Solutions Architects and the race share one PIN: <b>SKO27</b>.</p>
-      <div class="row"><button class="btn" data-role="team">Teams</button><button class="btn" data-role="architect">Solutions Architects</button><button class="btn" data-role="host">Session host</button><button class="btn" data-role="projector">Projector</button></div>
-    </section>
-    <section>
-      <h2>The four tables</h2>
-      <p class="muted small">Open one on the iPad at each table, then Share → Add to Home Screen for full screen.</p>
+    <section class="home-tables">
+      <h1>Pick your table</h1>
+      <p class="muted">Four tables, one customer problem each. Tap the table you are sitting at. Nothing to set up: the game is open.</p>
       <div class="tiles" id="stations"></div>
     </section>
     <section>
-      <h2>Run the room</h2>
-      <div class="tiles">
-        <a class="tile" href="/host.html" style="--c:#ffffff"><b>Host and Solutions Architects</b><span class="muted">Session plan, teams, approvals, the race and readouts. Solutions Architects sign in here too, pick their table and run its pitch queue. PIN: SKO27.</span></a>
-        <a class="tile" href="/race.html" style="--c:#ffd700"><b>Projector</b><span class="muted">The phase, its countdown and the lap-time ladder of seconds found, then the race and the readouts.</span></a>
-      </div>
+      <h2>How to play</h2>
+      <ol class="home-how" id="howToPlay">
+        <li><b>Add your team:</b> type a name, tap once. At every other table, tap your team in the list.</li>
+        <li><b>Brief:</b> read it together. It holds every number you need.</li>
+        <li><b>Tune:</b> three dials. Each choice locks the moment you tap it, so decide first.</li>
+        <li><b>Pitch:</b> Call the Solutions Architect. Approved tables find seconds per lap for the race.</li>
+      </ol>
     </section>
+    <nav class="home-links" aria-label="Run the room">
+      <a href="/race.html" id="projectorLink">Projector</a>
+      <a href="/host.html" id="hostLink">Host controls and Solutions Architects</a>
+      <button class="btn small-btn" data-role="team">Full instructions</button>
+    </nav>
   </main>
   <script>
     if (location.protocol === "file:") document.body.innerHTML = '<div style="font:18px/1.5 -apple-system,sans-serif;max-width:640px;margin:12vh auto;padding:24px;color:#eee;background:#15171c;border-radius:12px"><h1 style="margin-top:0">Podium needs its server</h1><p>This page was opened as a file, so the game cannot load.</p><p>In Finder, double-click <b>start.command</b> in the Podium folder (or run <code>npm start</code> in Terminal), then open <a style="color:#4cc9f0" href="http://localhost:8080/">http://localhost:8080/</a>.</p></div>'
@@ -47,7 +42,7 @@
     installErrorLogging("home")
     for (const b of document.querySelectorAll("[data-role]")) b.addEventListener("click", () => openInstructions(b.dataset.role))
     const box = document.getElementById("stations")
-    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}`, "data-station": s.id }, el("b", {}, s.name), el("span", {}, s.problem), el("span", { class: "muted small" }, `Targets: ${s.targets.map((t) => `${t.name} ${t.zone}`).join(" · ")} · pitch to the ${s.architect}`)))
+    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}`, "data-station": s.id }, el("b", {}, s.name), el("span", {}, s.problem)))
   </script>
 </body>
 </html>

@@ -7,7 +7,7 @@ import { podiumGraphic } from "/js/podium.js"
 import { approvedStations } from "/js/approval.js"
 import { raceSeconds } from "/js/model.js"
 import { CAR_PATH, CAR_VIEWBOX } from "/js/scene.js"
-import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
+import { phaseOf, phaseInfo, phaseRemainingMs, playOpen } from "/js/session.js"
 import { COTA_PATH_D, COTA_VIEWBOX, COTA_TURNS, COTA_FACTS } from "/js/cota.js"
 import { el, clock, post, watchState, gameClock, installErrorLogging, instructionsButton, button, confirmDialog, WORDS } from "/js/ui.js"
 
@@ -43,7 +43,12 @@ watchState((next, off) => {
     sub.textContent = "Reconnecting to the game server"
     return
   }
-  if (gameId && state.id !== gameId && !state.teams.length && !teamParam) location.href = "/"
+  /* A restarted game: stay on the projector and start again from the empty ladder. */
+  if (gameId && state.id !== gameId) {
+    held = null
+    cycleIndex = 0
+    viewKey = ""
+  }
   gameId = state.id
   render()
 }, 1500)
@@ -79,7 +84,9 @@ function render() {
 function phaseHeader() {
   const phase = phaseOf(state)
   const ms = phaseRemainingMs(state, offset)
-  lapBox.textContent = Number.isFinite(ms) ? clock(ms) : phase === "ended" ? "TIME" : "FLAG"
+  /* A countdown only while a timer is running or paused; otherwise the phase's own word ("No timer" in an open session). */
+  lapBox.textContent = Number.isFinite(ms) ? clock(ms) : phase === "race" || phase === "readout" ? "FLAG" : phaseInfo(phase).idle
+  lapBox.classList.toggle("idle", phase === "open")
   return phaseInfo(phase)
 }
 
@@ -172,23 +179,24 @@ function runRacePanel() {
   const password = el("input", { type: "password", id: "racePassword", placeholder: WORDS.racePassword, autocomplete: "off", maxlength: 64 })
   const go = async () => {
     if (!password.value) return toast(`Enter the ${WORDS.racePassword.toLowerCase()}`)
-    const playing = phaseOf(state) === "play"
-    if (playing && !(await confirmDialog("Play is still running. End it now and run the race?", WORDS.runRace))) return
+    if (playOpen(state) && !(await confirmDialog("Run the race now? Play ends for every table, and tables not approved race on the customer's existing setup.", WORDS.runRace))) return
     try {
-      await post("/api/race/run", { password: password.value, endClock: playing }, false)
+      await post("/api/race/run", { password: password.value }, false)
     } catch (err) {
+      password.value = ""
       toast(err.message)
     }
   }
   password.addEventListener("keydown", (e) => e.key === "Enter" && go())
   return el("div", { class: "panel", id: "runRacePanel" }, el("h3", {}, WORDS.runRace),
-    el("div", { class: "row" }, password, el("button", { class: "btn primary", id: "runRaceBtn", onclick: go }, WORDS.runRace)))
+    el("div", { class: "row" }, password, el("button", { class: "btn primary", id: "runRaceBtn", onclick: go }, WORDS.runRace),
+      el("span", { class: "small muted" }, "The race password is the host PIN. The race can run at any time, with or without a timer.")))
 }
 
 function renderWaiting() {
   const info = phaseHeader()
   sub.dataset.phase = info.id
-  sub.textContent = state.teams.length ? info.line : "Waiting for the host"
+  sub.textContent = info.line
   const rows = liveRows()
   const skeleton = JSON.stringify(["wait", info.id, state.teams.map((t) => [t.id, t.name, t.color])])
   if (skeleton === viewKey && ladder && document.getElementById("lapLadder")) return updateLadder(rows)
@@ -197,11 +205,11 @@ function renderWaiting() {
   ladder = null
   const standings = rows.length ? buildLadder(rows) : null
   app.replaceChildren(el("div", { class: "projector" },
-    el("div", { class: "panel phase-panel" }, el("div", { class: "phase-name" }, info.name), el("div", { class: "phase-clock", id: "phaseClock" }, lapBox.textContent), el("p", { class: "muted" }, info.line),
-      el("div", { class: "phase-steps" }, ["brief", "play", "race", "readout"].map((id) => el("div", { class: `phase-step${info.id === id || (id === "brief" && info.id === "briefDone") || (id === "race" && info.id === "ended") ? " on" : ""}` }, el("b", {}, phaseInfo(id).name))))),
+    el("div", { class: "panel phase-panel" }, el("div", { class: "phase-name" }, info.name),
+      info.id === "open" ? null : el("div", { class: "phase-clock", id: "phaseClock" }, lapBox.textContent), el("p", { class: "muted" }, info.line)),
     el("div", { class: "panel" }, el("h2", {}, "Lap-time ladder"), el("p", { class: "small muted" }, `Each car sits at the seconds per lap its approved tables have found (${WORDS.todaySetup.toLowerCase()} finds 0.00 s). Four FIT gauges per team, grey until approved. The race runs on these seconds plus incidents.`),
-      standings || el("p", { class: "muted" }, "No teams yet.")),
-    info.id === "ended" || info.id === "play" ? runRacePanel() : null))
+      standings || el("div", { class: "empty-state", id: "noTeams" }, el("b", {}, "No teams yet"), el("p", { class: "muted" }, "Teams add themselves on the table iPads. Each one gets a car here the moment it joins."))),
+    rows.length ? runRacePanel() : null))
 }
 
 /* ------------------------------------------------------------ COTA */

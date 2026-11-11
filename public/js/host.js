@@ -319,7 +319,7 @@ function renderQueues(s) {
     const arch = s.architects?.[id]
     const q = (action, team) => act("/api/host/queue", { station: id, action, team })
     return el("div", { class: "queue-table" },
-      el("h3", {}, `${C.byId(C.STATIONS, id).name} `, el("span", { class: arch?.available ? "done small" : "muted small" }, arch?.available ? "· Available" : "· Busy"),
+      el("h3", {}, `${C.byId(C.STATIONS, id).name} `, el("span", { class: arch?.available ? "done small" : "muted small" }, arch?.available ? "· Available" : arch ? "· Busy" : `· No ${WORDS.sa} signed in`),
         s.pitches?.[id] ? el("span", { class: "small warn-text" }, ` · pitching: ${s.teams.find((x) => x.id === s.pitches[id].team)?.name || ""}`) : null,
         button(`Act as ${WORDS.sa}`, () => { hostLeads = id; selectedTeam = null; render(true) }, { small: true })),
       list.length ? el("div", { class: "queue-list" }, list.map((entry, i) => {
