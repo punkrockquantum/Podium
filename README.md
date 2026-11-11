@@ -1,7 +1,8 @@
 # Podium 2027
 
-A 50-minute team game for sales teams about solving a Formula 1 team's infrastructure problems. Up to
-ten teams visit four tables. Each table is one customer problem: the team **reads the brief**, then
+A team game for sales teams (about 50 minutes) about solving a Formula 1 team's infrastructure
+problems. **There is nothing to set up:** once the server is running the game is open, and teams add
+themselves on the table iPads. Up to ten teams visit four tables. Each table is one customer problem: the team **reads the brief**, then
 **locks three decisions, one tap each**, aiming to put every target gauge in its green zone **without
 crossing a cost cap line**. Each team then pitches its board to the table's Solutions Architect (SA)
 in 30 seconds and watches the approved boards race the Austin 2027 Grand Prix on the projector. Every
@@ -14,8 +15,8 @@ are a simplified, fictional version of the real regulations.
 ## Contents
 
 1. [The game in one minute](#1-the-game-in-one-minute)
-2. [The 50-minute session](#2-the-50-minute-session)
-3. [Screens, roles and PINs](#3-screens-roles-and-pins)
+2. [The session and the optional timer](#2-the-session-and-the-optional-timer)
+3. [Screens, roles and the host PIN](#3-screens-roles-and-the-host-pin)
 4. [Teams and the budget level](#4-teams-and-the-budget-level)
 5. [The four tables](#5-the-four-tables)
 6. [FIT, scoring and approval](#6-fit-scoring-and-approval)
@@ -30,7 +31,11 @@ are a simplified, fictional version of the real regulations.
 
 ## 1. The game in one minute
 
-- **Teams:** 1 to 10. Each has a name and one of ten colours. Every team plays the same four problems
+- **No setup, no host coordination.** Open the app and play: a new game is open, untimed and empty.
+  The host only steps in to start a timer (optional) and to run the race.
+- **Teams:** up to 10, and they create themselves. On any table iPad, under **Choose your team**,
+  type a name and tap **Add your team**: no PIN, one tap, and the team is in with the next of ten
+  colours. It appears in the team list on every other iPad. Every team plays the same four problems
   on the same budget.
 - **Tables:** four, one iPad each, each with its own Solutions Architect: Connectivity, OEMs,
   Datacenter & Power and the CFD Supercomputer.
@@ -38,8 +43,8 @@ are a simplified, fictional version of the real regulations.
   zone finds 0.25–0.35 s; a cap or FIA breach is *not allowed* and finds nothing. A team's total
   (up to about 1.4 s) is what the host grid, the projector's **lap-time ladder**, the race and the
   readout all show.
-- **At each table**, the team picks itself from the team list, then works through three steps, which
-  look the same on every table:
+- **At each table**, the team adds itself (its first table) or taps its name in the team list (every
+  table after that), then works through three steps, which look the same on every table:
   1. **Brief:** the table's brief, written for a sales audience (`public/js/briefs.js`): *The
      situation*, *What the team wants* (with the numbers), *The rules* (the FIA rule numbers, both
      cost caps and what a breach costs), *Your three decisions* (what each setting does to
@@ -72,68 +77,127 @@ are a simplified, fictional version of the real regulations.
 
 ---
 
-## 2. The 50-minute session
+## 2. The session and the optional timer
 
-| Phase | Default | What happens |
+The session needs no host to begin. The moment the server runs, every table is open: teams add
+themselves, read the brief, lock their choices and pitch. By default there is **No timer**; the
+header of every screen says so, in the place where a countdown would be.
+
+| Phase | Clock shows | What happens |
 | --- | --- | --- |
-| Brief | 5 min | The host explains the game. iPads show "Listen to the brief" and block choices. |
-| Play | 35 min | Teams move freely between tables: read the brief, lock three choices, pitch. When time is up, every table locks. |
-| Race | 30 s | The host or the projector runs the race with the race password. |
-| Readout | 9 min | The projector cycles through each team's readout; anyone can pick one to hold it on screen. |
+| Open session (default) | No timer | Play is open and nothing expires. |
+| Play | A countdown | The host started the timer. Play is open until it reaches zero. |
+| Paused | The frozen countdown | The host paused the timer. Tables stay open. |
+| Time is up | TIME | The timer reached zero: every table locks. A board locked before then can still be pitched and approved. |
+| Race | RACE | The race has run (30 seconds on the projector). Decisions are locked. |
+| Readouts | RACE | The projector cycles through each team's readout; anyone can pick one to hold it on screen. |
 
-The host can change the four lengths before the session starts (1–120 minutes; the race is always
-30 seconds). During a phase the host can add or remove minutes, and can pause, resume or end play.
-The projector always shows the current phase, its countdown and the live standings.
+**The timer is optional**, and lives in the host controls (section 3):
 
-**Host controls, in order:** **Start brief** → **Start play** (or **Skip to play**) → **Pause**,
-**−5/−1/+1/+5 min** → **End play** → **Run race** (race password) → **Show readouts**.
-Adding minutes after play has ended reopens play.
+- **Start timer:** type the minutes (35 unless changed, 1–120) and tap **Start timer**.
+- **Pause** / **Resume**, and **−5 / −1 / +1 / +5 min** while it runs.
+- **Reset timer:** back to an untimed, open session.
+- When the timer reaches zero the tables lock. **Start timer**, adding minutes or **Reset timer**
+  reopens play.
+
+**The race can run at any time**, with or without a timer: from the host controls, or from the
+projector with the race password (the host PIN). Running it ends play. **Show readouts** follows,
+and **Clear the race** discards the result and reopens play with no timer.
+
+The projector always shows the current phase, the countdown when a timer is running, and the live
+standings.
 
 ---
 
-## 3. Screens, roles and PINs
+## 3. Screens, roles and the host PIN
 
 | Screen | Address | Who |
 | --- | --- | --- |
-| Landing page | `/` | Everyone: the four tables, the roles, and short instructions. |
+| Landing page | `/` | Everyone: the four tables first, then four lines on how to play, and small links to the projector and the host controls. |
 | Table iPad | `/station.html?station=<id>` | Teams. No PIN. Ids: `network`, `oem`, `dc`, `compute`. |
-| Host console | `/host.html` | The **session host**, or a **Solutions Architect** (the PIN plus their table). |
+| Host controls | `/host.html` | The **session host**, or a **Solutions Architect** (the host PIN plus their table). |
 | Projector | `/race.html` | The big screen: phase, countdown, standings, the race, the readouts. |
-| Team readout | `/race.html?team=t1` | One team's readout (`t1` to `t10`). The host console lists every link. |
+| Team readout | `/race.html?team=t1` | One team's readout. The host controls list every link once the race has run. |
 
 The old table ids `ai`, `storage` and `governance` show "This table is not in play" with links to
 the four tables.
 
-**One PIN: `SKO27`.** The host, the Solutions Architects and the race password all use it, and it is
-the default in the code, in `start.command` and in the background-service installer, so a fresh
-install or a restart always accepts SKO27. The three roles are still separate environment variables,
-so an event can give them different values if it ever wants to:
+### The host PIN
 
-| Variable | Default | Used for |
-| --- | --- | --- |
-| `HOST_PIN` | `SKO27` | The session host. |
-| `LEADER_PIN` | `SKO27` | The Solutions Architects. One shared PIN; each SA picks their table. (The variable keeps its old name so existing installs keep working.) |
-| `RACE_PIN` | `SKO27` | The race password, on the projector and the host console. |
+One PIN protects everything a team must not be able to do: the timer, the race, clearing the race,
+restarting, the budget level, renaming or removing a team, and every Solutions Architect action. The
+server checks it on each of those requests. Adding a team, checking in, reading the brief, locking
+choices and calling the SA need no PIN.
 
-**Session host** sees everything: setup, the session plan, the approvals grid (locks, attempts,
-pitches, seconds found and FIT), the readout links, the live feed, every pitch queue, and restart.
-**Act as SA** lets the host run any table's queue.
+**The PIN is never shown.** No page, instruction, placeholder, message, address or log line contains
+it; the screens only ever say "the host PIN". It is typed into a masked field, and a wrong PIN clears
+the field. Ten wrong PINs from one address in five minutes lock that address out for five minutes.
 
-**A Solutions Architect** opens the host console, chooses the **Solutions Architect** tab, enters the
-PIN, picks a table and, optionally, a name. They see only their table: the **Available** toggle, the
-queue, **Start pitch** (a 30-second timer), the board exactly as the team locked it, which attempt
-this is, the table's brief, and **Approve** or **Reject** with a reason (up to 120 characters). The
-server refuses SA actions for any other table.
+**For whoever installs Podium:** the PIN is `SKO27` unless you change it. That default is set in
+`server.mjs` (`DEFAULT_PINS`) and in the background-service installer (`EVENT_PIN` in
+`scripts/install-service.sh`). The host, the Solutions Architects and the race password all use it.
+To use different values, set these environment variables before starting the server or running the
+installer (1–64 letters, digits, `_` or `-`); tell the people who need them in person, not on a
+screen:
+
+| Variable | Used for |
+| --- | --- |
+| `HOST_PIN` | The session host: everything in the host controls. |
+| `LEADER_PIN` | The Solutions Architects. One shared PIN; each SA picks their table. (The variable keeps its old name so existing installs keep working.) |
+| `RACE_PIN` | The race password asked for on the projector. |
+
+### The host controls
+
+`/host.html` opens on a single masked field for the host PIN. Entering it opens one page of controls:
+
+- **Timer:** **Start timer** (minutes, default 35), **Pause** / **Resume**, add or remove minutes,
+  **Reset timer** (section 2).
+- **Race:** **Run race**, then **Show readouts** and **Clear the race**.
+- **Approvals grid:** every team against every table: locks, attempts, pitches, seconds found and FIT.
+- **Pitch queues:** one per table, with **Act as SA** to run any table's queue.
+- **Live feed**, and the **readout links** once the race has run.
+- **Teams:** the compact list of teams that have added themselves, each with **Rename** and
+  **Remove**.
+- **Budget level** (section 4).
+- **Restart the experience:** one confirmation, then an empty, open, untimed game on the Standard
+  budget. **Demo mode** and **Log out** sit beside it.
+
+There is nothing to prepare before the session: no team list to type, no plan to edit.
+
+### Solutions Architects
+
+**A Solutions Architect** opens the same page, enters the host PIN, picks their table (and,
+optionally, a name) and taps **Open my table**. A sign-in that names a table opens that table's SA
+view; a sign-in without one opens the host controls. The SA is **Available** from the moment they
+sign in, so there is nothing to switch on. They see only their table: the queue, **Start pitch** (a
+30-second timer), the board exactly as the team locked it, which attempt this is, the table's brief,
+and **Approve** or **Reject** with a reason (up to 120 characters). The server refuses SA actions
+for any other table.
 
 ---
 
 ## 4. Teams and the budget level
 
-The host sets up 1–10 teams with a name; colours are assigned in order (ten distinct colours). There
-are no per-team tiers: every team plays the same problems.
+**Teams add themselves.** On a table iPad, **Choose your team** lists the teams so far and, below
+them, **Add your team**: type a name, tap once, and the team is in and sitting at that table. At its
+next table the team just taps its name.
 
-**The budget level** is one setting for the whole session, chosen at setup or in the lobby. It moves
-every table's CapEx and OpEx cap lines, never the physical power limits.
+- Names are checked by the server: trimmed, 32 characters or fewer, control characters removed, not
+  empty, and not the same as another team's name whatever the capitals ("There is already a team
+  called …").
+- Colours are given in order from the ten team colours; a removed team's colour is free again.
+- **Ten teams at most.** After that the iPads say all ten places are taken and to ask the host to
+  remove one.
+- One address can add 30 teams in ten minutes, then has to wait: enough for any room, too few to
+  flood the game.
+- The host can **Rename** or **Remove** a team in the host controls until the race has run. Removing
+  a team discards its choices and its place in every queue.
+- There are no per-team tiers: every team plays the same problems.
+
+**The budget level** is one setting for the whole session. It starts at **Standard**, and the host
+can change it in the host controls until the first dial is locked (after that it would move the
+cap lines under teams that have already decided; **Restart the experience** returns to Standard). It
+moves every table's CapEx and OpEx cap lines, never the physical power limits.
 
 | Level | Cap lines | Effect |
 | --- | --- | --- |
@@ -257,8 +321,8 @@ one hint that names the single dial setting that fixes the most urgent problem.
 `round(FIT × 1.1 ÷ 4)` table points (up to 28 per table). A table that is never locked (*missed*),
 or locked but not approved (*not approved*), earns nothing and races on today's setup. A rejected
 team's dials reopen at that table only (its previous picks shown as *last time* ghosts); it locks
-three new choices and queues for the SA again while play is running, and the attempt count goes up.
-A board locked before play ended can still be pitched and approved afterwards.
+three new choices and queues for the SA again while play is open, and the attempt count goes up.
+A board locked before the timer ran out can still be pitched and approved afterwards.
 
 **Penalties** are rolled in the race with fixed chances:
 
@@ -284,7 +348,8 @@ Lap pace is **96 s minus the team's seconds found per lap**: the sum over the fo
 (approved boards as tuned, the rest on today's setup at 0.00 s). Strategy quality follows the
 Connectivity and CFD FITs. Before the race the projector shows the **lap-time ladder**: one car per
 team, in its colour, as far right as its approved seconds, with four mini FIT gauges; cars slide
-and reorder as approvals land.
+and reorder as approvals land. With no teams yet, the projector says so and waits: each team gets a
+car the moment it adds itself.
 Incidents follow visible dial settings, and each names its dial:
 
 - **Connectivity:** a drop on a single tunnel, public-internet jitter, a fibre cut (satellite backup
@@ -310,12 +375,14 @@ today's setup at least 95% of the time.
   setting, the seconds and FIT gain, why it matters and how a provider helps;
 - the incidents that affected the team.
 
-Readouts are at `/race.html?team=<id>` and are listed on the host console. In the readout phase the
-projector cycles through every team every 20 seconds; tap a team in the chooser to hold it.
+Readouts are at `/race.html?team=<id>` and are listed in the host controls. Once the host taps
+**Show readouts**, the projector cycles through every team every 20 seconds; tap a team in the
+chooser to hold it.
 
-**Demo mode** (on the host console) walks through seven steps with sample data on the CFD table:
-scenario → tune (out of the zone, with live dials and a **Turn a dial for me** button that changes
-the wind tunnel) → in the zone → pitch → approve → race → readout. It does not touch the real game.
+**Demo mode** (in the host controls) walks through eight steps with sample data on the CFD table:
+add your team and the brief → tune (out of the zone, with live dials and a **Lock a dial for me**
+button that changes the wind tunnel) → in the zone → pitch → rejected → approved → race → readout.
+It does not touch the real game.
 
 ---
 
@@ -329,7 +396,7 @@ on this Mac only and opens `http://localhost:8080/`. From Terminal: `npm start`.
 **On Wi-Fi for iPads.**
 
 ```bash
-npm run start:lan            # every role uses the PIN SKO27
+npm run start:lan            # the host PIN is the default unless HOST_PIN is set (section 3)
 ```
 
 The line starting `iPads` gives the room address, for example `http://192.168.1.20:8080/`. Every
@@ -339,14 +406,22 @@ device must be on the same network. If the background service (section 9) is run
 Lock each iPad to its table page with **Guided Access** (Settings → Accessibility → Guided Access,
 then triple-click the side button).
 
+**On the day.** There is no setup step. Open each iPad on its table page and the projector on
+`/race.html`; teams add themselves as they sit down. Start the timer if you want one, and run the
+race when the room is ready.
+
 **Rehearsal checklist.**
 
-- [ ] The PIN SKO27 accepted on the host console (host and Solutions Architect tabs) and for Run race.
-- [ ] Teams created; budget level and phase lengths set.
-- [ ] Four iPads on their table pages; the team grid shows every team.
-- [ ] Each Solutions Architect logged in on their own device, scoped to their table, and marked Available.
-- [ ] Projector on `/race.html`; the race password tested.
-- [ ] One pitch rehearsed: I've read the brief → three taps (Locked 3 of 3) → Call the Solutions Architect → Start pitch → Approve, and one Reject to see the dials reopen as Attempt 2.
+- [ ] The host PIN opens the host controls, and with a table chosen opens that table's SA view.
+- [ ] Four iPads on their table pages, each showing **Add your team**. A test team added on one iPad
+      appears in the list on the others.
+- [ ] Projector on `/race.html`, showing "No timer" and the lap-time ladder as teams appear.
+- [ ] One pitch rehearsed: Add your team → I've read the brief → three taps (Locked 3 of 3) → Call the
+      Solutions Architect → Start pitch → Approve, and one Reject to see the dials reopen as Attempt 2.
+- [ ] If you want a countdown: **Start timer**, then **Reset timer**, tried once.
+- [ ] **Run race** tried from the projector (the race password is the host PIN), then **Clear the
+      race**.
+- [ ] **Restart the experience** before the doors open, so the game is empty.
 - [ ] Laptop on power, with sleep disabled.
 
 ---
@@ -357,7 +432,7 @@ then triple-click the side button).
 8080 and restarts it within about two seconds if it stops.
 
 ```bash
-HOST_PIN=… LEADER_PIN=… RACE_PIN=… sh scripts/install-service.sh   # install (asks for PINs if not given)
+sh scripts/install-service.sh                                        # install; HOST_PIN=… LEADER_PIN=… RACE_PIN=… in front to change the PINs
 launchctl kickstart -k gui/$(id -u)/com.podium.server                # restart
 launchctl bootout gui/$(id -u)/com.podium.server                     # stop until next login
 sh scripts/uninstall-service.sh                                      # remove, keep the game
@@ -367,8 +442,11 @@ The PINs are written into the LaunchAgent plist, which only your user can read.
 
 **Data.** The game is saved to `data/state.json` after every change, so restarts keep it. Logs go to
 `data/logs/`. Set `DATA_DIR` to store the game elsewhere. Back up `data/state.json` before an event.
-An unreadable save is renamed `state.json.damaged-<time>` and a blank game starts. Saves from the old
-six-table game load into the four-table game, keeping only valid choices.
+An unreadable save is renamed `state.json.damaged-<time>` and a blank game starts. Older saves load
+as they are: a game the host had set up but not started, or one in the host-run brief, opens as an
+untimed open session with its teams, choices, locked boards, reviews and attempts kept; a running or
+paused timer keeps running or stays paused; a finished race and its readouts are kept. Saves from the
+old six-table game load into the four-table game, keeping only valid choices.
 
 **Public tunnel for testing.** A Cloudflare Quick Tunnel gives a temporary HTTPS address with no
 account. It needs `cloudflared` (`brew install cloudflared`).
@@ -383,8 +461,9 @@ sh scripts/start-tunnel-window.sh # fallback: run it in a Terminal window
 The tunnel uses HTTP/2 over TCP 443 (`PODIUM_TUNNEL_PROTOCOL=quic` switches to QUIC). Its runner
 lives in `~/Library/Application Support/Podium/` and its log in `~/Library/Logs/Podium/tunnel.log`,
 because macOS stops LaunchAgents from reading `~/Documents`. **The URL changes whenever the tunnel
-restarts.** Anyone with the URL can act as a team, and the PIN is the well-known SKO27, so share the
-URL only with the people testing or playing, and restart the experience afterwards.
+restarts.** Anyone with the URL can add a team and play, so share the URL only with the people
+testing or playing, set your own PINs for anything public (section 3), and restart the experience
+afterwards.
 
 ---
 
@@ -396,9 +475,16 @@ URL only with the people testing or playing, and restart the experience afterwar
 | Port 8080 in use | `lsof -nP -iTCP:8080 -sTCP:LISTEN`, or `PORT=8090 npm start`. If it is Podium, a second start just opens the browser. |
 | "Podium needs its server" | An `.html` file was opened from Finder. Use `http://localhost:8080/`. |
 | "Reconnecting to the game server" | The server is restarting. It recovers on its own; choices are re-sent. |
-| "Listen to the brief" on an iPad | The brief is running. Choices open when the host presses **Start play**. |
-| "Time is up" on an iPad | Play has ended. Locked plans can still be pitched; the host can add minutes to reopen play. |
-| "Waiting for the SA" | No Solutions Architect is marked Available at that table. The SA toggles **Available**, or the host uses **Act as SA**. |
+| An iPad shows no teams | Nobody has added one yet. Type a name under **Add your team** and tap once. |
+| "There is already a team called …" | That name is taken (capitals do not count). Tap the team in the list, or choose another name. |
+| "All 10 team places are taken" | Ten teams is the limit. The host can **Remove** one in the host controls. |
+| "Too many new teams from this device" | One address added 30 teams in ten minutes. Wait a few minutes, or tap an existing team. |
+| The header says "No timer" | That is the default: play is open and nothing expires. The host can **Start timer** in the host controls. |
+| "Time is up" on an iPad | The timer reached zero. Locked boards can still be pitched; the host can **Start timer**, add minutes or **Reset timer** to reopen play. |
+| "The race has run: decisions are locked" | The host can **Clear the race** to reopen play. |
+| "Waiting for the SA" | The team is in the queue. The table's SA taps **Start pitch**, or the host uses **Act as SA**. |
+| "Wrong PIN" / "Host PIN required" | The field wants the host PIN. Whoever installed Podium has it (section 3); it is not shown on any screen. |
+| The budget level will not change | A dial is already locked somewhere. **Restart the experience** returns to Standard and reopens the choice. |
 | A team's dials are greyed out | The brief gate: the team has not tapped **I've read the brief** on this iPad for this table (the server refuses choices until it does), or the table is locked, waiting for the SA, or approved. |
 | "That choice is locked" | One tap decides a dial. Only a **Reject** by the SA reopens that team's dials at that table. |
 | "Too many failed PIN attempts" | Ten wrong PINs from one address in five minutes lock it out for five minutes. |
@@ -411,14 +497,14 @@ URL only with the people testing or playing, and restart the experience afterwar
 ```text
 server.mjs               Node HTTP server: static files, JSON API, state, persistence (no dependencies)
 public/index.html        landing page            public/station.html   table iPad
-public/host.html         host / SA console        public/race.html     projector and readouts
+public/host.html         host controls / SA view  public/race.html     projector and readouts
 public/js/briefs.js      the four briefs (situation, wants, rules, decisions, provider, words to know)
 public/js/briefview.js   renders a brief, with the #briefEnd sentinel the brief gate watches
 public/js/catalog.js     tables, problems, targets, caps, dials, budget levels, today's setup (the game data)
 public/js/model.js       boardFor(): gauges, cap bars, FIA chips, FIT, seconds found, sentence and hint; evaluate() for the race
 public/js/scene.js       the live scenario per table (wind tunnel, hall, data path, rack row) and its labels
 public/js/board.js       the tuning board (scene, SVG gauges, cap bars, FIT ring, dials), shared by every screen
-public/js/session.js     phases and countdowns
+public/js/session.js     the phase (open, play, paused, ended, race, readout) and the countdown: the single source
 public/js/race.js        the seeded race and its incidents
 public/js/report.js      the podium and each team's readout
 public/js/plan.js, plandata.js, summary.js   the locked board snapshot and the SA's summary
@@ -430,20 +516,26 @@ tests/                   node:test suites
 The browser and the server share the same ES modules, so the board an iPad shows is exactly the board the server locks in (the server is authoritative at lock-in). State is one
 JSON document; every change increments `version`, and clients poll `GET /api/state?since=<version>`.
 
-**Routes.** Host routes need `x-pin: <HOST_PIN>`. SA routes need `x-pin: <LEADER_PIN>` and
-`x-station: <table>`, and the host PIN works for any table. Failed PIN attempts are rate limited per
-client IP (`CF-Connecting-IP` behind the tunnel).
+**Routes.** Host routes need the header `x-pin: <HOST_PIN>`. SA routes need `x-pin: <LEADER_PIN>` and
+`x-station: <table>`, and the host PIN works for any table. A PIN travels only in that header or in
+the JSON body of a login or race request: never in an address, a response or a log line. PINs are
+compared in constant time, and failed attempts are rate limited per client IP (`CF-Connecting-IP`
+behind the tunnel). Team routes need no PIN.
 
 | Route | Purpose |
 | --- | --- |
 | `GET /api/state`, `GET /api/health`, `GET /api/presence` | Read the game; health includes the phase. |
-| `POST /api/login` | `{pin, station?}` → `{role: "host" \| "architect", station?}`. |
-| `POST /api/host/setup` | `{teams: [{name}], stations?, budget?}` with 1–10 teams; `budget` is `tight`, `standard` or `generous`. |
-| `POST /api/host/phase` | `{action: set (phase minutes and `budget`, lobby only) \| brief \| play \| pause \| resume \| add \| end \| readout}`. |
-| `POST /api/host/race`, `POST /api/race/run` | Run the race (`racePassword`, optional `seed`, `endClock`). |
-| `POST /api/host/unrace`, `/api/host/queue`, `/api/host/reset` | Clear the race, manage queues, start an empty game. |
+| `POST /api/login` | `{pin, station?}` → `{role: "host" \| "architect", station?}`. With a table it signs in that table's SA (and marks them Available); without one, the host. |
+| `POST /api/teams` | No PIN. `{name}` → `201 {team}`: a team adds itself. `400` for an empty or over-long name, `409` for a duplicate name, a full game (10 teams) or once time is up or the race has run, `429` past 30 new teams per address in ten minutes. |
+| `POST /api/host/timer` | `{action: start \| pause \| resume \| add \| reset, minutes?}`. `start` takes 1–120 whole minutes (default 35); `add` takes whole minutes, negative to remove; `reset` returns to no timer. Refused once the race has run. |
+| `POST /api/host/race` | Run the race on the host PIN (optional `seed`). Ends play. |
+| `POST /api/race/run` | Run the race from the projector: `{password, seed?}`, where `password` is the race password. |
+| `POST /api/host/readout`, `POST /api/host/unrace` | Show the readouts; clear the race and reopen play with no timer. |
+| `POST /api/host/team` | `{team, action: rename \| remove, name?}`. Refused once the race has run. |
+| `POST /api/host/budget` | `{budget: tight \| standard \| generous}`. Refused once any dial is locked. |
+| `POST /api/host/queue`, `POST /api/host/reset` | Manage a pitch queue; restart with an empty, open, untimed game. |
 | `POST /api/architect/availability`, `/pitch`, `/decide` | Available toggle, start/stop a pitch, approve or reject (`{team, station, decision: "approve" \| "reject", reason?}`). |
-| `POST /api/teams/<id>/checkin \| brief \| sim \| choices \| call \| presence \| checkout` | Team actions from a table iPad (no PIN). `brief` records that the brief was read for `{station}`; `choices` locks one dial at a time (`{station, choices: {dial: setting}}`) and is refused before the brief is read, for a dial already locked, or outside play. |
+| `POST /api/teams/<id>/checkin \| brief \| sim \| choices \| call \| presence \| checkout` | Team actions from a table iPad (no PIN). `brief` records that the brief was read for `{station}`; `choices` locks one dial at a time (`{station, choices: {dial: setting}}`) and is refused before the brief is read, for a dial already locked, or once time is up or the race has run. |
 
 ---
 
@@ -463,11 +555,18 @@ The suites (`node:test`, no dependencies) cover:
 - **Race:** determinism, incidents tied to dials, pace from the seconds found, the balance over 200
   seeds per budget level (printed as `[balance]` lines), and a 10-team race with board thumbnails,
   lessons, suggestions and "You found X s per lap" in every readout.
-- **Server:** setup and budget validation, the phases, the brief gate, one-tap locks, call, pitch,
-  approve and reject (reopening one team at one table, attempts counted), the approval gate scoring
-  FIT, SA scoping, rate limiting, persistence, old-save migration, a
-  damaged save, and static-file safety.
+- **Server:** a new game open with no host action, teams adding themselves (name checks, duplicates,
+  the 10-team limit, the per-address limit), the timer (start, pause, resume, add, reset, expiry), the
+  host PIN on every host and SA route and in no response, the brief gate, one-tap locks, call, pitch,
+  approve and reject (reopening one team at one table, attempts counted), the race at any time and
+  clearing it, SA scoping, rate limiting, persistence, migration of older saves, a damaged save, and
+  static-file safety.
 - **UX:** one vocabulary (Scenario, Tune, Seconds found per lap, FIT, In the zone, Today's setup…),
   the two tabs, scene labels of 8 words or fewer across every dial combination, the demo dial
   changing the wind tunnel, no retired product names, no tiers or old score bands, dead modules
-  removed, the phases, the demo steps, and the landing page.
+  removed, the phases, the demo steps, the landing page, and the host PIN appearing in no file under
+  `public/` and exactly once in this README.
+- **Browser** (headless Chrome, skipped if Chrome is not installed): from an empty game with no host
+  action, a team adds itself on a table iPad, reads the brief, locks three dials and calls the SA; the
+  page never moves while polling; a rejection reopens the dials; the host controls open behind one
+  masked PIN field, start and reset the timer and run the race; no JavaScript errors.

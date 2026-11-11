@@ -4,9 +4,9 @@
 # Usage: sh scripts/install-service.sh        (re-run after moving the folder or changing Node)
 #
 # PINs: HOST_PIN, LEADER_PIN and RACE_PIN are written into the LaunchAgent's EnvironmentVariables.
-# The game uses one PIN, SKO27, for the host, the Solutions Architects and the race. Each variable is
-# taken from the environment if set (HOST_PIN=... sh scripts/install-service.sh), otherwise it is
-# SKO27. PINs: 1-64 letters, digits, "_" or "-".
+# The game uses one PIN (EVENT_PIN below) for the host, the Solutions Architects and the race. Each
+# variable is taken from the environment if set (HOST_PIN=... sh scripts/install-service.sh),
+# otherwise it is the event PIN. PINs: 1-64 letters, digits, "_" or "-".
 set -euo pipefail
 
 LABEL="com.podium.server"
@@ -46,7 +46,7 @@ mkdir -p "$LOGS" "$HOME/Library/LaunchAgents"
 EVENT_PIN="SKO27"
 
 # pin_for NAME: the environment value if set, otherwise the event PIN. Nothing is asked
-# interactively, so the installer is safe to run unattended and always gives SKO27.
+# interactively, so the installer is safe to run unattended and always gives the event PIN.
 pin_for() {
   local name="$1" value="${!1:-}"
   [ -z "$value" ] && value="$EVENT_PIN"

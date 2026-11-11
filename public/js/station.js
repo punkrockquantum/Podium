@@ -322,14 +322,17 @@ function startTable() {
     gate.observer.observe(end)
   }
 
-  function readBrief(team) {
-    if (!gateOpen(team)) return
+  /** Works on the team as it is now: the brief stays on screen while other teams join and the state moves on. */
+  function readBrief() {
+    const team = currentTeam()
+    if (!team || !gateOpen(team)) return
     if (briefRead(team)) return goTab("tune")
     const btn = document.getElementById("readBrief")
     if (btn) btn.disabled = true
     post(`/api/teams/${team.id}/brief`, { station: station.id })
       .then((res) => {
-        if (res?.team) Object.assign(team, res.team)
+        const now = currentTeam()
+        if (now && res?.team) Object.assign(now, res.team)
         watcher.refresh()
         goTab("tune")
       })
@@ -352,7 +355,7 @@ function startTable() {
     return [
       panel(null, briefView(station.id, { withEnd: true })),
       el("div", { class: "panel brief-gate", id: "briefGate" },
-        el("div", { class: "actions" }, el("button", { class: "btn primary", id: "readBrief", disabled: !open, onclick: () => readBrief(team) }, read ? WORDS.goToDecisions : WORDS.readBrief)),
+        el("div", { class: "actions" }, el("button", { class: "btn primary", id: "readBrief", disabled: !open, onclick: readBrief }, read ? WORDS.goToDecisions : WORDS.readBrief)),
         read ? null : el("p", { class: `small muted${open ? " hidden" : ""}`, id: "briefGateHint" }, WORDS.briefGateHint),
         beforeFirstLock ? el("p", { class: "one-shot-warning", id: "oneShotWarning" }, el("b", {}, WORDS.oneShot)) : null),
     ]
