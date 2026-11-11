@@ -168,21 +168,21 @@ export const INSTRUCTIONS = {
   team: {
     title: "Teams",
     steps: [
-      "Tap your team on the table's iPad. Move between the four tables freely.",
+      "Open any table on its iPad. First time: type your team name and tap Add your team. At every other table, tap your team in the list. Move between the four tables freely.",
       "1 · Brief: read the whole brief together. It holds the targets, the rules, both cost caps and what every setting does. Then tap “I've read the brief. Take me to the decisions.” (it unlocks once you reach the end, or after 30 seconds).",
       "2 · Tune: each choice locks the moment you tap it. There is no undo and no confirmation, so decide as a team first. The scene, the gauges, the cap bars and the seconds found per lap update at once, so you see the consequence.",
       "The counter shows Locked 1 of 3. When all three are locked the table locks itself and the only step left is Call the Solutions Architect.",
       "3 · Pitch: wait for the SA (they may be busy with another team), then pitch for 30 seconds: why each choice helps the customer and how a provider helps.",
       "Approved: this table counts in the race. Rejected: the SA's reason is shown, all three dials reopen with your last picks shown as “last time” ghosts, and you choose again and call the SA again. That takes time.",
       "Over a cap or breaking an FIA rule is not allowed: 0.00 s counts. FIT 80+ means in the zone.",
-      "When time is up, any table not approved (including one still adjusting after a rejection) races on today's setup. After the race, open your readout: seconds found, attempts, lessons and what to do differently.",
+      "There is no timer unless the host starts one. When the race runs (or a timer reaches zero), any table not approved, including one still adjusting after a rejection, races on today's setup. After the race, open your readout: seconds found, attempts, lessons and what to do differently.",
     ],
   },
   architect: {
     title: "Solutions Architects (SA)",
     steps: [
-      "On the host screen choose Solutions Architect, enter the SA PIN (SKO27) and pick your table.",
-      "Set yourself Available. Tap a team in the queue: you see its board exactly as the team locked it, which attempt this is, and the table's brief.",
+      "On the host screen enter the host PIN, pick your table under Solutions Architects and tap Open my table. You are Available at once.",
+      "Tap a team in the queue: you see its board exactly as the team locked it, which attempt this is, and the table's brief.",
       "Start pitch: 30 seconds. Ask why each choice helps the customer and how a provider helps.",
       "Approve, or Reject with a short reason the team will see. Rejecting reopens that team's three dials at your table only; they choose again and call you again.",
     ],
@@ -190,17 +190,17 @@ export const INSTRUCTIONS = {
   host: {
     title: "Session host",
     steps: [
-      "Sign in with the host PIN (SKO27). Set up 1–10 teams and one budget level for everyone: Tight, Standard or Generous.",
-      "Start brief (5 min): the iPads show the briefs; choices stay closed. Start play when it ends (35 min). Use +/− to adjust the clock.",
-      "Watch the approvals grid: locks, attempts, pitches, seconds found and FIT. End play, then Run race with the race password (SKO27).",
-      "Show readouts: the projector cycles through every team's readout (about 9 min).",
+      "Nothing to set up: the game is open the moment a page is open. Teams add themselves on the table iPads, and the budget level is Standard unless you change it before the first lock.",
+      "The timer is optional. Start timer (35 minutes unless you change it), Pause, add or remove minutes, or Reset timer to go back to no timer. When a timer reaches zero every table locks; Start timer or Reset timer reopens play.",
+      "Watch the approvals grid: locks, attempts, pitches, seconds found and FIT. Rename or remove a team to fix a typo, and use Act as SA to run any table's queue.",
+      "Run race at any time, then Show readouts. Clear the race reopens play. Restart the experience empties the game for the next group.",
     ],
   },
   projector: {
     title: "Projector",
     steps: [
-      "Shows the phase, its countdown and the lap-time ladder: each team's car moves right as its approved seconds land.",
-      "The race plays in 30 seconds, then the podium.",
+      "Shows the lap-time ladder as teams add themselves: each team's car moves right as its approved seconds land. A countdown shows only while a timer is running.",
+      "Run race needs the race password, which is the host PIN. The race plays in 30 seconds, then the podium.",
       "Readouts cycle through every team; tap a team to hold it on screen.",
     ],
   },
@@ -241,6 +241,9 @@ export function confirmDialog(text, yes = "Yes", no = "Cancel") {
 /** One vocabulary for the same action on every table, the host and the projector. */
 export const WORDS = {
   chooseTeam: "Choose your team",
+  addTeam: "Add your team",
+  noTimer: "No timer",
+  hostPin: "Host PIN",
   switchTeam: "Switch team",
   startTuning: "Start tuning",
   problem: "Problem",
@@ -294,7 +297,7 @@ export function button(label, onclick, { kind = "secondary", disabled = false, s
   return el("button", { class: cls, onclick, disabled, title }, label)
 }
 
-/** The one banner for locked, ended, lobby, not-in-play and reconnecting states. */
+/** The one banner for locked, time-up, not-in-play and reconnecting states. */
 export function stateBanner(text, tone = "warn") {
   return text ? el("div", { class: `state-banner ${tone}`, role: "status" }, text) : null
 }

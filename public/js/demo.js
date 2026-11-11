@@ -8,14 +8,14 @@ import { runRace, systemScore } from "./race.js"
 import { buildPlan } from "./plandata.js"
 
 export const DEMO_STEPS = [
-  { id: "brief", screen: "brief", title: "1. Brief: read it together (5 min)", narration: "Each table opens on its brief: the situation, the targets with their numbers, the FIA rules and both cost caps, what each setting does, and every term explained. Tune and Pitch stay closed until the team taps “I've read the brief”, which unlocks at the end of the brief or after 30 seconds. The warning is the point: each choice locks the moment you tap it." },
-  { id: "tune", screen: "tuneOff", title: "2. Tune: one tap locks a dial (35 min)", narration: "No Lock-in button, no confirmation, no undo. The first tap on a dial locks it: the padlock appears, the other settings go quiet and the counter reads Locked 1 of 3. The scene, the gauges, the cap bars and the seconds found per lap update at once, so the team sees the consequence immediately. Tap a dial, or Lock a dial for me." },
+  { id: "brief", screen: "brief", title: "1. Add your team, then the brief", narration: "Nothing is set up first: a team types its name on any table's iPad, taps Add your team and is in (at the next table it just taps its name). Each table opens on its brief: the situation, the targets with their numbers, the FIA rules and both cost caps, what each setting does, and every term explained. Tune and Pitch stay closed until the team taps “I've read the brief”, which unlocks at the end of the brief or after 30 seconds. The warning is the point: each choice locks the moment you tap it." },
+  { id: "tune", screen: "tuneOff", title: "2. Tune: one tap locks a dial", narration: "No Lock-in button, no confirmation, no undo. The first tap on a dial locks it: the padlock appears, the other settings go quiet and the counter reads Locked 1 of 3. The scene, the gauges, the cap bars and the seconds found per lap update at once, so the team sees the consequence immediately. Tap a dial, or Lock a dial for me." },
   { id: "zone", screen: "tuneOn", title: "3. In the zone", narration: "Every gauge is green and every bar is under its cap line: the airflow is smooth and the tunnel shows the lap time found. In the zone is worth 0.25–0.35 s per lap; a cap or FIA breach is not allowed and finds nothing. When the third dial locks, the table locks itself." },
   { id: "pitch", screen: "plan", title: "4. All three locked: call the Solutions Architect", narration: "With all three locked the only step left is Call the Solutions Architect. The team joins the SA's queue (the SA may be busy with another team) and pitches for 30 seconds: why each choice helps the customer and how a provider helps." },
   { id: "reject", screen: "rejected", title: "5. Rejected: adjust and call again", narration: "The SA rejected the design with a short reason, shown on the team's iPad. Only this team's dials at this table reopen, with last time's picks shown as dashed “last time” ghosts. Each new tap locks instantly; three locks make attempt 2 and the team calls the SA again. That costs time, which is the lesson." },
   { id: "approve", screen: "architect", title: "6. The Solutions Architect approves", narration: "The SA sees the board exactly as the team locked it, which attempt this is, and the table's brief; starts the 30-second pitch; then taps Approve or Reject. The approvals grid shows every team's status, attempt and seconds found." },
-  { id: "race", screen: "race", title: "7. The race (30 s)", narration: "Each team's pace is the seconds it found per lap across its approved tables, plus race incidents. Anything not approved when time ran out, including a table still adjusting after a rejection, races on the customer's existing setup, and the incidents name the dial that caused them." },
-  { id: "readout", screen: "readout", title: "8. Readouts (9 min)", narration: "Every team gets a readout: You found X s per lap; the race said where you finished. Then each table's final scene with its story (Approved on the second attempt), the lessons and what to do differently, naming the dial and how a provider helps." },
+  { id: "race", screen: "race", title: "7. The race (30 s)", narration: "Each team's pace is the seconds it found per lap across its approved tables, plus race incidents. The host runs it whenever the room is ready, with or without a timer. Anything not approved by then, including a table still adjusting after a rejection, races on the customer's existing setup, and the incidents name the dial that caused them." },
+  { id: "readout", screen: "readout", title: "8. Readouts", narration: "Every team gets a readout: You found X s per lap; the race said where you finished. Then each table's final scene with its story (Approved on the second attempt), the lessons and what to do differently, naming the dial and how a provider helps." },
 ]
 
 const IDS = C.STATIONS.map((s) => s.id)
@@ -47,10 +47,10 @@ export function buildDemo(index) {
   const state = {
     id: "demo",
     version: 1,
-    settings: { ...C.SESSION, budget: C.DEFAULT_BUDGET, stations: IDS },
-    brief: { status: step.id === "brief" ? "running" : "done", endsAt: Date.now() + 4 * 60_000 },
-    clock: { status: step.id === "brief" ? "lobby" : ["race", "readout"].includes(step.id) ? "ended" : "running", totalMs: C.SESSION.playMinutes * 60_000, endsAt: Date.now() + 21 * 60_000, remainingMs: null },
-    readout: step.id === "readout" ? { startedAt: Date.now(), endsAt: Date.now() + 9 * 60_000 } : null,
+    settings: { budget: C.DEFAULT_BUDGET, stations: IDS },
+    /* The pretend session is open and untimed, as a real one is until the host starts the timer. */
+    clock: { status: ["race", "readout"].includes(step.id) ? "ended" : "open", totalMs: 0, endsAt: null, remainingMs: null, endedAt: null, endedBy: null, pausedAt: null },
+    readout: step.id === "readout" ? { startedAt: Date.now() } : null,
     tables: { [STATION]: { team: focus.id, since: Date.now() } },
     queues: {},
     architects: { [STATION]: { available: true } },

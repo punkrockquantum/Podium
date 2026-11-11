@@ -4,7 +4,7 @@ import { miniFit, learningCard, createBoard } from "/js/board.js"
 import { planSheet, summaryBlock, frozenBoard } from "/js/plan.js"
 import { designSummary } from "/js/summary.js"
 import { designStatus, approvalGrid, lockedDials, ghostsAt, STATUS_LABEL, STATUS_ORDER, PITCH_SECONDS, REJECT_REASON_MAX } from "/js/approval.js"
-import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
+import { phaseOf, phaseInfo, phaseRemainingMs, playOpen } from "/js/session.js"
 import { DEMO_STEPS, buildDemo } from "/js/demo.js"
 import { readoutFor } from "/js/report.js"
 import { readoutCard } from "/js/readoutview.js"
@@ -18,12 +18,10 @@ const app = document.getElementById("app")
 const FEED_POLL_MS = 2000
 let state = null
 let offset = 0
-let setupDraft = null
 /** Which screen the page currently shows: login, demo, control, architect or reconnecting. */
 let screen = ""
 let presence = { now: Date.now(), presence: {} }
 let demoIndex = null
-let loginMode = "host"
 /** The host can act as the Solutions Architect (SA) of one table; an SA always reviews the table chosen at login. */
 let hostLeads = null
 let selectedTeam = null
@@ -61,7 +59,7 @@ async function act(url, body, done) {
     if (done) toast(done)
   } catch (err) {
     toast(err.message)
-    if (/Host PIN|SA PIN/.test(err.message)) {
+    if (/Host PIN/.test(err.message)) {
       logout()
       render(true)
     }
@@ -87,155 +85,154 @@ function slot(id, key, build) {
   patchSlot(node, JSON.stringify(key), build)
 }
 
-/* ------------------------------------------------------------ login */
+/* ------------------------------------------------------------ sign-in: one masked PIN field */
 
+/**
+ * The host PIN opens the host controls; the same field plus a table signs a Solutions Architect in
+ * for that table. The PIN is typed, never shown: the field is masked and nothing on any screen says
+ * what it is.
+ */
 function renderLogin() {
-  const architect = loginMode === "architect"
-  const input = el("input", { type: "password", inputmode: "numeric", placeholder: architect ? "SA PIN" : "Host PIN", autocomplete: "off", id: "pinInput" })
+  const input = el("input", { type: "password", placeholder: WORDS.hostPin, "aria-label": WORDS.hostPin, autocomplete: "off", autocapitalize: "off", autocorrect: "off", spellcheck: "false", maxlength: 64, id: "pinInput" })
   const stations = (state?.settings?.stations || C.STATIONS.map((s) => s.id)).map((id) => C.byId(C.STATIONS, id))
-  const table = el("select", { class: "field", id: "architectTable" }, el("option", { value: "" }, "Pick your table"), stations.map((s) => el("option", { value: s.id }, s.name)))
-  const name = el("input", { type: "text", placeholder: "Your name (optional)", maxlength: 40, id: "architectName" })
-  const go = async () => {
-    if (architect && !table.value) return toast("Pick the table you are the Solutions Architect for")
+  const table = el("select", { class: "field", id: "architectTable", "aria-label": "Your table" }, el("option", { value: "" }, "Pick your table"), stations.map((s) => el("option", { value: s.id }, s.name)))
+  const name = el("input", { type: "text", placeholder: "Your name (optional)", maxlength: 40, autocomplete: "off", id: "architectName" })
+  const signIn = async (asSa) => {
+    if (!input.value) {
+      input.focus()
+      return toast("Enter the host PIN")
+    }
+    if (asSa && !table.value) return toast("Pick the table you are the Solutions Architect for")
     try {
-      const role = await login(input.value, architect ? table.value : "", architect ? name.value : "")
-      if (!architect && role !== "host") {
-        logout()
-        return toast(`That is the SA PIN: choose ${WORDS.solutionsArchitect}`)
-      }
+      await login(input.value, asSa ? table.value : "", asSa ? name.value : "")
       selectedTeam = null
+      hostLeads = null
       render(true)
     } catch (err) {
-      toast(/table/.test(err.message) ? err.message : "Wrong PIN")
+      input.value = ""
+      toast(/table|Too many/.test(err.message) ? err.message : "Wrong PIN")
     }
   }
-  input.addEventListener("keydown", (e) => e.key === "Enter" && go())
-  const tab = (mode, label) => el("button", { class: `btn small-btn${loginMode === mode ? " primary" : ""}`, "data-login": mode, onclick: () => { loginMode = mode; render(true) } }, label)
+  input.addEventListener("keydown", (e) => e.key === "Enter" && signIn(Boolean(table.value)))
   app.replaceChildren(el("div", { class: "pin-box panel" },
-    el("div", { class: "row" }, tab("host", "Session host"), tab("architect", WORDS.solutionsArchitect)),
-    el("h2", {}, architect ? WORDS.solutionsArchitect : "Host PIN"),
-    architect ? el("p", { class: "small muted" }, "Review, hear the pitch and approve or reject designs for your table. You only see your table.") : null,
-    input, architect ? table : null, architect ? name : null,
-    el("button", { class: "btn primary", onclick: go, id: "loginGo" }, architect ? "Open my table" : "Enter race control"), instructionsButton(architect ? "architect" : "host")))
+    el("h2", {}, WORDS.hostPin),
+    el("p", { class: "small muted" }, "The timer, the race, the teams and restart are behind the host PIN. Teams need no PIN: they play from the table iPads."),
+    input,
+    el("button", { class: "btn primary", onclick: () => signIn(false), id: "loginGo" }, "Open host controls"),
+    el("div", { class: "sa-login" },
+      el("h3", {}, "Solutions Architects"),
+      el("p", { class: "small muted" }, "Enter the host PIN above, pick your table and open its pitch queue. You only see your table."),
+      table, name,
+      el("button", { class: "btn", onclick: () => signIn(true), id: "saLoginGo" }, "Open my table")),
+    instructionsButton("host")))
 }
 
-/* ------------------------------------------------------------ setup */
+/* ------------------------------------------------------------ timer, race, teams and budget */
 
-const DEFAULT_NAMES = ["Scuderia Silicon", "Photon Racing", "Team Liquid Cool", "Petaflop GP", "Latency Zero", "Rack & Roll", "Throttle Up", "Edge Dynamics", "Quantum Pit", "Fibre Optic F1"]
-function defaultSetup() {
-  return { count: 6, teams: DEFAULT_NAMES.map((name) => ({ name })), budget: C.DEFAULT_BUDGET, stations: C.STATIONS.map((s) => s.id), ...Object.fromEntries(["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"].map((k) => [k, C.SESSION[k]])) }
+function phaseClock(s) {
+  const ms = phaseRemainingMs(s, s.demo ? 0 : offset)
+  return Number.isFinite(ms) ? clock(ms) : phaseInfo(phaseOf(s)).idle
+}
+
+const TIMER_LINES = {
+  open: "No timer is running: play is open and nothing expires. Start one only if you want a countdown.",
+  play: "Tables lock when the timer reaches zero. A board locked before then can still be pitched and approved.",
+  paused: "The timer is paused. Tables stay open.",
+  ended: "Time is up: every table is locked. Start the timer, add minutes or reset it to reopen play.",
+  race: "The race has run. Clear the race to reopen play and use the timer again.",
+  readout: "The race has run. Clear the race to reopen play and use the timer again.",
+}
+
+/** The optional timer: start it (35 minutes unless changed), pause or resume, add or remove minutes, or reset to no timer. */
+function renderTimer() {
+  const phase = phaseOf(state)
+  const timerAct = (body, done) => act("/api/host/timer", body, done)
+  const idButton = (id, label, onclick, kind = "") => el("button", { class: `btn ${kind}`.trim(), id, onclick }, label)
+  const add = (list) => list.map((m) => button(`${m > 0 ? "+" : "−"}${Math.abs(m)} min`, () => timerAct({ action: "add", minutes: m }), { small: true }))
+  const minutes = el("input", { type: "number", id: "timerMinutes", min: 1, max: C.SESSION.maxMinutes, step: 1, value: C.SESSION.timerMinutes, inputmode: "numeric", "aria-label": "Timer minutes" })
+  const start = () => timerAct({ action: "start", minutes: minutes.value === "" ? undefined : Number(minutes.value) }, "Timer started")
+  minutes.addEventListener("keydown", (e) => e.key === "Enter" && start())
+  const startRow = () => [minutes, el("span", { class: "muted" }, "minutes"), idButton("startTimer", "Start timer", start, "go")]
+  const reset = (confirmFirst) => idButton("resetTimer", "Reset timer", async () => {
+    if (confirmFirst && !(await confirmDialog("Reset the timer? The countdown stops and play stays open with no timer.", "Reset timer"))) return
+    timerAct({ action: "reset" }, "No timer: play is open")
+  })
+  const controls = []
+  if (phase === "open") controls.push(...startRow())
+  if (phase === "play") controls.push(idButton("pauseTimer", "Pause", () => timerAct({ action: "pause" })), ...add([-5, -1, 1, 5]), reset(true))
+  if (phase === "paused") controls.push(idButton("resumeTimer", "Resume", () => timerAct({ action: "resume" }), "go"), ...add([-5, -1, 1, 5]), reset(true))
+  if (phase === "ended") controls.push(...startRow(), ...add([1, 5]), reset(false))
+  return panel("timer-panel", el("h2", {}, `Timer · ${phaseInfo(phase).name}`),
+    el("div", { class: `big-timer${phase === "ended" ? " over" : ""}${phase === "open" ? " idle" : ""}`, id: "bigTimer" }, phaseClock(state)),
+    el("p", { class: "muted small", id: "timerLine" }, TIMER_LINES[phase]),
+    controls.length ? el("div", { class: "row timer-controls" }, controls) : null)
+}
+
+/** The race: run it at any time, then show the readouts; clearing it reopens play. Once it has run, the readout links sit here. */
+function renderRace() {
+  const s = state
+  if (!s.race) {
+    const none = !s.teams.length
+    const seed = el("input", { type: "text", placeholder: "Seed (optional)", maxlength: 64, id: "raceSeed" })
+    const go = async () => {
+      const ask = playOpen(state) ? "Run the race now? Play ends for every table, and tables not approved race on the customer's existing setup." : "Run the race? Tables not approved race on the customer's existing setup."
+      if (await confirmDialog(ask, WORDS.runRace)) act("/api/host/race", { seed: seed.value }, "Lights out!")
+    }
+    return panel("race-panel", el("h2", {}, "Race"),
+      el("p", { class: "muted small" }, none ? "The race needs at least one team. Teams add themselves on the table iPads." : "Run it whenever the room is ready, with or without a timer. Running the race ends play; the projector shows it in 30 seconds."),
+      el("div", { class: "row" }, el("button", { class: "btn primary", id: "hostRunRace", disabled: none, onclick: go }, WORDS.runRace), seed))
+  }
+  const r = s.race.result
+  const readouts = phaseOf(s) === "readout"
+  return panel("wide race-panel", el("h2", {}, readouts ? "Race · readouts on the projector" : "Race · finished"),
+    el("div", { class: "row" },
+      readouts ? null : el("button", { class: "btn go", id: "showReadouts", onclick: () => act("/api/host/readout", {}, "Readouts on the projector") }, "Show readouts"),
+      el("button", { class: "btn danger", id: "clearRace", onclick: async () => (await confirmDialog("Clear the race? Its result is discarded and play reopens with no timer.", "Clear the race")) && act("/api/host/unrace", {}, "Race cleared: play is open") }, "Clear the race")),
+    el("p", { class: "small muted" }, "Each team's readout opens on one screen, ready for a screenshot. Show readouts makes the projector cycle through them."),
+    el("div", { class: "readout-links", id: "readoutLinks" }, r.standings.map((row, i) => {
+      const t = s.teams.find((x) => x.id === row.id)
+      return el("a", { class: "readout-link", href: `/race.html?team=${encodeURIComponent(row.id)}`, target: "_blank", style: `--c:${row.color}` }, el("b", {}, `${i + 1}. ${t?.name || row.name}`), el("span", { class: "small muted" }, `P${r.results.find((x) => x.id === row.id)?.position} in the race · ${row.score} pts`))
+    })))
+}
+
+/** The compact team list: teams add themselves at the tables; the host renames or removes one to fix a typo. */
+function renderTeams() {
+  const s = state
+  const raced = Boolean(s.race)
+  const rows = s.teams.map((t) => {
+    const name = el("input", { type: "text", value: t.name, maxlength: C.TEAM_NAME_MAX, autocomplete: "off", "data-team-name": t.id, "aria-label": `Name of ${t.name}`, disabled: raced })
+    const rename = () => {
+      if (!name.value.trim() || name.value.trim() === t.name) return toast("Type the new name first")
+      act("/api/host/team", { team: t.id, action: "rename", name: name.value }, "Team renamed")
+    }
+    name.addEventListener("keydown", (e) => e.key === "Enter" && rename())
+    const remove = async () => (await confirmDialog(`Remove ${t.name}? Its choices, plans and approvals are deleted.`, "Remove")) && act("/api/host/team", { team: t.id, action: "remove" }, `${t.name} removed`)
+    return el("tr", { "data-team-row": t.id }, el("td", {}, el("i", { class: "swatch", style: `background:${t.color}` })), el("td", {}, name),
+      el("td", { class: "team-admin-actions" }, button("Rename", rename, { small: true, disabled: raced }), button("Remove", remove, { small: true, kind: "danger", disabled: raced })))
+  })
+  return panel("", el("h2", {}, `Teams · ${s.teams.length} of ${C.MAX_TEAMS}`),
+    el("p", { class: "small muted" }, raced ? "The race has run: clear it to rename or remove a team." : "Teams add themselves on the table iPads. Rename or remove one here to fix a typo."),
+    rows.length ? el("table", { class: "grid setup-grid team-admin", id: "teamAdmin" }, el("tbody", {}, rows)) : el("p", { class: "muted", id: "noTeamsYet" }, "No teams yet."))
 }
 
 /** One budget level for the whole session: it moves every table's cap lines. */
 function budgetSelect(value, onChange, id) {
-  const select = el("select", { class: "field", id }, C.BUDGET_LEVELS.map((b) => el("option", { value: b.id, selected: b.id === value }, `${b.name} budget`)))
+  const select = el("select", { class: "field", id, "aria-label": "Budget level" }, C.BUDGET_LEVELS.map((b) => el("option", { value: b.id, selected: b.id === value }, `${b.name} budget`)))
   select.addEventListener("change", () => onChange(select.value))
   return select
 }
 
-const budgetLines = () => el("ul", { class: "tier-lines small" }, C.BUDGET_LEVELS.map((b) => el("li", {}, el("b", {}, b.name), `: ${b.line}`)))
+/** True once any dial is locked (or the race has run): the budget level is then fixed, so every board is scored on the same caps. */
+const budgetFixed = (s) => Boolean(s.race) || s.teams.some((t) => [t.choices, t.plans, t.reviews].some((x) => x && Object.keys(x).length))
 
-/** The setup form's draft: the current game's teams and budget, or the defaults. */
-function ensureDraft() {
-  if (!setupDraft) {
-    setupDraft = state?.teams?.length
-      ? { ...defaultSetup(), count: state.teams.length, budget: state.settings.budget || C.DEFAULT_BUDGET, teams: [...state.teams.map((t) => ({ name: t.name })), ...defaultSetup().teams.slice(state.teams.length)], stations: [...state.settings.stations] }
-      : defaultSetup()
-  }
-  return setupDraft
-}
-
-function renderSetup() {
-  const d = ensureDraft()
-  const rows = d.teams.slice(0, d.count).map((t, i) => {
-    const name = el("input", { type: "text", value: t.name, maxlength: 32, "data-team-name": i })
-    name.addEventListener("input", () => { t.name = name.value })
-    return el("tr", {}, el("td", {}, el("i", { class: "swatch", style: `background:${C.TEAM_COLORS[i]}` })), el("td", {}, name))
-  })
-  const count = el("select", { class: "field", id: "teamCount" }, Array.from({ length: C.MAX_TEAMS }, (_, k) => el("option", { value: k + 1, selected: d.count === k + 1 }, `${k + 1} team${k ? "s" : ""}`)))
-  count.addEventListener("change", () => { d.count = Number(count.value); render(true) })
-  const stations = C.STATIONS.map((s) => {
-    const box = el("input", { type: "checkbox", checked: d.stations.includes(s.id) })
-    box.addEventListener("change", () => { d.stations = box.checked ? [...d.stations, s.id] : d.stations.filter((id) => id !== s.id) })
-    return el("label", { class: "row", style: "min-height:40px" }, box, el("span", { style: `color:${s.color};font-weight:800` }, s.name))
-  })
-  return panel("wide", el("h2", {}, state?.teams?.length ? "Re-create the game" : "Set up the game"),
-    el("p", { class: "small muted" }, "Every team plays the same four problems. The budget level moves every table's CapEx and OpEx cap lines for everyone."),
-    budgetLines(),
-    el("div", { class: "row" }, count, budgetSelect(d.budget, (v) => { d.budget = v }, "setupBudget")),
-    el("table", { class: "grid setup-grid" }, el("tbody", {}, rows)),
-    el("h3", { style: "margin-top:12px" }, "Tables in play"), el("div", { class: "row" }, stations),
-    el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn primary", id: "createGame", onclick: async () => {
-      if (state?.teams?.length && !(await confirmDialog("This wipes every team's choices, plans and scores. Continue?", "Re-create"))) return
-      act("/api/host/setup", { teams: d.teams.slice(0, d.count), stations: d.stations, budget: d.budget, briefMinutes: d.briefMinutes, playMinutes: d.playMinutes, raceMinutes: d.raceMinutes, readoutMinutes: d.readoutMinutes }, "Game created")
-      setupDraft = null
-    } }, state?.teams?.length ? "Re-create game" : "Create game")))
-}
-
-/* ------------------------------------------------------------ session plan */
-
-function phaseClock(s) {
-  const ms = phaseRemainingMs(s, s.demo ? 0 : offset)
-  const phase = phaseOf(s)
-  return Number.isFinite(ms) ? clock(ms) : phase === "ended" ? "TIME" : "RACE"
-}
-
-function minutesInputs() {
-  const s = state.settings
-  const inputs = {}
-  const field = (key, label) => {
-    inputs[key] = el("input", { type: "number", min: 0.5, max: C.SESSION.maxMinutes, step: 0.5, value: s[key], style: "width:84px", "data-minutes": key })
-    return el("label", {}, `${label} `, inputs[key])
-  }
-  const total = ["briefMinutes", "playMinutes", "raceMinutes", "readoutMinutes"].reduce((sum, k) => sum + s[k], 0)
-  let level = s.budget || C.DEFAULT_BUDGET
-  return el("div", { class: "session-plan" },
-    el("div", { class: "row" }, field("briefMinutes", "Brief"), field("playMinutes", "Play"), field("raceMinutes", "Race"), field("readoutMinutes", "Readout"),
-      budgetSelect(level, (v) => { level = v }, "lobbyBudget"),
-      button("Save plan", () => act("/api/host/phase", { action: "set", budget: level, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, Number(i.value)])) }, "Session plan saved"), { small: true })),
-    el("p", { class: "small muted" }, `Total ${total} minutes (default ${C.sessionTotal()}). The race itself lasts 30 seconds; its minute includes the podium. Budget: ${C.budgetFor(level).line}`))
-}
-
-function renderSession() {
-  const s = state
-  const phase = phaseOf(s)
-  const info = phaseInfo(phase)
-  const phaseAct = (body, done) => act("/api/host/phase", body, done)
-  const add = (list) => list.map((m) => button(`${m > 0 ? "+" : "−"}${Math.abs(m)} min`, () => phaseAct({ action: "add", minutes: m }), { small: true }))
-  const buttons = []
-  if (phase === "lobby") buttons.push(button("Start brief", () => phaseAct({ action: "brief" }, "Brief started"), { kind: "go" }), button("Skip to play", () => phaseAct({ action: "play" }, "Play started")))
-  if (phase === "brief") buttons.push(...add([-1, 1]), button("Start play", () => phaseAct({ action: "play" }, "Play started")))
-  if (phase === "briefDone") buttons.push(button("Start play", () => phaseAct({ action: "play" }, "Play started"), { kind: "go" }))
-  if (phase === "play") {
-    buttons.push(s.clock.status === "paused" ? button("Resume", () => phaseAct({ action: "resume" }), { kind: "go" }) : button("Pause", () => phaseAct({ action: "pause" })))
-    buttons.push(...add([-5, -1, 1, 5]))
-    buttons.push(button("End play", async () => (await confirmDialog("End play now? Every table locks; unapproved tables race on the customer's existing setup.", "End play")) && phaseAct({ action: "end" }, "Play ended"), { kind: "danger" }))
-  }
-  if (phase === "ended") buttons.push(...add([1, 5]))
-  if (phase === "race") buttons.push(button("Show readouts", () => phaseAct({ action: "readout" }, "Readouts on the projector"), { kind: "go" }))
-  if (phase === "readout") buttons.push(...add([-1, 1]))
-  const steps = ["brief", "play", "race", "readout"].map((id) => {
-    const on = phase === id || (id === "brief" && phase === "briefDone") || (id === "race" && phase === "ended")
-    const minutes = state.settings[`${id}Minutes`]
-    return el("div", { class: `phase-step${on ? " on" : ""}` }, el("b", {}, phaseInfo(id).name), el("span", {}, id === "race" ? "30 s" : `${minutes} min`))
-  })
-  return panel("wide session-panel", el("h2", {}, `Session plan · ${info.name}${s.clock.status === "paused" ? " (paused)" : ""}`),
-    el("div", { class: "phase-steps" }, steps),
-    el("div", { class: `big-timer${phase === "ended" ? " over" : ""}`, id: "bigTimer" }, phaseClock(s)),
-    el("p", { class: "muted", style: "text-align:center;margin:0 0 8px" }, phase === "briefDone" ? "The brief is over: start play." : info.line),
-    el("div", { class: "row", style: "justify-content:center" }, buttons),
-    phase === "lobby" ? minutesInputs() : null,
-    phase === "ended" ? renderRunRace() : null)
-}
-
-function renderRunRace() {
-  const seed = el("input", { type: "text", placeholder: "Seed (optional)", maxlength: 64 })
-  const password = el("input", { type: "password", placeholder: WORDS.racePassword, autocomplete: "off", maxlength: 64, id: "hostRacePassword" })
-  const go = async () => {
-    if (!password.value) return toast(`Enter the ${WORDS.racePassword.toLowerCase()}`)
-    if (await confirmDialog("Run the race? Unapproved tables score 0 and race on the customer's existing setup.", WORDS.runRace)) act("/api/host/race", { seed: seed.value, racePassword: password.value }, "Lights out!")
-  }
-  return el("div", { class: "row run-race", style: "justify-content:center;margin-top:12px" }, password, seed, el("button", { class: "btn primary", id: "hostRunRace", onclick: go }, WORDS.runRace))
+function renderBudget() {
+  const level = state.settings.budget || C.DEFAULT_BUDGET
+  const fixed = budgetFixed(state)
+  const select = budgetSelect(level, (v) => act("/api/host/budget", { budget: v }, `${C.budgetFor(v).name} budget`), "budgetLevel")
+  select.disabled = fixed
+  return panel("", el("h2", {}, "Budget level"),
+    el("div", { class: "row" }, select),
+    el("p", { class: "small muted", id: "budgetNote" }, fixed ? `Fixed at ${C.budgetFor(level).name}: a dial has been locked, so every board is scored on the same caps. Restart the experience to change it.` : `${C.budgetFor(level).line} Standard needs no action; change it before the first dial is locked.`))
 }
 
 /* ------------------------------------------------------------ approvals, feed and queues */
@@ -271,6 +268,7 @@ function approvalsKey(s) {
 }
 
 function renderApprovals(s) {
+  if (!s.teams.length) return panel("wide", el("h2", {}, "Approvals"), el("p", { class: "muted", id: "noApprovals" }, "No teams yet. Teams add themselves on the table iPads and appear here as they join."))
   const grid = approvalGrid(s)
   const head = el("tr", {}, el("th", {}, "Team"), ...grid.stations.map((id) => el("th", {}, shortName(id))), el("th", {}, "Approved"), el("th", {}, WORDS.secondsFound))
   const rows = grid.rows.map((row) => el("tr", {},
@@ -333,18 +331,6 @@ function renderQueues(s) {
   return panel("", el("h2", {}, "Pitch queues"), ...tables)
 }
 
-function renderReadouts() {
-  if (!state.race) return null
-  const r = state.race.result
-  return panel("wide", el("h2", {}, "Readouts"),
-    el("p", { class: "small muted" }, "Each team's readout opens on one screen, ready for a screenshot. The projector cycles through them in the Readouts phase."),
-    el("div", { class: "readout-links", id: "readoutLinks" }, r.standings.map((row, i) => {
-      const t = state.teams.find((x) => x.id === row.id)
-      return el("a", { class: "readout-link", href: `/race.html?team=${encodeURIComponent(row.id)}`, target: "_blank", style: `--c:${row.color}` }, el("b", {}, `${i + 1}. ${t?.name || row.name}`), el("span", { class: "small muted" }, `P${r.results.find((x) => x.id === row.id)?.position} in the race · ${row.score} pts`))
-    })),
-    el("div", { class: "row", style: "margin-top:10px" }, button("Re-open decisions (discard the race)", async () => (await confirmDialog("Discard this race and re-open decisions?", "Re-open")) && act("/api/host/unrace", {}, "Decisions re-opened"), { small: true, kind: "danger" })))
-}
-
 function renderLinks() {
   return panel("", el("h2", {}, "Table iPads"),
     el("div", { style: "display:grid;gap:6px" }, C.STATIONS.filter((s) => state.settings.stations.includes(s.id)).map((s) => el("a", { href: `/station.html?station=${s.id}`, target: "_blank" }, `${s.name}: ${location.origin}/station.html?station=${s.id}`))))
@@ -353,33 +339,36 @@ function renderLinks() {
 function toolbar() {
   return panel("row wide", instructionsButton("host"),
     button("Demo mode", () => { demoIndex = 0; render(true) }, { small: true }),
-    button("Restart the experience", restartExperience, { small: true, kind: "danger" }),
+    el("button", { class: "btn danger small-btn", id: "restartExperience", onclick: restartExperience }, "Restart the experience"),
     button("Log out", () => { logout(); render(true) }, { small: true }),
-    el("span", { class: "muted small" }, `${DEMO_STEPS.length}-step demo · ${state.teams.length} team${state.teams.length === 1 ? "" : "s"}`))
+    el("span", { class: "muted small" }, `${state.teams.length} team${state.teams.length === 1 ? "" : "s"} · ${DEMO_STEPS.length}-step demo`))
 }
 
-/** Race control: one slot per panel, each rebuilt only when what it shows changes. */
+const CONTROL_SLOTS = ["toolbarSlot", "timerSlot", "raceSlot", "approvalsSlot", "queuesSlot", "feedSlot", "teamsSlot", "budgetSlot", "linksSlot"]
+
+/** The host controls: one slot per panel, each rebuilt only when what it shows changes. Nothing here needs setting up first. */
 function renderControl(force) {
   const s = state
-  if (force || screen !== "control" || !document.getElementById("raceControl")) {
+  if (force || screen !== "control" || !document.getElementById("hostControls")) {
     screen = "control"
-    replaceKeepingScroll(app, el("div", { class: "host-grid", id: "raceControl" }, ["toolbarSlot", "sessionSlot", "approvalsSlot", "readoutsSlot", "feedSlot", "queuesSlot", "setupSlot", "linksSlot"].map((id) => el("div", { id, class: "slot" }))))
+    replaceKeepingScroll(app, el("div", { class: "host-grid", id: "hostControls" }, CONTROL_SLOTS.map((id) => el("div", { id, class: "slot" }))))
   }
   const has = s.teams.length > 0
-  ensureDraft()
+  const teamNames = s.teams.map((t) => [t.id, t.name, t.color])
   slot("toolbarSlot", [s.teams.length], toolbar)
-  slot("sessionSlot", has ? [phaseOf(s), s.clock.status, s.settings, s.race?.seed, s.readout?.endsAt] : null, () => (has ? renderSession() : null))
-  slot("approvalsSlot", has ? [approvalsKey(s), s.settings.budget, s.settings.stations] : null, () => (has ? renderApprovals(s) : null))
-  slot("readoutsSlot", has ? [s.race?.seed, s.teams.length] : null, () => (has ? renderReadouts() : null))
+  slot("timerSlot", [phaseOf(s)], renderTimer)
+  slot("raceSlot", [phaseOf(s), s.race?.seed, has, s.race ? teamNames : null], renderRace)
+  slot("approvalsSlot", [approvalsKey(s), s.settings.budget, s.settings.stations], () => renderApprovals(s))
+  slot("queuesSlot", [s.queues, s.architects, s.pitches, s.settings.stations, teamNames], () => renderQueues(s))
   slot("feedSlot", has ? feedKey(s, presence) : null, () => (has ? renderFeed(s, presence) : null))
-  slot("queuesSlot", has ? [s.queues, s.architects, s.pitches, s.settings.stations, s.teams.map((t) => t.name)] : null, () => (has ? renderQueues(s) : null))
-  slot("setupSlot", [s.teams.map((t) => t.name), s.settings.budget, s.settings.stations, setupDraft?.count], renderSetup)
-  slot("linksSlot", has ? [s.settings.stations] : null, () => (has ? renderLinks() : null))
+  slot("teamsSlot", [teamNames, Boolean(s.race)], renderTeams)
+  slot("budgetSlot", [s.settings.budget, budgetFixed(s)], renderBudget)
+  slot("linksSlot", [s.settings.stations], renderLinks)
 }
 
 /* ------------------------------------------------------------ Solutions Architect */
 
-/** One table's SA view: availability, the queue, the design as the team locked it, the brief and the 30-second pitch. */
+/** One table's SA view: the queue, the design as the team locked it, the brief and the 30-second pitch. Available is a courtesy to the teams, not a step. */
 function renderArchitect(stationId, force) {
   const s = state
   const station = C.byId(C.STATIONS, stationId)
@@ -405,7 +394,7 @@ function renderArchitect(stationId, force) {
       el("span", { style: "flex:1" }),
       el("button", { class: `btn ${arch.available ? "go" : ""}`, id: "availabilityToggle", disabled: Boolean(pitch), onclick: () => go("/api/architect/availability", { available: !arch.available }, arch.available ? "You are Busy" : "You are Available") }, arch.available ? "Available" : "Busy"),
       instructionsButton("architect"),
-      me.role === "host" ? button("Back to race control", () => { hostLeads = null; render(true) }, { small: true }) : button("Log out", () => { logout(); render(true) }, { small: true }))))
+      me.role === "host" ? button("Back to host controls", () => { hostLeads = null; render(true) }, { small: true }) : button("Log out", () => { logout(); render(true) }, { small: true }))))
 
   slot("saPitch", [pitch?.team, pitch?.startedAt, pitch?.attempt], () => {
     if (!pitch) return null
@@ -425,8 +414,8 @@ function renderArchitect(stationId, force) {
 
   const startButton = (t) => {
     const d = designStatus(s, t, stationId)
-    const can = arch.available && !pitch && Boolean(d.plan) && d.status !== "approved"
-    const why = !d.plan ? "Not all three choices are locked" : d.status === "approved" ? "Already approved" : pitch ? "A pitch is running" : !arch.available ? "Set yourself Available first" : `${PITCH_SECONDS}-second pitch`
+    const can = !pitch && Boolean(d.plan) && d.status !== "approved"
+    const why = !d.plan ? "Not all three choices are locked" : d.status === "approved" ? "Already approved" : pitch ? "A pitch is running" : `${PITCH_SECONDS}-second pitch`
     return el("button", { class: "btn primary small-btn", disabled: !can, title: why, "data-start": t.id, onclick: () => go("/api/architect/pitch", { action: "start", team: t.id }, `${t.name}: pitch started`) }, WORDS.startPitch)
   }
 
@@ -472,28 +461,12 @@ function renderArchitect(stationId, force) {
 
 /* ------------------------------------------------------------ restart and demo */
 
-function restartExperience() {
-  const input = el("input", { type: "password", inputmode: "numeric", placeholder: "Host PIN", autocomplete: "off" })
-  const close = () => document.getElementById("drawer")?.remove()
-  const go = async () => {
-    try {
-      if ((await login(input.value)) !== "host") return toast("The host PIN is needed")
-    } catch {
-      return toast("Wrong PIN")
-    }
-    close()
-    if (!(await confirmDialog("Restart the experience? Every team, choice, plan, queue and score is deleted.", "Restart"))) return
-    try {
-      await post("/api/host/reset", {})
-      location.href = "/"
-    } catch (err) {
-      toast(err.message)
-    }
-  }
-  close()
-  document.body.append(el("div", { id: "drawer", class: "drawer-back" }, el("div", { class: "drawer confirm" }, el("h2", {}, "Restart the experience"), el("p", {}, "Enter the host PIN to continue."), input,
-    el("div", { class: "row" }, el("button", { class: "btn danger", onclick: go }, "Continue"), el("button", { class: "btn", onclick: close }, "Cancel")))))
-  input.focus()
+/** Restart: an empty game, open for the next group at once. The host is already behind the PIN, so one confirmation is enough. */
+async function restartExperience() {
+  if (!(await confirmDialog("Restart the experience? Every team, choice, plan, queue and score is deleted, and an empty game opens for the next group.", "Restart"))) return
+  hostLeads = null
+  selectedTeam = null
+  act("/api/host/reset", {}, "Restarted: an empty game is open")
 }
 
 function renderDemo() {

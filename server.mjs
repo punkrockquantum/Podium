@@ -264,7 +264,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
     }
     if (!isArchitect(req)) {
       failedPin(req)
-      return [403, "SA PIN required"]
+      return [403, "Host PIN required"]
     }
     if (req.headers["x-station"] !== station) return [403, "You are signed in as the Solutions Architect of another table"]
     clearPinFailures(req)

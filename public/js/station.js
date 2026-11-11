@@ -4,7 +4,7 @@ import { planSheet, queueStatus } from "/js/plan.js"
 import { designStatus, lockedDials, ghostsAt, attemptWord, PITCH_SECONDS } from "/js/approval.js"
 import { BRIEF_GATE_SECONDS } from "/js/briefs.js"
 import { briefView } from "/js/briefview.js"
-import { phaseOf, phaseInfo, phaseRemainingMs } from "/js/session.js"
+import { phaseOf, phaseInfo, phaseRemainingMs, playOpen } from "/js/session.js"
 import { el, clock, post, watchState, gameClock, installErrorLogging, instructionsButton, WORDS, button, stateBanner, panel, teamChip, tabBar, patchSlot, replaceKeepingScroll, setText } from "/js/ui.js"
 
 installErrorLogging("table")
@@ -86,11 +86,11 @@ function startTable() {
     sessionStorage.removeItem(KEY_TEAM)
   }
 
-  /** Check the chosen team in at this table once play is open (the host's live feed shows it). */
+  /** Check the chosen team in at this table while play is open (the host's live feed shows it). */
   let checkingIn = false
   function seatHere() {
     const team = state?.teams?.find((t) => t.id === teamId)
-    if (!team || checkingIn || phaseOf(state) !== "play") return
+    if (!team || checkingIn || !playOpen(state)) return
     if (state.tables?.[station.id]?.team === team.id) return
     checkingIn = true
     post(`/api/teams/${team.id}/checkin`, { station: station.id }).then(() => watcher.refresh()).catch(() => {}).finally(() => { checkingIn = false })
@@ -154,11 +154,9 @@ function startTable() {
   const learned = () => { try { return new Set(JSON.parse(sessionStorage.getItem(learnedKey()) || "[]")) } catch { return new Set() } }
   const markLearned = () => sessionStorage.setItem(learnedKey(), JSON.stringify([...learned(), station.id]))
 
-  /** Why dials are closed for everyone right now, or null. */
+  /** Why dials are closed for everyone right now, or null. Play is open, timed or not, until time is up or the race runs. */
   function phaseReason() {
     const phase = phaseOf(state)
-    if (phase === "lobby") return ["Choose your team and read the brief. Choices open when the host starts play.", "info"]
-    if (phase === "brief" || phase === "briefDone") return [`${WORDS.readTheBrief} now: choices open when the host starts play.`, "warn"]
     if (phase === "ended") return [`Time is up: every table is locked. Tables not approved race on ${WORDS.todaySetup.toLowerCase()}.`, "bad"]
     if (phase === "race" || phase === "readout") return ["The race has run: the dials are locked.", "bad"]
     return null
@@ -196,10 +194,11 @@ function startTable() {
   function renderClock() {
     const phase = phaseOf(state)
     const ms = phaseRemainingMs(state, offset)
-    setText(timerBox, Number.isFinite(ms) ? clock(ms) : phase === "ended" ? "TIME" : "RACE")
+    setText(timerBox, Number.isFinite(ms) ? clock(ms) : phaseInfo(phase).idle)
+    timerBox.classList.toggle("idle", phase === "open")
     timerBox.classList.toggle("warn", phase === "play" && ms < 300_000 && ms > 0)
     timerBox.classList.toggle("over", phase === "ended")
-    setText(roundTag, `${phaseInfo(phase).name}${state.clock.status === "paused" ? " · paused" : ""}`)
+    setText(roundTag, phaseInfo(phase).name)
   }
 
   setInterval(() => {
@@ -227,20 +226,67 @@ function startTable() {
 
   /* ------------------------------------------------------------ step 0: choose your team */
 
+  /**
+   * The team list and, under it, Add your team. Each part is its own slot, so a team appearing from
+   * another iPad updates the list without touching a name someone is typing here.
+   */
   function renderStepZero() {
-    const key = JSON.stringify(["zero", phaseOf(state), state.teams.map((t) => [t.id, t.name, t.color]), state.tables, state.settings.stations])
-    if (shape === key) return
-    shape = key
-    const nodes = [el("h2", {}, WORDS.chooseTeam), el("p", { class: "muted" }, `${station.name} · pitch to the ${station.architect}.`)]
+    if (shape !== "zero" || !document.getElementById("teamGridSlot")) {
+      shape = "zero"
+      replaceKeepingScroll(app, el("div", { class: "workspace-single" }, el("div", { class: "panel step-zero" },
+        el("h2", {}, WORDS.chooseTeam), el("p", { class: "muted" }, `${station.name} · pitch to the ${station.architect}.`),
+        el("div", { id: "zeroBanner" }), el("div", { id: "teamGridSlot" }), el("div", { id: "addTeamSlot" }))))
+    }
     const b = banner(null)
-    if (b) nodes.push(b)
-    if (!state.teams.length) nodes.push(stateBanner("The host has not created the teams yet.", "info"))
-    nodes.push(el("div", { class: "team-grid", id: "teamGrid" }, state.teams.map((t) => {
-      const at = Object.entries(state.tables || {}).find(([, seat]) => seat.team === t.id)?.[0]
-      const where = at === station.id ? "Checked in here" : at ? `At ${C.byId(C.STATIONS, at)?.name || at}` : "Free to start here"
-      return el("button", { class: "team-button", "data-team": t.id, onclick: () => chooseTeam(t.id) }, el("i", { style: `background:${t.color}` }), el("b", {}, t.name), el("span", {}, where))
-    })))
-    replaceKeepingScroll(app, el("div", { class: "workspace-single" }, el("div", { class: "panel step-zero" }, ...nodes)))
+    patchSlot(document.getElementById("zeroBanner"), b ? `${b.className}|${b.textContent}` : "", () => b)
+    patchSlot(document.getElementById("teamGridSlot"), JSON.stringify([state.teams.map((t) => [t.id, t.name, t.color]), state.tables]), () => {
+      if (!state.teams.length) return el("p", { class: "muted", id: "noTeams" }, "No teams yet. Add yours below: it takes one tap.")
+      return el("div", { class: "team-grid", id: "teamGrid" }, state.teams.map((t) => {
+        const at = Object.entries(state.tables || {}).find(([, seat]) => seat.team === t.id)?.[0]
+        const where = at === station.id ? "Checked in here" : at ? `At ${C.byId(C.STATIONS, at)?.name || at}` : "Free to start here"
+        return el("button", { class: "team-button", "data-team": t.id, onclick: () => chooseTeam(t.id) }, el("i", { style: `background:${t.color}` }), el("b", {}, t.name), el("span", {}, where))
+      }))
+    })
+    const full = state.teams.length >= C.MAX_TEAMS
+    patchSlot(document.getElementById("addTeamSlot"), JSON.stringify([full, Boolean(phaseReason()), notInPlay()]), () => addTeamBox(full))
+  }
+
+  /** Add your team: a name, one tap, and the team is in. No PIN; the server trims and checks the name. */
+  function addTeamBox(full) {
+    if (phaseReason() || notInPlay()) return null
+    if (full) return el("div", { class: "state-banner info", role: "status", id: "teamsFull" }, `All ${C.MAX_TEAMS} team places are taken. Tap your team above, or ask the host to remove one.`)
+    const input = el("input", { type: "text", id: "teamName", maxlength: C.TEAM_NAME_MAX, placeholder: "Team name", autocomplete: "off", autocapitalize: "words", enterkeyhint: "go", "aria-label": "Team name" })
+    const error = el("p", { class: "form-error hidden", id: "addTeamError", role: "alert" })
+    const go = () => addTeam(input, error)
+    input.addEventListener("keydown", (e) => e.key === "Enter" && go())
+    input.addEventListener("input", () => error.classList.add("hidden"))
+    return el("div", { class: "add-team", id: "addTeamBox" },
+      el("h3", {}, WORDS.addTeam),
+      el("div", { class: "row" }, input, el("button", { class: "btn primary", id: "addTeam", onclick: go }, WORDS.addTeam)),
+      el("p", { class: "small muted" }, "Type your team name and tap once. At every other table, tap your team in the list."),
+      error)
+  }
+
+  let adding = false
+  async function addTeam(input, error) {
+    const fail = (text) => {
+      error.textContent = text
+      error.classList.remove("hidden")
+      input.focus({ preventScroll: true })
+    }
+    if (!input.value.trim()) return fail("Type a team name first")
+    if (adding) return
+    adding = true
+    try {
+      const res = await post("/api/teams", { name: input.value }, false)
+      if (!state.teams.some((t) => t.id === res.team.id)) state.teams.push(res.team)
+      watcher.refresh()
+      chooseTeam(res.team.id)
+    } catch (err) {
+      fail(err.message)
+    } finally {
+      adding = false
+    }
   }
 
   /* ------------------------------------------------------------ 1 · Brief */
@@ -423,8 +469,11 @@ function startTable() {
 
   /* ------------------------------------------------------------ render */
 
-  /** What decides the page's structure; everything else is patched in place, so polling never moves the page. */
-  const shapeOf = (team) => JSON.stringify([state.id, team.id, tab, briefRead(team), phaseOf(state), notInPlay(), budget()])
+  /**
+   * What decides the page's structure; everything else is patched in place, so polling never moves
+   * the page. The timer starting, pausing or being reset is not structure: only play closing is.
+   */
+  const shapeOf = (team) => JSON.stringify([state.id, team.id, tab, briefRead(team), state.race ? "race" : playOpen(state) ? "open" : "ended", notInPlay(), budget()])
 
   function render(force) {
     if (!state || !gameClock(state)) return
