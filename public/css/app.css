@@ -727,9 +727,9 @@ dl.brief-words { font-size: 15px; }
 /* On an iPad-sized projector view the ladder takes the full width, and the header line stays on one line. */
 @media (max-width: 900px) { .projector:has(#lapLadder) { grid-template-columns: 1fr; } }
 .station-title span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* On an iPad-sized projector view the ladder takes the full width, and the header line stays on one line. */
-@media (max-width: 900px) { .projector:has(#lapLadder) { grid-template-columns: 1fr; } }
-.station-title span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .btn { white-space: nowrap; }
+.step-zero > div > p { margin: 0; }
+.pin-box input::placeholder { letter-spacing: 0; }
 .pin-box .sa-login { display: grid; gap: 10px; margin-top: 6px; padding-top: 16px; border-top: 1px solid var(--line); }
 .pin-box .sa-login input, .pin-box .sa-login select { font-size: 16px; letter-spacing: 0; text-align: left; }
 .pin-box p { margin: 0; }
