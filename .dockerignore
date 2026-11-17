@@ -1,0 +1,26 @@
+# The Dockerfile copies only package.json, server.mjs, public/ and the entrypoint. This list keeps
+# everything else, above all data/ (the saved game and its logs), out of the build context.
+.git
+.gitignore
+.github
+.worktrees
+.DS_Store
+**/.DS_Store
+node_modules
+data
+tests
+scripts
+*.md
+*.log
+*.plist
+*.tmp
+.env
+.env.*
+LICENSE
+start.command
+deploy/*
+!deploy/docker-entrypoint.sh
+Dockerfile
+.dockerignore
+render.yaml
+fly.toml
