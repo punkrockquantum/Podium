@@ -465,6 +465,15 @@ restarts.** Anyone with the URL can add a team and play, so share the URL only w
 testing or playing, set your own PINs for anything public (section 3), and restart the experience
 afterwards.
 
+### Cloud hosting
+
+For **one address that never changes and does not need this laptop**, run Podium on a cloud host.
+[HOSTING.md](HOSTING.md) has the click-by-click setup: a `Dockerfile`, a Render Blueprint
+(`render.yaml`) and a Fly.io file (`fly.toml`), the three PIN variables set as secrets on the host,
+what is kept across restarts, and how updates are deployed. Podium needs a host that runs a program
+all the time, as exactly one instance; it cannot go on a static file host. The laptop, the
+background service and the tunnel above keep working as they are.
+
 ---
 
 ## 10. Troubleshooting
@@ -496,6 +505,7 @@ afterwards.
 
 ```text
 server.mjs               Node HTTP server: static files, JSON API, state, persistence (no dependencies)
+Dockerfile, render.yaml, fly.toml, deploy/   the cloud-hosted environment (HOSTING.md)
 public/index.html        landing page            public/station.html   table iPad
 public/host.html         host controls / SA view  public/race.html     projector and readouts
 public/js/briefs.js      the four briefs (situation, wants, rules, decisions, provider, words to know)
@@ -520,7 +530,9 @@ JSON document; every change increments `version`, and clients poll `GET /api/sta
 `x-station: <table>`, and the host PIN works for any table. A PIN travels only in that header or in
 the JSON body of a login or race request: never in an address, a response or a log line. PINs are
 compared in constant time, and failed attempts are rate limited per client IP (`CF-Connecting-IP`
-behind the tunnel). Team routes need no PIN.
+behind the tunnel). Team routes need no PIN. On a cloud host, `HOST` sets the address to listen on
+and `TRUST_PROXY` names the proxy whose header gives the client IP ([HOSTING.md](HOSTING.md),
+section 11); a forwarded-address header from anywhere else is ignored.
 
 | Route | Purpose |
 | --- | --- |
@@ -566,6 +578,9 @@ The suites (`node:test`, no dependencies) cover:
   changing the wind tunnel, no retired product names, no tiers or old score bands, dead modules
   removed, the phases, the demo steps, the landing page, and the host PIN appearing in no file under
   `public/` and exactly once in this README.
+- **Hosting:** where the server listens (`HOST`, `--lan`), the client IP behind each proxy
+  `TRUST_PROXY` can name and forged headers being ignored, the response headers, a clean stop on
+  SIGTERM, and the `Dockerfile`, `render.yaml` and `fly.toml` probing `/api/health` and holding no PIN.
 - **Browser** (headless Chrome, skipped if Chrome is not installed): from an empty game with no host
   action, a team adds itself on a table iPad, reads the brief, locks three dials and calls the SA; the
   page never moves while polling; a rejection reopens the dials; the host controls open behind one

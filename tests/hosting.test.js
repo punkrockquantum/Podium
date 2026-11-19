@@ -162,7 +162,10 @@ test("started with HOST and PORT, the server listens there, and SIGTERM saves th
   const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })))
   try {
     const ready = new Promise((resolve) => child.stdout.on("data", () => log.includes("PINs in use") && resolve("ready")))
-    assert.equal(await Promise.race([ready, exited.then(() => "exited"), new Promise((resolve) => setTimeout(resolve, 10_000, "timeout"))]), "ready", log)
+    let timer
+    const timeout = new Promise((resolve) => (timer = setTimeout(resolve, 10_000, "timeout")))
+    assert.equal(await Promise.race([ready, exited.then(() => "exited"), timeout]), "ready", log)
+    clearTimeout(timer)
     assert.ok(log.includes(`Listening on 127.0.0.1:${port} (HOST from the environment`), log)
     assert.match(log, /Failed PINs are counted per visitor address: the connecting address/)
     for (const pin of [DEFAULT_PINS.host, ...Object.values(PINS)]) assert.ok(!log.includes(pin), "the log never carries a PIN")
