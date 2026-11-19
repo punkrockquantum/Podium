@@ -1,0 +1,40 @@
+# Render Blueprint: Podium as one web service, built from the Dockerfile.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Render then asks for the three PIN
+# values (HOST_PIN, LEADER_PIN, RACE_PIN); they are never stored in this file. Steps: HOSTING.md.
+#
+# One instance only, never more: the whole game lives in that one process's memory.
+# PORT is injected by Render; server.mjs reads it.
+#
+# plan: free has no disk, so a restart, a redeploy or a wake-up after idling starts a fresh game.
+# To keep the game across restarts, change the plan to a paid instance type (starter or above) and
+# uncomment the disk block at the bottom: the game is then saved to /data/state.json on that disk.
+#
+# autoDeploy is off so that a push during a session cannot restart the game; use "Manual Deploy" in
+# the dashboard when you want the newest version.
+services:
+  - type: web
+    name: podium
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: HOST_PIN
+        sync: false
+      - key: LEADER_PIN
+        sync: false
+      - key: RACE_PIN
+        sync: false
+      - key: DATA_DIR
+        value: /data
+      # Render's edge reports each visitor's address in CF-Connecting-IP (used to rate limit failed PINs).
+      - key: TRUST_PROXY
+        value: render
+    # disk:
+    #   name: podium-data
+    #   mountPath: /data
+    #   sizeGB: 1

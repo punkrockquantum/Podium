@@ -1,0 +1,42 @@
+# Fly.io: Podium on one small machine in London with a volume at /data (the saved game).
+# A volume belongs to exactly one machine and the game lives in one process, so deploy with --ha=false.
+#
+#   fly launch --no-deploy --copy-config --name <unique-app-name>   # then set app = below to match
+#   fly secrets set HOST_PIN=<the host PIN> LEADER_PIN=<the SA PIN> RACE_PIN=<the race password>
+#   fly deploy --ha=false                                            # creates the 1 GB volume on first deploy
+#
+# The PINs are Fly secrets, never written in this file. Steps: HOSTING.md.
+app = "podium-2027"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/data"
+  PORT = "8080"
+  # Fly's proxy reports each visitor's address in Fly-Client-IP (used to rate limit failed PINs).
+  TRUST_PROXY = "fly"
+
+[[mounts]]
+  source = "podium_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

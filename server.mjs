@@ -3,6 +3,8 @@
  * No dependencies. `node server.mjs` (localhost) or `node server.mjs --lan` (every iPad on the Wi-Fi).
  *
  * Env: PORT (8080), HOST_PIN, LEADER_PIN (the Solutions Architect PIN), RACE_PIN, DATA_DIR (./data).
+ * On a cloud host (HOSTING.md): HOST (the address to listen on, 0.0.0.0 in a container) and
+ * TRUST_PROXY (which proxy to believe about a visitor's address: cloudflare, render, fly, xff or none).
  * Every PIN defaults to the one event PIN in DEFAULT_PINS below. PIN values are never logged, never
  * sent to a client and never written to the saved game.
  *
@@ -16,6 +18,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "
 import { join, normalize, extname, dirname, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { networkInterfaces } from "node:os"
+import { isIP } from "node:net"
 import { randomUUID, randomInt, timingSafeEqual, createHash } from "node:crypto"
 import { STATIONS, TEAM_COLORS, SESSION, BUDGET_LEVELS, DEFAULT_BUDGET, MAX_TEAMS, TEAM_NAME_MAX, budgetFor, validChoice, decision, decisionsFor, tablePoints } from "./public/js/catalog.js"
 import { evaluate, effectiveTeam, boardFor, choicesOf } from "./public/js/model.js"
@@ -43,6 +46,47 @@ const PIN_FAILURE_WINDOW_MS = 5 * 60_000
 /** Teams join without a PIN, so one address may only add so many (the ten-team limit is the main guard). */
 const TEAM_CREATE_LIMIT = 30
 const TEAM_CREATE_WINDOW_MS = 10 * 60_000
+
+/** The request header that carries the visitor's address behind each proxy TRUST_PROXY can name. */
+const PROXY_HEADERS = { cloudflare: "cf-connecting-ip", render: "cf-connecting-ip", fly: "fly-client-ip", xff: "x-forwarded-for" }
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/
+/**
+ * Which proxy to believe about a visitor's address, from TRUST_PROXY: "cloudflare", "render", "fly" or
+ * "xff". Unset is "tunnel" (the laptop: only the Cloudflare tunnel running on this same machine is
+ * believed). Anything else, a typo included, is "none", so a mistake can never open the header to forgery.
+ */
+export function proxyTrust(env = process.env) {
+  const value = String(env.TRUST_PROXY || "").trim().toLowerCase()
+  if (!value) return "tunnel"
+  return Object.hasOwn(PROXY_HEADERS, value) ? value : "none"
+}
+/**
+ * The address a request is rate limited under. Anyone can type a forwarded-address header, so one is
+ * believed only when TRUST_PROXY names the proxy in front of the server; otherwise the address is the
+ * socket's own. In "tunnel" mode CF-Connecting-IP counts only on a connection from this machine, which
+ * is how the tunnel arrives. Of a list, the last entry counts: the one the nearest proxy wrote.
+ */
+export function clientAddress(req, trust = "tunnel") {
+  const socket = String(req.socket?.remoteAddress || "unknown")
+  const header = trust === "tunnel" ? (LOOPBACK.test(socket) ? PROXY_HEADERS.cloudflare : null) : Object.hasOwn(PROXY_HEADERS, trust) ? PROXY_HEADERS[trust] : null
+  const forwarded = header ? String(req.headers[header] || "").split(",").pop().trim() : ""
+  return (forwarded || socket).slice(0, 128)
+}
+/** One log line saying where visitor addresses come from. */
+export function proxySummary(env = process.env) {
+  const trust = proxyTrust(env)
+  if (trust === "tunnel") return "the connecting address, or CF-Connecting-IP from this machine's tunnel (TRUST_PROXY is not set)"
+  if (trust === "none") return "the connecting address (TRUST_PROXY names no proxy: cloudflare, render, fly or xff)"
+  return `the ${PROXY_HEADERS[trust]} header (TRUST_PROXY=${trust})`
+}
+
+/** HOST from the environment when it is an IP address (a container sets 0.0.0.0), else "": some shells put the machine's name there. */
+export const hostFromEnv = (env = process.env) => (isIP(String(env.HOST || "").trim()) ? String(env.HOST).trim() : "")
+/** Where to listen: HOST when a cloud host or container sets it, every interface with --lan, otherwise this machine only. */
+export const bindAddress = ({ env = process.env, argv = process.argv } = {}) => hostFromEnv(env) || (argv.includes("--lan") ? "0.0.0.0" : "127.0.0.1")
+
+/** Sent with every response: no content sniffing, and no address of ours passed on to other sites. */
+const SAFE_HEADERS = { "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" }
 
 /** Constant-time comparison of two short secrets (hashed first so lengths never leak). */
 function sameSecret(given, expected) {
@@ -224,7 +268,8 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
   const isArchitect = (req) => sameSecret(req.headers["x-pin"], architectPin) || isHost(req)
   const racePasswordOk = (value) => sameSecret(value, racePin)
   const pinFailures = new Map()
-  const clientIp = (req) => String(req.headers["cf-connecting-ip"] || req.socket.remoteAddress || "unknown").slice(0, 128)
+  const trust = proxyTrust(env)
+  const clientIp = (req) => clientAddress(req, trust)
   const clearPinFailures = (req) => pinFailures.delete(clientIp(req))
   const pinRateLimited = (req) => {
     const now = Date.now()
@@ -775,7 +820,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
 
 function send(res, status, payload) {
   const text = JSON.stringify(payload)
-  res.writeHead(status, { "content-type": TYPES[".json"], "cache-control": "no-store", "x-content-type-options": "nosniff" })
+  res.writeHead(status, { "content-type": TYPES[".json"], "cache-control": "no-store", ...SAFE_HEADERS })
   res.end(text)
 }
 
@@ -818,7 +863,7 @@ async function serveStatic(pathname, res) {
   try {
     if ((await stat(path)).isDirectory()) path = join(path, "index.html")
     const data = await readFile(path)
-    res.writeHead(200, { "content-type": TYPES[extname(path)] || "application/octet-stream", "cache-control": "no-cache", "x-content-type-options": "nosniff" })
+    res.writeHead(200, { "content-type": TYPES[extname(path)] || "application/octet-stream", "cache-control": "no-cache", ...SAFE_HEADERS })
     res.end(data)
   } catch {
     send(res, 404, { error: "Not found" })
@@ -849,14 +894,36 @@ function isDirectRun() {
   }
 }
 
+/** The links printed when Podium starts on a Mac: this machine's, and the room's with --lan. */
+function printLinks(port, lan) {
+  const base = `http://localhost:${port}`
+  console.log(`[podium] ${new Date().toISOString()} Podium 2027 is running on this Mac (pid ${process.pid}).`)
+  console.log(`[podium] Landing     ${base}/`)
+  console.log(`[podium] Host console ${base}/host.html`)
+  console.log(`[podium] Projector    ${base}/race.html`)
+  for (const station of STATIONS) console.log(`[podium] ${station.name.padEnd(28)} ${base}/station.html?station=${station.id}`)
+  if (lan) {
+    const ips = lanAddresses()
+    if (!ips.length) {
+      console.error(`[podium] No LAN address found (Wi-Fi off, VPN, or this Mac blocked the interface list). iPads cannot join.`)
+      console.error(`[podium] On this Mac, use the localhost links above. For the room, join Wi-Fi and run npm run start:lan again.`)
+    } else {
+      for (const ip of ips) console.log(`[podium] iPads        http://${ip}:${port}/`)
+    }
+  } else {
+    console.log(`[podium] Localhost only. For iPads on the same Wi-Fi, stop this and run: npm run start:lan`)
+  }
+}
+
 if (isDirectRun()) {
-  const lan = process.argv.includes("--lan")
+  const hosted = hostFromEnv()
+  const lan = !hosted && process.argv.includes("--lan")
   const port = Number(process.env.PORT) || 8080
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     console.error(`[podium] PORT must be a whole number from 1 to 65535 (got "${process.env.PORT}"). Example: PORT=8080 npm start`)
     process.exit(1)
   }
-  const bind = lan ? "0.0.0.0" : "127.0.0.1"
+  const bind = bindAddress()
   const app = createApp({ dataDir: process.env.DATA_DIR || join(ROOT, "data") })
   const server = createServer(app.handle)
   server.on("error", async (err) => {
@@ -891,23 +958,9 @@ if (isDirectRun()) {
     })
   }
   server.listen(port, bind, () => {
-    const base = `http://localhost:${port}`
-    console.log(`[podium] ${new Date().toISOString()} Podium 2027 is running on this Mac (pid ${process.pid}).`)
-    console.log(`[podium] Landing     ${base}/`)
-    console.log(`[podium] Host console ${base}/host.html`)
-    console.log(`[podium] Projector    ${base}/race.html`)
-    for (const station of STATIONS) console.log(`[podium] ${station.name.padEnd(28)} ${base}/station.html?station=${station.id}`)
-    if (lan) {
-      const ips = lanAddresses()
-      if (!ips.length) {
-        console.error(`[podium] No LAN address found (Wi-Fi off, VPN, or this Mac blocked the interface list). iPads cannot join.`)
-        console.error(`[podium] On this Mac, use the localhost links above. For the room, join Wi-Fi and run npm run start:lan again.`)
-      } else {
-        for (const ip of ips) console.log(`[podium] iPads        http://${ip}:${port}/`)
-      }
-    } else {
-      console.log(`[podium] Localhost only. For iPads on the same Wi-Fi, stop this and run: npm run start:lan`)
-    }
+    if (hosted) console.log(`[podium] ${new Date().toISOString()} Podium 2027 is listening on ${bind}:${port} (HOST from the environment, pid ${process.pid}).`)
+    else printLinks(port, lan)
+    console.log(`[podium] Failed PINs are counted per visitor address: ${proxySummary()}.`)
     console.log(`[podium] PINs in use: ${pinSummary()}. Values are never printed (the default is the event PIN in the README).`)
   })
 }
