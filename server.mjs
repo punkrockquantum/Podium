@@ -894,30 +894,8 @@ function isDirectRun() {
   }
 }
 
-/** The links printed when Podium starts on a Mac: this machine's, and the room's with --lan. */
-function printLinks(port, lan) {
-  const base = `http://localhost:${port}`
-  console.log(`[podium] ${new Date().toISOString()} Podium 2027 is running on this Mac (pid ${process.pid}).`)
-  console.log(`[podium] Landing     ${base}/`)
-  console.log(`[podium] Host console ${base}/host.html`)
-  console.log(`[podium] Projector    ${base}/race.html`)
-  for (const station of STATIONS) console.log(`[podium] ${station.name.padEnd(28)} ${base}/station.html?station=${station.id}`)
-  if (lan) {
-    const ips = lanAddresses()
-    if (!ips.length) {
-      console.error(`[podium] No LAN address found (Wi-Fi off, VPN, or this Mac blocked the interface list). iPads cannot join.`)
-      console.error(`[podium] On this Mac, use the localhost links above. For the room, join Wi-Fi and run npm run start:lan again.`)
-    } else {
-      for (const ip of ips) console.log(`[podium] iPads        http://${ip}:${port}/`)
-    }
-  } else {
-    console.log(`[podium] Localhost only. For iPads on the same Wi-Fi, stop this and run: npm run start:lan`)
-  }
-}
-
 if (isDirectRun()) {
-  const hosted = hostFromEnv()
-  const lan = !hosted && process.argv.includes("--lan")
+  const lan = process.argv.includes("--lan")
   const port = Number(process.env.PORT) || 8080
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     console.error(`[podium] PORT must be a whole number from 1 to 65535 (got "${process.env.PORT}"). Example: PORT=8080 npm start`)
@@ -958,8 +936,24 @@ if (isDirectRun()) {
     })
   }
   server.listen(port, bind, () => {
-    if (hosted) console.log(`[podium] ${new Date().toISOString()} Podium 2027 is listening on ${bind}:${port} (HOST from the environment, pid ${process.pid}).`)
-    else printLinks(port, lan)
+    const base = `http://localhost:${port}`
+    console.log(`[podium] ${new Date().toISOString()} Podium 2027 is running on this Mac (pid ${process.pid}).`)
+    console.log(`[podium] Landing     ${base}/`)
+    console.log(`[podium] Host console ${base}/host.html`)
+    console.log(`[podium] Projector    ${base}/race.html`)
+    for (const station of STATIONS) console.log(`[podium] ${station.name.padEnd(28)} ${base}/station.html?station=${station.id}`)
+    if (lan) {
+      const ips = lanAddresses()
+      if (!ips.length) {
+        console.error(`[podium] No LAN address found (Wi-Fi off, VPN, or this Mac blocked the interface list). iPads cannot join.`)
+        console.error(`[podium] On this Mac, use the localhost links above. For the room, join Wi-Fi and run npm run start:lan again.`)
+      } else {
+        for (const ip of ips) console.log(`[podium] iPads        http://${ip}:${port}/`)
+      }
+    } else {
+      console.log(`[podium] Localhost only. For iPads on the same Wi-Fi, stop this and run: npm run start:lan`)
+    }
+    if (hostFromEnv()) console.log(`[podium] Listening on ${bind}:${port} (HOST from the environment: a cloud host or container).`)
     console.log(`[podium] Failed PINs are counted per visitor address: ${proxySummary()}.`)
     console.log(`[podium] PINs in use: ${pinSummary()}. Values are never printed (the default is the event PIN in the README).`)
   })

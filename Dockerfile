@@ -32,4 +32,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/api/health" || exit 1
 
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["node", "server.mjs"]
+# --lan as on the room Wi-Fi: every interface. HOST above says so explicitly and takes precedence.
+CMD ["node", "server.mjs", "--lan"]
