@@ -1,15 +1,19 @@
 # Render Blueprint: Podium as one web service, built from the Dockerfile.
-# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Render then asks for the three PIN
-# values (HOST_PIN, LEADER_PIN, RACE_PIN); they are never stored in this file. Steps: HOSTING.md.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo and the branch this file is on.
+# Render then asks for the three PIN values (HOST_PIN, LEADER_PIN, RACE_PIN); they are never stored
+# in this file. Step by step: HOSTING.md.
 #
-# One instance only, never more: the whole game lives in that one process's memory.
-# PORT is injected by Render; server.mjs reads it.
+# One instance only, never more: the whole game lives in that one process's memory. One is Render's
+# default, so nothing below asks for more; do not add scaling in the dashboard.
+# PORT is injected by Render; server.mjs reads it. The service follows the branch the Blueprint was
+# created from.
 #
-# plan: free has no disk, so a restart, a redeploy or a wake-up after idling starts a fresh game.
-# To keep the game across restarts, change the plan to a paid instance type (starter or above) and
+# plan: free has no disk, and a free service is stopped when nobody has used it for a while. A
+# restart, a redeploy or a wake-up therefore starts a fresh game. To keep the game across restarts,
+# change the plan to a paid one (0.5c-512mb is the smallest; older Render pages call it Starter) and
 # uncomment the disk block at the bottom: the game is then saved to /data/state.json on that disk.
 #
-# autoDeploy is off so that a push during a session cannot restart the game; use "Manual Deploy" in
+# Auto-deploy is off so that a push during a session cannot restart the game; use "Manual Deploy" in
 # the dashboard when you want the newest version.
 services:
   - type: web
@@ -17,11 +21,10 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
-    autoDeploy: false
+    autoDeployTrigger: "off"
     envVars:
       - key: HOST_PIN
         sync: false
@@ -31,7 +34,8 @@ services:
         sync: false
       - key: DATA_DIR
         value: /data
-      # Render's edge reports each visitor's address in CF-Connecting-IP (used to rate limit failed PINs).
+      # Render's edge sets CF-Connecting-IP to each visitor's address and refuses a request that
+      # brings its own, so the failed-PIN limit can rely on it.
       - key: TRUST_PROXY
         value: render
     # disk:
