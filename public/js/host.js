@@ -129,7 +129,7 @@ function renderLogin() {
     instructionsButton("host")))
 }
 
-/* ------------------------------------------------------------ timer, race, teams and budget */
+/* ------------------------------------------------------------ timer, race, the four tables and budget */
 
 function phaseClock(s) {
   const ms = phaseRemainingMs(s, s.demo ? 0 : offset)
