@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Audi F1 Team × Digital Realty — Infrastructure performance simulator</title>
+  <meta name="description" content="Tweak the Restricted CFD cluster, the Digital Realty Zurich facility and the paddock link inside the FIA envelope and read the impact on the 2027 and 2028 seasons." />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/css/sim.css" />
+</head>
+<body class="sim-page">
+  <a class="skip" href="#controls">Skip to the controls</a>
+  <div id="sim-root">
+    <noscript>
+      <div class="file-warning">This page needs JavaScript. Open it through the local server: <code>sh start.command</code>, then <a href="http://localhost:8090/">http://localhost:8090/</a>.</div>
+    </noscript>
+    <div id="sim-loading" class="loading" aria-live="polite">Loading the simulator…</div>
+  </div>
+  <script>
+    if (location.protocol === "file:") {
+      document.getElementById("sim-loading").innerHTML = "This page must be served by the local server (ES modules do not load from file://). Run <code>sh start.command</code> and open <a href=\"http://localhost:8090/\">http://localhost:8090/</a>."
+    }
+  </script>
+  <script type="module">
+    import { mountSim } from "/js/sim/app.js"
+    const root = document.getElementById("sim-root")
+    try {
+      mountSim(root)
+    } catch (err) {
+      const loading = document.getElementById("sim-loading")
+      if (loading) loading.textContent = `The simulator could not start: ${err && err.message ? err.message : err}`
+      console.error(err)
+      throw err
+    }
+  </script>
+</body>
+</html>
