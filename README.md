@@ -1,16 +1,26 @@
-# Podium 2027
+# Podium 2027 · Audi F1 Team edition
 
 A team game for sales teams (about 50 minutes) about solving a Formula 1 team's infrastructure
-problems. **There is nothing to set up:** once the server is running the game is open, and teams add
+problems. **This build is the Audi F1 Team edition**: the customer is the Audi F1 Team (Hinwil,
+Canton of Zurich), we are the colocation provider, and the decision on the table is **500 kW of
+colocation in our Zurich campus versus staying on-prem in Hinwil**, as a credible 2027 plan with a
+contractual path to 2028. See [Audi F1 Team edition](#audi-f1-team-edition) for the scenario, the
+figures and how to change them.
+
+**There is nothing to set up:** once the server is running the game is open, and teams add
 themselves on the table iPads. Up to ten teams visit four tables. Each table is one customer problem: the team **reads the brief**, then
 **locks three decisions, one tap each**, aiming to put every target gauge in its green zone **without
-crossing a cost cap line**. Each team then pitches its board to the table's Solutions Architect (SA)
+crossing a cap line**. Each team then pitches its board to the table's Solutions Architect (SA)
 in 30 seconds and watches the approved boards race the Austin 2027 Grand Prix on the projector. Every
-team then gets a one-screen readout: the lessons it achieved, and what it could have done differently.
+team then gets a one-screen readout: the lessons it achieved, what it could have done differently,
+and one line on the 2028 path.
 
 The point for the players is to learn **why each choice matters to the customer** and **how a
-provider helps**. Prices, speeds and rules are **teaching estimates**, not quotes. The "FIA rules"
-are a simplified, fictional version of the real regulations.
+provider helps**. Every customer-specific figure lives in one file, `public/js/customer.js`, and is
+either a VERIFIED public fact (with its source in `docs/audi-f1-sources.md`) or a labelled planning
+ASSUMPTION. Prices are planning figures, not quotes. FIA references are to the real 2026 Financial
+Regulations and the 2027 Aerodynamic Testing Restrictions (Section F, Art. F4); the team's own
+operational standards appear as "Audi F1 requirement", never as a made-up FIA article.
 
 ## Contents
 
@@ -26,6 +36,7 @@ are a simplified, fictional version of the real regulations.
 10. [Troubleshooting](#10-troubleshooting)
 11. [Code and API](#11-code-and-api)
 12. [Tests](#12-tests)
+13. [Audi F1 Team edition](#audi-f1-team-edition)
 
 ---
 
@@ -46,18 +57,18 @@ are a simplified, fictional version of the real regulations.
 - **At each table**, the team adds itself (its first table) or taps its name in the team list (every
   table after that), then works through three steps, which look the same on every table:
   1. **Brief:** the table's brief, written for a sales audience (`public/js/briefs.js`): *The
-     situation*, *What the team wants* (with the numbers), *The rules* (the FIA rule numbers, both
-     cost caps and what a breach costs), *Your three decisions* (what each setting does to
+     situation*, *What the team wants* (with the numbers), *The rules* (the real FIA articles, the Audi F1
+     requirements, both cap lines and what a breach costs), *Your three decisions* (what each setting does to
      performance, cost, power and risk, and the balance to strike), *How a provider helps* and
      *Words to know*. Everything needed to find an in-zone answer is in the brief. The **Tune** and
      **Pitch** steps stay closed until the team taps **I've read the brief. Take me to the
      decisions.**, which unlocks when the brief has been scrolled to its end or after 30 seconds (the
      server enforces it too).
   2. **Tune:** a live picture of the customer's problem sits at the top (an F1 car in the CFD wind
-     tunnel, the data hall, the data path from Austin to the factory, the rack row and its budget),
+     tunnel, the data hall, the data path from the circuit through the Zurich campus to Hinwil, the rack row and its budget),
      with the problem sentence, the targets drawn on the scene, the seconds found and one
      plain-English outcome line ("You've found 0.31 s per lap and you're inside both caps"). Below
-     it: 2–3 **targets** as gauges with a green zone, the **cap lines** (CapEx, yearly OpEx, and
+     it: 2–3 **targets** as gauges with a green zone, the **cap lines** (2027 capital, yearly cost-cap charge, and
      power where it matters), the **FIT** ring and three dials with three settings each. A grey
      needle and marker show **Today's setup**. **Nothing is selected when the table opens**, and
      **each choice locks the moment you tap it**: the dial reads *Tap once to lock* until the tap,
@@ -197,7 +208,7 @@ next table the team just taps its name.
 **The budget level** is one setting for the whole session. It starts at **Standard**, and the host
 can change it in the host controls until the first dial is locked (after that it would move the
 cap lines under teams that have already decided; **Restart the experience** returns to Standard). It
-moves every table's CapEx and OpEx cap lines, never the physical power limits.
+moves every table's capital and cost-cap charge lines, never the physical power limits.
 
 | Level | Cap lines | Effect |
 | --- | --- | --- |
@@ -212,73 +223,79 @@ see on the table is everything that scores it.
 
 ## 5. The four tables
 
-Each table has a brief, a problem, 2–3 targets, its cap lines and three dials. ★ marks today's setup.
-The briefs (`public/js/briefs.js`, 450–520 words each) carry every figure below in plain English, so
-a team that reads carefully can work out an in-zone answer before its first tap.
+Each table has a brief, a problem, 2–3 targets, its cap lines and three dials. ★ marks today's setup
+(everything on-prem in Hinwil). The briefs (`public/js/briefs.js`, 350–550 words each) carry every
+figure below in plain English with `[source]` tags into `docs/audi-f1-sources.md`, so a team that
+reads carefully can work out an in-zone answer before its first tap. Money is in CHF. The two cap
+lines per table are the **2027 capital envelope** (one-off cash, an Audi F1 requirement) and the
+**yearly cost-cap charge** (running cost plus straight-line depreciation of anything bought, which is
+how purchased kit reaches the FIA cost cap, Financial Regulations D6.1.1.k).
 
 ### Connectivity (`network`): Connectivity Solutions Architect
 
-*Problem:* get car data from the track to the factory strategists fast and reliably at every race.
-*Caps (Standard):* CapEx $600k, OpEx $700k a year.
-*Targets:* round-trip latency 120 ms or less · weekend availability 99.9% or more · FIA compliance.
+*Problem:* link the Zurich campus to Hinwil, the trackside garage and Neuburg fast and reliably at every race.
+*Caps (Standard):* capital CHF 500k, cost-cap charge CHF 600k a year.
+*Targets:* trackside → Zurich round trip 120 ms or less · race-weekend availability 99.9% or more · rules and requirements pass.
 
 | Dial | Settings |
 | --- | --- |
-| Paths to the factory | ★ Single tunnel (breaks FIA 5.3) · Two diverse paths · Two paths + satellite |
-| Route to the data centre | ★ Public internet · Private cross-connect · Dark fibre |
-| Car data out of the garage | Garage Wi-Fi (breaks FIA 5.2) · ★ Wired umbilical · Umbilical + edge cache |
+| Paths Hinwil ↔ Zurich campus | ★ Single route (breaks the Audi F1 two-paths requirement) · Two diverse routes · Two routes + satellite |
+| Route from the circuit to Zurich | ★ Public internet · Private circuit into the campus · Private WAN + edge PoP |
+| Car data out of the garage | Unmanaged garage Wi-Fi (breaks the Audi F1 wired-data requirement) · ★ Wired umbilical · Umbilical + garage edge node |
 
 ### OEMs (`oem`): OEM Solutions Architect
 
-*Problem:* refresh the hardware this season without blowing the CapEx envelope or the yearly cost cap.
-*Caps:* CapEx $3.4M, OpEx $1.9M a year.
+*Problem:* refresh Hinwil's hardware for 2027 under the cost cap, delivered before the Bahrain test, fixed fast on race weekends.
+*Caps:* capital CHF 3.0M, cost-cap charge CHF 1.9M a year.
 *Targets:* performance 2.0× today or more · race-weekend fix time 4 hours or less · lead time 12 weeks
 or less.
 
 | Dial | Settings |
 | --- | --- |
-| Hardware | ★ Incumbent, last generation · Dell, HPE or Lenovo · NVIDIA DGX, newest |
-| How you pay | ★ Buy outright · Lease · As-a-service (Dell, HPE or Lenovo only; DGX falls back to a lease) |
+| Hardware | ★ Incumbent, last generation (CHF 2.0M) · Dell, HPE or Lenovo (CHF 3.4M) · NVIDIA DGX, newest (CHF 5.5M) |
+| How you pay | ★ Buy outright (depreciated over 4 years) · Lease · As-a-service (Dell, HPE or Lenovo only; DGX falls back to a lease) |
 | Race-weekend support | ★ Basic · Next business day · 4-hour, 24/7 |
 
 ### Datacenter & Power (`dc`): Datacenter Solutions Architect
 
-*Problem:* house, power and cool the 400 kW cluster so it runs at full speed, inside the cost cap.
-*Caps:* CapEx $1.0M, OpEx $1.0M a year, plus facility power against the site's supply.
-*Targets:* power and cooling 100% of need or more · PUE 1.30 or less · N+1 backup.
+*Problem:* house, power and cool the 400 kW 2027 estate, with a path to 2028, inside the cost cap.
+*Caps:* capital CHF 1.9M, cost-cap charge CHF 2.1M a year (fees, metered power, plant depreciation over 10 years), plus the IT load against the site's supply.
+*Targets:* power and cooling 100% of the 2027 need or more · PUE 1.30 or less · N+1 or 2N (an Audi F1 requirement).
 
 | Dial | Settings |
 | --- | --- |
-| Where it lives | ★ Factory server room (300 kW, no N+1, FIA 4.1) · Colo near the factory · Cheap-power region (single grid feed, FIA 4.1) |
+| Where the 2027 cluster lives | ★ Hinwil data room (300 kW, single feed) · Zurich campus, 500 kW (CHF 180 per kW a month, 2N power, N+1 cooling, expansion right to 1,000 kW) · Remote low-cost region (single grid feed; F4.4.3 re-declaration) |
 | Cooling | ★ Air · Rear-door water · Direct-to-chip liquid |
 | Power setting | Capped at 85% · ★ Standard · Max boost |
 
 ### CFD Supercomputer (`compute`): CFD Solutions Architect
 
-*Problem:* run the season's aero simulations inside the FIA compute cap, with each design cycle back
-the same day.
-*Caps:* CapEx $3.6M, OpEx $500k a year, plus cluster power against the 400 kW hall.
-*Targets:* 10 or more design cycles a week · compute 100% of the FIA cap or less · nodes kept fed 90%
+*Problem:* run the season's aero simulations inside the team's 6.3 MAUh allowance (P8 in 2026 → 105% of
+the 6 MAUh baseline, FIA F4.6.1), on declared CPU cores in 2027 (F4.4.1), each design cycle back the same day.
+*Caps:* capital CHF 2.4M, cost-cap charge CHF 600k a year, plus cluster power against the room's 120 kW CFD allocation.
+*Targets:* 10 or more design cycles a week · solver compute 100% of the MAUh allowance or less · nodes kept fed 90%
 or more.
 
 | Dial | Settings |
 | --- | --- |
-| Cluster size | ★ 8 nodes · 16 nodes · 28 nodes |
-| Chips | ★ CPU only · Mixed CPU + GPU · GPU heavy |
+| Declared cluster size | ★ 8 nodes · 12 nodes (sized to the allowance) · 20 nodes |
+| Chips | ★ CPU-only solver · CPU solver + GPU partition · GPU solver (not allowed before 1 Jan 2028, F4.4.1) |
 | Storage | ★ Office NAS · Parallel file system · Parallel + flash cache |
 
 **In-zone answers at Standard** (FIT in brackets; the tests require at least two per table):
 
-- Connectivity: two paths + cross-connect + umbilical (95); + edge cache (87); satellite +
-  cross-connect + umbilical (87).
-- OEMs: Dell/HPE/Lenovo lease + 4-hour (94); Dell/HPE/Lenovo as-a-service + 4-hour (94).
-- Datacenter & Power: colo + rear-door + 85% cap (93); colo + liquid + 85% cap (91); and three more
-  colo combinations.
-- CFD: 16 nodes + CPU + parallel (91); 16 nodes + CPU + flash cache (88); 16 nodes + mixed + parallel
-  (84).
+- Connectivity: two diverse routes + private circuit + umbilical (95); satellite + private circuit +
+  umbilical (91); two routes + private circuit + edge node (86); two routes + private WAN + umbilical (84).
+- OEMs: Dell/HPE/Lenovo as-a-service + 4-hour (97); Dell/HPE/Lenovo lease + 4-hour (96). Buying
+  Dell/HPE/Lenovo outright only fits the Generous envelope.
+- Datacenter & Power: Zurich campus + rear-door + 85% cap (88); campus + rear-door + standard (87);
+  campus + liquid + 85% cap (87); campus + liquid + standard or boost (86).
+- CFD: 12 nodes + CPU + parallel (96); 12 nodes + CPU + flash cache (91). 12 nodes + GPU partition +
+  parallel fits the Generous allowance.
 
-**Today's setup** scores 18 (Connectivity: breaks FIA 5.3), 33 (OEMs), 20 (Datacenter & Power: the
-factory room cannot power the cluster) and 61 (CFD: too few cycles).
+**Today's setup** scores 27 (Connectivity: a single route breaks the Audi F1 requirement), 33 (OEMs),
+27 (Datacenter & Power: the 300 kW Hinwil room cannot power the 400 kW 2027 load) and 63 (CFD: too
+few cycles).
 
 ---
 
@@ -293,27 +310,27 @@ readout) are still.
 
 | Table | The scene | What reacts |
 | --- | --- | --- |
-| CFD Supercomputer | An F1 car in a **wind tunnel**, a tunnel display and an "Aero efficiencies found this week" counter | Streamline count follows design cycles; the flow turns smooth once nodes are fed (≥ 90%) and cycles reach 10; downforce arrows grow; the display shows "Lap time −0.xx s"; over the FIA cap a red FIA 2.4 flag flashes and cycles read "not allowed". |
-| Datacenter & Power | A hall cross-section with six racks, a PUE meter and a power meter against the kW available | Rack glow follows GPU speed; throttled racks dim and read "GPUs running at 70%"; heat shimmer with air cooling (throttled or boosted); air flow, rear-door strips or liquid loops by cooling; N+1 generators appear at the colo. |
-| Connectivity | COTA on the left, the factory on the right, packets travelling between them | Packet speed follows latency ("Strategy call lands in 110 ms"); a second path appears with two paths, a satellite and a third path with satellite backup; packets drop on the public internet or a single tunnel; garage Wi-Fi flashes an FIA 5.2 flag; an edge cache appears in the garage. |
-| OEMs | A rack row, a performance bar against 2× today, CapEx and OpEx jars, a support clock and a lead-time calendar | Old servers slide out for current-generation or DGX ones; the bar fills; the jars fill by payment model (buy, lease, as-a-service); the clock reads 72 h, next day or 4 h; the delivery marker moves against the first race. |
+| CFD Supercomputer | An F1 car in a **wind tunnel**, a tunnel display and an "Aero efficiencies found this week" counter | Streamline count follows design cycles; the flow turns smooth once nodes are fed (≥ 90%) and cycles reach 10; downforce arrows grow; the display shows "Lap time −0.xx s"; over the MAUh allowance a red FIA F4.6.1 flag flashes and cycles read "not allowed". |
+| Datacenter & Power | A hall cross-section with six racks (signed Hinwil data room, Zurich campus · 500 kW or Remote low-cost region), a PUE meter and a power meter against the kW available | Rack glow follows cluster speed; throttled racks dim and read "Cluster running at 70%"; heat shimmer with air cooling (throttled or boosted); air flow, rear-door strips or liquid loops by cooling; N+1 generators appear at the campus. |
+| Connectivity | The circuit on the left, the Zurich campus and Hinwil Mission Control on the right, packets travelling between them | Packet speed follows latency ("Strategy call lands in 110 ms"); a second route appears with two routes, a satellite and a third path with satellite backup; packets drop on the public internet or a single route; garage Wi-Fi flashes an "Audi F1 req." flag; an edge node appears in the garage. |
+| OEMs | A rack row, a performance bar against 2× today, capital and cost-cap jars, a support clock and a lead-time calendar | Old servers slide out for current-generation or DGX ones; the bar fills; the jars fill by payment model (buy, lease, as-a-service); the clock reads 72 h, next day or 4 h; the delivery marker moves against the Bahrain test. |
 
 Each scene carries one label per dial (8 words or fewer), with the seconds that dial found against
-today's setting, for example "Liquid cooling: GPUs at 100% (+0.19 s)".
+today's setting, for example "Liquid cooling: cluster at 100% (+0.16 s)".
 
 **Seconds found per lap** (`outcomeOf` in `public/js/model.js`), per table:
 
-- a cap or FIA breach: **0.00 s, not allowed** ("Over the CapEx cap: the FIA would reject this");
+- a cap, FIA-rule or Audi F1 requirement breach: **0.00 s, not allowed** ("Over the capital envelope: the finance board would not sign it");
 - in the zone: **0.25 + 0.10 × (FIT − 80) ÷ 20**, so 0.25–0.35 s (more spare budget, more time);
 - otherwise: **0.20 × progress from today's FIT towards 80**, so 0.00–0.20 s, with the line naming
   the worst miss ("Latency too high: the strategy call arrives too late").
 
-The reference build finds 0.32 + 0.32 + 0.31 + 0.31 = 1.26 s per lap at Standard.
+The reference build finds 0.32 + 0.34 + 0.28 + 0.33 = 1.27 s per lap at Standard.
 
 **FIT (0–100)** is one number per board. Each target has a closeness from 0 to 1, where 1 means it is
 in its green zone. When every target is in the zone, FIT is 80 plus up to 20 for spare budget (the
 average share of each money cap left unused, with half a cap spare earning the full 20). Otherwise FIT
-is 70 × the average closeness. **Any cap breach (CapEx, OpEx or power) or FIA breach caps FIT at
+is 70 × the average closeness. **Any cap breach (capital, cost-cap charge or power), FIA-rule or requirement breach caps FIT at
 40**, so an over-cap board can never score well. The board shows FIT as a ring with one sentence and
 one hint that names the single dial setting that fixes the most urgent problem.
 
@@ -324,15 +341,19 @@ team's dials reopen at that table only (its previous picks shown as *last time* 
 three new choices and queues for the SA again while play is open, and the attempt count goes up.
 A board locked before the timer ran out can still be pitched and approved afterwards.
 
-**Penalties** are rolled in the race with fixed chances:
+**Penalties** are rolled in the race with fixed chances. FIA articles are stewards' matters; an
+ignored Audi F1 requirement bites operationally; an envelope overrun is a finance review:
 
 | Breach | Table | Chance | Points |
 | --- | --- | --- | --- |
-| Single tunnel (FIA 5.3) | Connectivity | 60% | −5 |
-| Garage Wi-Fi (FIA 5.2) | Connectivity | 80% | −6 and +5 s |
-| No N+1 power (FIA 4.1) | Datacenter & Power | 50% | −6 |
-| Over the FIA compute cap (FIA 2.4) | CFD | 50% | −8 |
-| Over a CapEx or OpEx cap line | any | certain | −10 |
+| Single route (Audi F1 requirement) | Connectivity | 60% | −5 (operations) |
+| Garage Wi-Fi (Audi F1 requirement) | Connectivity | 80% | +5 s at the stop, no points |
+| GPU solver before 2028 (FIA F4.4.1) | CFD | 60% | −8 |
+| Over the MAUh allowance (FIA F4.6.1) | CFD | 60% | −8 |
+| Over the capital envelope (finance) or the cost-cap charge line (FIA) | any | certain | −10 |
+
+A site without N+1 or 2N breaks a target, not a rule: it costs the zone and shows up as a power blip
+in the race rather than as a penalty.
 
 **Final score** = table points + race points × 4 − penalty points. Race points follow F1:
 25, 18, 15, 12, 10, 8, 6, 4, 2, 1.
@@ -352,14 +373,14 @@ and reorder as approvals land. With no teams yet, the projector says so and wait
 car the moment it adds itself.
 Incidents follow visible dial settings, and each names its dial:
 
-- **Connectivity:** a drop on a single tunnel, public-internet jitter, a fibre cut (satellite backup
-  survives it, two paths lose 0.8 s, a single tunnel loses 4 s), the edge cache's gain, and the Wi-Fi
-  time penalty.
+- **Connectivity:** a drop on a single route to Mission Control, public-internet jitter, a fibre cut
+  between Hinwil and Zurich (satellite backup survives it, two routes lose 0.8 s, a single route
+  loses 4 s), the garage edge node's gain, and a Wi-Fi stall at the stop.
 - **OEMs:** last-generation kit runs too few what-ifs, late delivery, and a failed node (saved by
   4-hour support, costly with basic support).
 - **Datacenter & Power:** a power blip without N+1, throttling when cooling falls short, and a heat
   spike (air cooling and max boost suffer; an 85% cap stays stable).
-- **CFD:** too few design cycles, slow storage, the flash cache's gain, and tripping the hall's power.
+- **CFD:** too few design cycles, slow storage, the flash cache's gain, and tripping the room's 120 kW CFD allocation.
 
 **Balance** (checked in the tests over 200 seeds for every budget level): a team with four approved
 in-zone boards beats the same boards with two tables unapproved at least 85% of the time, and beats
@@ -373,6 +394,8 @@ today's setup at least 95% of the time.
 - **What went well:** 2–3 lessons achieved (each in-zone approved board says why it matters);
 - **What you could have done differently:** 2–3 suggestions, each naming the dial, the better
   setting, the seconds and FIT gain, why it matters and how a provider helps;
+- **2028 path:** one line on whether the boards the race used carry the 800 kW 2028 load and the
+  GPU-solver rule (where the cluster lives, its cooling, the chips, the routes);
 - the incidents that affected the team.
 
 Readouts are at `/race.html?team=<id>` and are listed in the host controls. Once the host taps
@@ -498,17 +521,21 @@ afterwards.
 server.mjs               Node HTTP server: static files, JSON API, state, persistence (no dependencies)
 public/index.html        landing page            public/station.html   table iPad
 public/host.html         host controls / SA view  public/race.html     projector and readouts
+public/case.html         the business case (Hinwil on-prem vs the Zurich campus, 2027 and 2028)
+public/js/customer.js    every customer-specific figure, annotated VERIFIED (source row) or ASSUMPTION (rationale)
+public/js/case.js        caseModel(): the business-case arithmetic (formulae in the header comment) and its page
 public/js/briefs.js      the four briefs (situation, wants, rules, decisions, provider, words to know)
 public/js/briefview.js   renders a brief, with the #briefEnd sentinel the brief gate watches
 public/js/catalog.js     tables, problems, targets, caps, dials, budget levels, today's setup (the game data)
-public/js/model.js       boardFor(): gauges, cap bars, FIA chips, FIT, seconds found, sentence and hint; evaluate() for the race
+public/js/model.js       boardFor(): gauges, cap bars, rule chips (FIA articles and Audi F1 requirements), FIT, seconds found, sentence and hint; evaluate() for the race
 public/js/scene.js       the live scenario per table (wind tunnel, hall, data path, rack row) and its labels
 public/js/board.js       the tuning board (scene, SVG gauges, cap bars, FIT ring, dials), shared by every screen
 public/js/session.js     the phase (open, play, paused, ended, race, readout) and the countdown: the single source
 public/js/race.js        the seeded race and its incidents
-public/js/report.js      the podium and each team's readout
+public/js/report.js      the podium and each team's readout, including the 2028 path line
 public/js/plan.js, plandata.js, summary.js   the locked board snapshot and the SA's summary
 public/js/station.js, host.js, raceview.js, readoutview.js, approval.js, podium.js, ui.js, demo.js
+docs/audi-f1-sources.md  the fact pack behind customer.js: every public source (URL, access date) and every assumption
 scripts/                 macOS service and tunnel helpers
 tests/                   node:test suites
 ```
@@ -570,3 +597,99 @@ The suites (`node:test`, no dependencies) cover:
   action, a team adds itself on a table iPad, reads the brief, locks three dials and calls the SA; the
   page never moves while polling; a rejection reopens the dials; the host controls open behind one
   masked PIN field, start and reset the timer and run the race; no JavaScript errors.
+
+---
+
+## Audi F1 Team edition
+
+### The scenario
+
+The customer is the **Audi F1 Team** (entrant "Audi Revolut F1 Team"; the Sauber Group in Hinwil,
+Canton of Zurich, became Audi's works team for 2026). Its race cars, race operations ("Mission
+Control"), wind tunnel and today's data room are in Hinwil, about 30 km from Zurich; the power unit
+comes from Neuburg an der Donau and a technology centre opened in Bicester in 2025. We are the
+colocation provider. The decision on the table: **500 kW of colocation in our Zurich campus for 2027,
+with a contractual expansion right to 1,000 kW for 2028, versus staying on-prem in Hinwil.**
+
+Everything the game says about the customer is one of two things:
+
+- a **VERIFIED** public fact: the row in `docs/audi-f1-sources.md` gives the source URL and the access
+  date (24 Nov 2026), for example the 2026 Financial Regulations (USD 215M cost cap, Art. D4.1.2; no
+  separate capital allowance, straight-line depreciation under D6.1.1.k; Property Costs and
+  heat-recovery kit excluded), the 2027 Aerodynamic Testing Restrictions (Section F Art. F4: 6 MAUh
+  per period at 100%, AUh = cores × seconds × peak GHz ÷ 3600, CPU-only solver until GPUs are allowed
+  on 1 January 2028, re-declaration within a month of a change of location), Audi's P8 in the 2026
+  championship (105% on the sliding scale, so 6.3 MAUh), ElCom/EKZ/ewz 2026–2027 tariffs, Zurich
+  data-centre norms and the 2027 calendar (Austin, 22–24 October, stays the game's finale);
+- a labelled **ASSUMPTION** with a one-line rationale: today's room (≈ 300 kW, PUE ≈ 1.6, single
+  feed), the 2027 IT load (≈ 400 kW) and the 2028 load (≈ 800 kW), our fee (CHF 180 per kW per
+  month, power metered on top), fit-out and migration (CHF 1.2M), the all-in planning tariffs
+  (16 Rp/kWh Hinwil, 15 Rp/kWh campus), the planning FX (1 USD = 0.84 CHF) and the node arithmetic
+  behind "12 nodes sized to the allowance".
+
+Nothing is claimed about the customer's internal IT, contracts, partners or prices beyond the public
+record; the team's own operational standards (two diverse paths, wired car data, N+1/2N) are shown as
+"Audi F1 requirement", never as an FIA article.
+
+### How to run tomorrow's demo
+
+1. `npm start` (or `PORT=8199 DATA_DIR=/tmp/podium-audi node server.mjs` for a throwaway game), then
+   open `http://localhost:8080/`. The header reads *Audi F1 Team · Hinwil → Zurich campus · 2027
+   plan, 2028 path*.
+2. Open the **Business case** (`/case.html`, linked from the landing page and the host console) on
+   the projector first: Hinwil as is, Hinwil upgraded and the Zurich campus side by side for 2027 and
+   2028 (IT load, PUE, facility kWh, electricity in CHF, fee, one-off, yearly cost-cap charge, 3-year
+   TCO 2027–2029, CO2, resilience, 2028 headroom, heat reuse, cost-cap treatment). Move the sliders
+   (electricity prices, 2027 and 2028 loads, fee) live; **Print** gives a clean handout with the
+   values and the sources.
+3. Play the four tables as usual (section 1). The briefs carry the real numbers with `[source]` tags;
+   the in-zone answers at Standard are listed in section 5. **Datacenter & Power** is the table that
+   makes the sale: the Hinwil room cannot power the 2027 load, the remote region has one grid feed,
+   and only the campus meets the Audi F1 N+1/2N requirement with 2028 headroom.
+4. Run the race from the host console. Each readout ends with a **2028 path** line.
+5. **Demo mode** on the host console still plays all eight steps end to end with the edition's
+   boards.
+
+### Every assumption, and how to change it
+
+All customer-specific figures live in **`public/js/customer.js`** as annotated entries:
+`v(value, "A3")` is VERIFIED (the key points at a row of `docs/audi-f1-sources.md`) and
+`a(value, "why")` is an ASSUMPTION with its rationale. `FIGURES` is the same tree with the annotations
+stripped, and `annotatedFigures()` lists every entry for the business-case page's sources table. The
+catalog, the briefs, the scenes, the race, the readouts, the business case and this README all derive
+from it; change a figure there and everything follows (then run `npm test`, which pins the
+in-zone counts and the word limits).
+
+| Figure | Value | Status | Where |
+| --- | --- | --- | --- |
+| 2027 IT load | 400 kW (350–450) | ASSUMPTION B-a | `load.it2027KW` |
+| 2028 IT load | 800 kW (700–900) | ASSUMPTION B-b | `load.it2028KW` |
+| Today's room | 300 kW, PUE 1.6, single feed | ASSUMPTION A-a..A-c | `room.*` |
+| Hinwil upgrade | CHF 3.0M → 450 kW, PUE 1.4, N+1 | ASSUMPTION A-e | `room.upgrade*` |
+| Campus offer | 500 kW, PUE 1.2, 2N/N+1, CHF 180/kW/month, CHF 1.2M fit-out + migration, expansion right 1,000 kW | ASSUMPTION D-d | `offer.*` |
+| Electricity | Hinwil 16 Rp/kWh (EKZ 2027 MV 17.11/12.91 + CHF 8/kW/month), campus 15 Rp/kWh (ewz 2027 NNC) | ASSUMPTION D-a/D-b on VERIFIED D2/D3 | `tariffs.*` |
+| Grid CO2 | 75 g CO2eq/kWh | ASSUMPTION D-c on VERIFIED D4 | `tariffs.gridCO2gPerKWh` |
+| FX | 1 USD = 0.84 CHF planning; FIA rate 1.1316 USD/CHF | ASSUMPTION E-a / VERIFIED C2 | `fx.*` |
+| Cost cap | USD 215M (CHF 190.0M at the FIA rate) | VERIFIED C1 | `fia.costCapUSD` |
+| ATR | P8 → 105% → 6.3 MAUh, 336 runs, 84 wind-on hours | VERIFIED A12, C4, C5 | `fia.atr*`, `fia.mauh*` |
+| Depreciation | IT 4 years, plant 10 years | ASSUMPTION | `fia.depreciationYears*` |
+| Cluster node | 128 cores, 3.7 GHz, 75% solver share, 1.2 kW, CHF 65k | ASSUMPTION | `cluster.*` |
+
+The game's own money lines (each table's capital envelope and cost-cap charge allowance, option
+prices) are in `public/js/catalog.js`, derived from `customer.js` where they touch the customer.
+
+### Where the facts live
+
+- `docs/audi-f1-sources.md`: the fact pack. Sections A (customer), B (load assumptions), C (FIA
+  regulations), D (Swiss context), E (calendar and FX), F (how the figures flow into the product).
+  Every row is VERIFIED (URL + access date) or ASSUMPTION (rationale).
+- `public/js/customer.js`: the same figures as code.
+- `public/case.html` + `public/js/case.js`: the business case, with the formulae in a comment at the
+  top of `case.js`.
+
+**Open questions for the customer** (the assumptions that matter most): the data room's real
+capacity, PUE and resilience today; the 2027 and 2028 IT load; whether the colocation fee's space
+component can be presented as Property Costs and the fit-out as a leasehold improvement under the
+Financial Regulations (`C3-open`); the team's depreciation policy for plant; and whether the 2028
+GPU partition is planned for the first 2028 period.
+
