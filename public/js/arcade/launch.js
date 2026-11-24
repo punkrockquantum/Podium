@@ -14,11 +14,11 @@ export const CAR_KEY = "podium.arcade.car"
 export const ARCADE_URL = "/arcade.html"
 export const SEASONS = [2027, 2028]
 
-/** The simulator's three presets as the arcade knew them on 24 Nov 2026 (P8, 60 % confidence). */
+/** The simulator's three presets as the arcade knew them on 24 Nov 2026 (P8, 60 % confidence, inside the 500 kW envelope). */
 export const BUILT_IN_FALLBACK = Object.freeze([
   { id: "today", season: 2027, label: "Today: Hinwil on-prem", short: "Today", secondsPerLapVsToday: 0, effectiveMauh: 3.84, allowanceUsedPct: 98.8, availabilityPct: 99.39, dataToDecisionS: 6.34, location: "Hinwil" },
   { id: "dr2027", season: 2027, label: "Digital Realty Zurich 2027", short: "DR 2027", secondsPerLapVsToday: 0.14, effectiveMauh: 6.15, allowanceUsedPct: 98.8, availabilityPct: 99.89, dataToDecisionS: 4.84, location: "Digital Realty Zurich" },
-  { id: "gl2028", season: 2028, label: "Digital Realty + HPE GreenLake 2028", short: "DR + GreenLake 2028", secondsPerLapVsToday: 0.39, effectiveMauh: 7.21, allowanceUsedPct: 93.6, availabilityPct: 99.98, dataToDecisionS: 4.84, location: "Digital Realty Zurich" },
+  { id: "gl2028", season: 2028, label: "Digital Realty + HPE GreenLake 2028", short: "DR + GreenLake 2028", secondsPerLapVsToday: 0.43, effectiveMauh: 7.21, allowanceUsedPct: 93.6, availabilityPct: 99.98, dataToDecisionS: 4.84, location: "Digital Realty Zurich" },
 ])
 
 const num = (v, fallback) => {
