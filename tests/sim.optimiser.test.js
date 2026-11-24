@@ -2,8 +2,11 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import {
   OBJECTIVES, OBJECTIVE_ORDER, SEARCH_SPACE, FIXED, LOCKED_BY_DEFAULT, DEFAULTS, canonicalPlan, fillNodes, ccfFloor, clampPlan,
-  defaultFits, scorePlan, mulberry32, randomPlan, optimise, diffPlans,
+  defaultFits, scorePlan, mulberry32, randomPlan, optimise, optimiseAsync, diffPlans, startFromPlan,
 } from "../public/js/sim/optimiser.js"
+import { createOptimiserRunner } from "../public/js/sim/optimiserRunner.js"
+import { planFromSets } from "../public/js/sim/strategies.js"
+import { normalizePlan, presetPlan, evaluatePlan as evaluateTwoSeasonPlan, seasonInputs } from "../public/js/sim/plan.js"
 import { STRATEGIES, STRATEGY_ORDER, SEASONS, ENVELOPE, evaluatePlan, evaluateStrategy } from "../public/js/sim/strategies.js"
 import { CONTROLS } from "../public/js/sim/model.js"
 
@@ -265,4 +268,70 @@ test("optimiser: diffPlans lists exactly the changed controls, A→A is empty, a
   const r = optimise({ start: STRATEGIES.A, restarts: 2, maxPlans: 300 })
   assert.deepEqual(r.diff, diffPlans(r.start, r.best))
   assert.ok(nodesOf(r.best).every((n) => n >= 0 && n <= 40))
+})
+
+test("optimiser: optimiseAsync yields between chunks, matches the synchronous search exactly and stops on an AbortSignal", async () => {
+  let ticks = 0
+  const sync = optimise({ start: STRATEGIES.A, objective: "fastest2028" })
+  const async = await optimiseAsync({ start: STRATEGIES.A, objective: "fastest2028", yieldEvery: 200, onProgress: () => ticks++ })
+  assert.equal(async.score, sync.score)
+  assert.equal(async.evaluations, sync.evaluations)
+  assert.deepEqual(async.best, sync.best)
+  assert.ok(ticks >= 10, `progress every 100 evaluations (${ticks})`)
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 15)
+  const stopped = await optimiseAsync({ start: STRATEGIES.A, objective: "fastest2028", restarts: 24, maxPlans: 20000, signal: controller.signal })
+  assert.equal(stopped.stopped, true)
+  assert.ok(stopped.evaluations < 20000)
+  assert.ok(stopped.score >= stopped.startScore, "the best so far is returned")
+  assert.ok(stopped.fits)
+})
+
+test("optimiser: the runner falls back to the main thread without a Worker and gives the same proposal; stop() keeps the best so far", async () => {
+  const runner = createOptimiserRunner({ allowWorker: false })
+  assert.equal(runner.mode, "main")
+  assert.equal(runner.busy, false)
+  let progress = 0
+  const r = await runner.run({ start: STRATEGIES.A, objective: "fastest2028" }, { onProgress: () => progress++ })
+  const sync = optimise({ start: STRATEGIES.A, objective: "fastest2028" })
+  assert.equal(r.score, sync.score)
+  assert.equal(r.evaluations, sync.evaluations)
+  assert.ok(progress >= 10)
+  assert.equal(runner.busy, false)
+  const p = runner.run({ start: STRATEGIES.B, objective: "balanced", thorough: true })
+  assert.equal(runner.busy, true)
+  await assert.rejects(runner.run({ start: STRATEGIES.B, objective: "balanced" }), /already running/)
+  setTimeout(() => runner.stop(), 20)
+  const stopped = await p
+  assert.equal(stopped.stopped, true)
+  assert.equal(stopped.restarts, DEFAULTS.thoroughRestarts)
+  assert.equal(stopped.maxPlans, DEFAULTS.thoroughMaxPlans)
+  assert.ok(stopped.fits)
+  runner.dispose()
+})
+
+test("optimiser: startFromPlan ↔ planFromSets round-trip a plan.js plan; detached 2028 values of shared controls are folded back and reported", () => {
+  const gl = presetPlan("gl2028")
+  const { sets, dropped } = startFromPlan(gl)
+  assert.deepEqual(dropped.sort(), ["cloudOnRamp", "cooling", "fibreGbps", "rackKW", "redundancy", "support", "trackside"], "gl2028 detaches these facility controls in 2028; the optimiser treats them as shared")
+  for (const id of Object.keys(SEARCH_SPACE.season)) assert.ok(id in sets[2027] && id in sets[2028], `${id} is a season control`)
+  for (const id of Object.keys(SEARCH_SPACE.shared)) assert.ok(id in sets.shared && !(id in sets[2027]), `${id} is shared`)
+  assert.equal(sets.shared.position, 8)
+  assert.equal(sets.shared.legacyExpansionRight, undefined)
+  const back = normalizePlan(planFromSets(sets, { timeline: gl.timeline }))
+  for (const y of [2027, 2028]) for (const id of Object.keys(SEARCH_SPACE.season)) assert.equal(seasonInputs(back, y)[id], seasonInputs(gl, y)[id], `${y} ${id} survives the round trip`)
+  for (const id of dropped) assert.equal(seasonInputs(back, 2028)[id], seasonInputs(gl, 2027)[id], `${id} folded back to 2027's value`)
+  // a strategy plan has nothing detached among the shared controls and round-trips exactly
+  const dr = presetPlan("dr2027")
+  const rt = startFromPlan(dr)
+  assert.deepEqual(rt.dropped, [])
+  const again = normalizePlan(planFromSets(rt.sets, { name: dr.meta.name, timeline: dr.timeline }))
+  assert.deepEqual({ s: again.shared, y: again.seasons, t: again.timeline }, { s: dr.shared, y: dr.seasons, t: dr.timeline })
+  // the optimiser's proposal becomes a plan.js plan that fits at plan level and carries the lineage
+  const r = optimise({ start: sets, objective: "fastest2028", restarts: 3, maxPlans: 1500 })
+  const proposal = normalizePlan(planFromSets(r.best, { name: "Optimiser proposal", origin: "optimiser", timeline: gl.timeline }))
+  assert.equal(proposal.meta.origin, "optimiser")
+  const result = evaluateTwoSeasonPlan(proposal)
+  assert.equal(result.envelope.fits, true)
+  assert.ok(result.seasons[2028].perf.sec > evaluateTwoSeasonPlan(gl).seasons[2028].perf.sec, "the proposal beats the start in 2028 at plan level")
 })

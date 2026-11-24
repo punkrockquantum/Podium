@@ -21,7 +21,8 @@
  * model's `evaluate` (single-season, steady-state figures: the optimiser ranks estates, plan.js blends the season).
  */
 import { K } from "./assumptions.js"
-import { ENVELOPE, SEASONS, evaluatePlan as evaluatePlanDefault, sharedOf } from "./strategies.js"
+import { ENVELOPE, SEASONS, evaluatePlan as evaluatePlanDefault, sharedOf, planFromSets } from "./strategies.js"
+import { seasonInputs } from "./plan.js"
 
 // ---------------------------------------------------------------------------------------------
 // Objectives (3.1)
@@ -126,6 +127,23 @@ export const DEFAULTS = Object.freeze({
 })
 
 const META_KEYS = new Set(["key", "id", "name", "tagline", "story", "timeline", "risks", "provides", "openQuestions", "cutover", "ml", "plan", "shared"])
+
+/**
+ * Optimiser-shaped sets `{ shared, 2027, 2028 }` from a plan.js plan: every 2027 input that is not a per-season
+ * search control goes to `shared` (so the optimiser moves location, cooling, consumption … for both seasons at
+ * once); the per-season search controls keep their 2027 and 2028 values. A 2028 value detached for a control the
+ * optimiser treats as shared is folded back to 2027's value and reported in `dropped`.
+ */
+export function startFromPlan(plan) {
+  const s27 = seasonInputs(plan, 2027)
+  const s28 = seasonInputs(plan, 2028)
+  const seasonIds = Object.keys(SEARCH_SPACE.season)
+  const shared = {}
+  for (const [k, v] of Object.entries(s27)) if (!seasonIds.includes(k) && k !== "season" && k !== "legacyExpansionRight") shared[k] = v
+  const pickSeason = (s) => Object.fromEntries(seasonIds.filter((id) => s[id] !== undefined).map((id) => [id, s[id]]))
+  const dropped = Object.keys(shared).filter((k) => s28[k] !== undefined && s28[k] !== s27[k])
+  return { sets: { shared, 2027: pickSeason(s27), 2028: pickSeason(s28) }, dropped }
+}
 
 /** Canonical { shared, 2027, 2028 } copy of a plan (a STRATEGIES entry, a prototype-shaped plan or a user plan). */
 export function canonicalPlan(plan) {
@@ -300,10 +318,33 @@ function normaliseLocked(locked) {
  * @param options.shouldStop   () → boolean, checked before every evaluation; the best so far is returned
  */
 export function optimise(options = {}) {
+  const it = optimiseSteps(options)
+  let step = it.next()
+  while (!step.done) step = it.next()
+  return step.value
+}
+
+/**
+ * The same search, yielding to the event loop every `yieldEvery` evaluations so a Stop button, a progress bar or
+ * a worker message can get through. Used by the Web Worker and by the main-thread fallback.
+ * `signal` (an AbortSignal) stops the search; the best plan so far is returned.
+ */
+export async function optimiseAsync(options = {}) {
+  const { yieldEvery = 200, signal = null, shouldStop = null } = options
+  const it = optimiseSteps({ ...options, chunk: yieldEvery, shouldStop: () => Boolean((signal && signal.aborted) || (shouldStop && shouldStop())) })
+  let step = it.next()
+  while (!step.done) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    step = it.next()
+  }
+  return step.value
+}
+
+function* optimiseSteps(options = {}) {
   const {
     start, objective = "fastest2028", evaluatePlan = evaluatePlanDefault, fits = defaultFits,
     restarts = DEFAULTS.restarts, maxSweeps = DEFAULTS.maxSweeps, maxPlans = DEFAULTS.maxPlans, seed = DEFAULTS.seed,
-    fill = true, onProgress = null, shouldStop = null, progressEvery = 100,
+    fill = true, onProgress = null, shouldStop = null, progressEvery = 100, chunk = Infinity,
   } = options
   if (!start) throw new Error("optimise() needs a start plan")
   const obj = typeof objective === "string" ? OBJECTIVES[objective] : objective
@@ -356,6 +397,8 @@ export function optimise(options = {}) {
     ...Object.keys(SEARCH_SPACE.shared).filter((id) => !isLocked(locked, "shared", id)).map((id) => ["shared", id]),
     ...SEASONS.flatMap((y) => Object.keys(SEARCH_SPACE.season).filter((id) => !isLocked(locked, "season", id) && !(fill && SEARCH_SPACE.season[id].derived)).map((id) => [y, id])),
   ]
+  let nextYield = chunk
+  const snapshot = () => ({ done: evaluations, total: maxPlans, bestScore: best ? best.score : -Infinity, best: best ? best.plan : null })
 
   outer: for (const [restart, s0] of starts.entries()) {
     let current = score(s0)
@@ -372,6 +415,7 @@ export function optimise(options = {}) {
           const cand = score(withValue(current.plan, scope, id, v))
           if (!cand) break outer
           if (cand.score > bestHere.score + 1e-9) bestHere = cand
+          if (evaluations >= nextYield) { nextYield = evaluations + chunk; yield snapshot() }
         }
         if (bestHere !== current) {
           current = bestHere
