@@ -110,3 +110,17 @@ test("every readout carries a 2028 path line that names the site and the GPU rul
   const today = path2028For({ choices: {}, reviews: {} })
   assert.match(today, /Hinwil data room .* short of the 800 kW/)
 })
+
+test("one participant: the customer's team is the Audi F1 Team, and the finale is its 2027 plan against today's Hinwil setup", () => {
+  assert.deepEqual(CUSTOMER.team, { id: "t1", name: "Audi F1 Team", color: "#e10600" })
+  assert.deepEqual(C.CUSTOMER_TEAM, CUSTOMER.team, "the catalog's customer is customer.js's")
+  assert.equal(C.MAX_TEAMS, 1)
+  assert.equal(C.FINALE_ENTRANTS.plan.id, CUSTOMER.team.id, "the plan car keeps the customer's id, so /race.html?team=t1 is its readout")
+  assert.equal(C.FINALE_ENTRANTS.plan.name, `${CUSTOMER.team.name} · 2027 plan`)
+  assert.equal(C.FINALE_ENTRANTS.today.name, `${CUSTOMER.team.name} · today's Hinwil setup`)
+  assert.notEqual(C.FINALE_ENTRANTS.today.id, CUSTOMER.team.id)
+  assert.equal(C.FINALE.laps, 56, "the Austin 2027 race keeps its 56 laps")
+  const readme = read("README.md")
+  for (const w of ["One customer, no teams", "How to run tomorrow's demo", "/station.html?station=dc", "Open my table", "Show readout", "2028 path"]) assert.ok(readme.includes(w), `README lacks "${w}"`)
+  assert.ok(!/(Audi F1 Team|customer)['’]s (team|crew) members/.test(readme), "the README does not invent the customer's people")
+})
