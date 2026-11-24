@@ -88,7 +88,8 @@ export const fmt = {
   pct(value, digits = 0) {
     const v = safe(value)
     if (v === null) return "—"
-    return `${(v * 100).toFixed(digits)} %`
+    const text = (v * 100).toFixed(digits)
+    return `${/^-0(\.0*)?$/.test(text) ? text.slice(1) : text} %`
   },
   signed(value, digits = 1, unit = "") {
     const v = safe(value)
