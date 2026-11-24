@@ -240,7 +240,7 @@ export function mountSim(root) {
     state.view = state.route === "sa" ? "sa" : "team"
     store.rememberView(state.view)
     if (params.has("pe")) setPlain(params.get("pe") !== "0")
-    else if (!state.plainSet && (viewBefore !== state.view || !pePrimed)) setPlain(defaultPlain())
+    else if (!pePrimed || (!state.plainSet && viewBefore !== state.view)) setPlain(defaultPlain())
     pePrimed = true
     if (params.has("p") || params.has("view") || params.has("pe") || state.route !== route) router.replace(state.route)
     if (panel.isOpen && viewBefore !== state.view) panel.close()

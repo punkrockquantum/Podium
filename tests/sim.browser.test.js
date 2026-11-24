@@ -597,6 +597,12 @@ test("Explainers: ? on controls, tiles, flags and bars opens one shared panel; w
   await settle()
   assert.equal(await text(page, "#pc-nodes-label"), "CPU nodes")
   assert.equal(await ev("localStorage.getItem('podium.sim.plainEnglish')"), "0")
+  await page.goto("about:blank") // a reload (not a hash change) must come back with the stored choice
+  await page.goto(`${base}/sim.html#/compute`)
+  await ready(page)
+  await settle()
+  assert.equal(await ev("document.querySelector('#plain-english').getAttribute('aria-checked')"), "false", "the choice survives a reload")
+  assert.equal(await text(page, "#pc-nodes-label"), "CPU nodes")
   await page.click("#share-link")
   await sleep(200)
   assert.match(await ev("location.hash"), /&pe=0$/, "the link carries pe=0")
