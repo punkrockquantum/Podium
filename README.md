@@ -48,7 +48,7 @@ npm start                 # http://localhost:8090/
   side-by-side table with Today and a chart. *Load this strategy* puts it in the planner (the plan bar
   reads *Strategy B*; any edit turns it into *Custom (from B)* with *Reload the strategy* / *Keep my
   edit*), *Compare* sends it to an A/B slot, *Race now* races it. Figures are **plan-level**: the
-  8 March 2027 target slips to the first boundary the lead times allow and 2027 is blended by the
+  8 March 2027 target slips to the first day the lead times allow (inside ATP 2) and 2027 is blended by the
   go-live date, so they sit below the briefs' steady-state numbers (A +0.10 / +0.37 s, B +0.15 / +0.47 s,
   C +0.14 / +0.46 s at P8 and 60 %).
 - **Optimiser — "Find the best use of 500 kW".** Pick an objective (*Fastest 2028 car*, *Most cost-cap

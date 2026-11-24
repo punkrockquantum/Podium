@@ -346,7 +346,7 @@ plan bar reads *Custom (from B)* until the user reloads the strategy or keeps th
 **Plan-level, not steady-state.** The briefs' headline figures were computed steady-state: each season evaluated as
 if the strategy's estate ran all year. The tool's figures are **plan-level**: the strategy is loaded into a plan and
 evaluated with the go-live blend of section 7, exactly as the planner shows it after *Load*. Two things move: the
-8 March 2027 target **slips** to the first boundary the lead times allow (A and C to 30 March, B — direct liquid rows
+8 March 2027 target **slips** to the first day the lead times allow, inside ATP 2 (A and C to 30 March, B — direct liquid rows
 and a 16-week fit-out — to 20 April 2027), and 2027 is then blended with today's room for the months before the
 cutover. 2028 is the full season on the stepped-up estate, so it matches steady state. At P8 and 60 %:
 

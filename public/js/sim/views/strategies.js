@@ -436,7 +436,7 @@ export function strategiesView(ctx) {
       el("div", { class: "card-head" }, el("h3", {}, "Side by side"), el("p", { class: "card-sub" }, "Today's setup and the three strategies, both seasons; the best value in each row per season is marked.")),
       el("div", { class: "table-wrap", id: "strategies-table-wrap" }),
       el("div", { class: "chart-wrap", id: "strategies-chart-wrap" }),
-      el("p", { class: "footnote" }, "Plan-level figures: 2027 is blended by the go-live date (the strategies' 8 March 2027 target slips to the first boundary the lead times allow), 2028 is the full season on the stepped-up estate. Steady-state season figures are in the model notes."),
+      el("p", { class: "footnote" }, "Plan-level figures: 2027 is blended by the go-live date (the strategies' 8 March 2027 target slips to the first day the lead times allow, which can be inside a period), 2028 is the full season on the stepped-up estate. Steady-state season figures are in the model notes."),
       el("p", { class: "footnote oem-footnote" }, PROVIDER.oemNote)),
     el("div", { id: "optimiser-host" }))
   const grid = node.querySelector("#strategy-grid")
