@@ -213,7 +213,7 @@ function sourcesList(el) {
       el("thead", {}, el("tr", {}, el("th", {}, "Figure"), el("th", {}, "Value"), el("th", {}, "Status"), el("th", {}, "Source or rationale"))),
       el("tbody", {}, items.map((x) => el("tr", { class: x.status.toLowerCase() },
         el("td", {}, el("code", {}, x.path)),
-        el("td", {}, typeof x.value === "object" && x.value !== null ? JSON.stringify(x.value) : String(x.value)),
+        el("td", {}, x.value === null || x.value === undefined ? "none" : typeof x.value === "object" ? JSON.stringify(x.value) : String(x.value)),
         el("td", {}, el("span", { class: `status ${x.status.toLowerCase()}` }, x.status)),
         el("td", {}, x.status === "VERIFIED" ? `[${x.ref}]${x.note ? ` ${x.note}` : ""}` : x.ref)))))))
 }
