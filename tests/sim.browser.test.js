@@ -43,7 +43,7 @@ after(async () => {
   if (dir) await rm(dir, { recursive: true, force: true })
 })
 
-const ROUTES = ["overview", "fia", "compute", "facility", "connectivity", "deployment", "commercials", "compare", "sa", "model"]
+const ROUTES = ["overview", "strategies", "fia", "compute", "facility", "connectivity", "deployment", "commercials", "compare", "sa", "model"]
 const CLEAN = /\bundefined\b|\bNaN\b|Infinity|\[object /
 const text = (page, selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent?.trim() || ""`)
 const count = (page, selector) => page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)
@@ -115,7 +115,7 @@ test("every route renders, the nav follows the hash and back/forward work", { sk
   const expectations = {
     fia: "#fia-seasons .season-card", compute: "#compute-seasons .season-card", facility: "#facility-seasons .season-card",
     connectivity: "#connectivity-seasons .season-card", deployment: "#gantt-card svg.gantt", commercials: "#commercials-seasons .season-card",
-    compare: "#compare-table", sa: "#sa-requirements .req-table", model: "#sources-table tbody tr",
+    compare: "#compare-table", sa: "#sa-requirements .req-table", model: "#sources-table tbody tr", strategies: "#strategy-grid .strategy-card",
   }
   for (const id of ROUTES.slice(1)) {
     await go(page, `#/${id}`)
@@ -400,6 +400,93 @@ test("Copy link restores the route and the plan; saved plans and A/B compare wor
   assert.deepEqual(await page.evaluate("window.__downloads"), ["audi-f1-digital-realty-plan-gl2028.json"])
   assert.deepEqual(page.errors, [])
   await page.close()
+})
+
+test("Strategies: three plan-level cards, the side-by-side table, Load / edited / Compare, and the optimiser in a web worker", { skip, timeout: 90_000 }, async () => {
+  const page = await chrome.page()
+  await openFresh(page)
+  await go(page, "#/strategies")
+  assert.deepEqual(page.errors, [], "no JS errors on #/strategies")
+  // cards
+  assert.equal(await count(page, "#strategy-grid .strategy-card"), 3)
+  for (const k of ["A", "B", "C"]) {
+    assert.ok(await visible(page, `#strategy-${k}`), `card ${k} is visible`)
+    assert.equal(await count(page, `#strategy-decisions-${k} tbody tr`), 9, `card ${k}: nine decision rows`)
+    assert.equal(await count(page, `#strategy-gauge-${k}-2027, #strategy-gauge-${k}-2028`), 2, `card ${k}: two envelope gauges`)
+    assert.equal(await count(page, `#strategy-tiles-${k} .stat`), 8, `card ${k}: outcome tiles for both seasons`)
+    assert.ok(await visible(page, `#strategy-timeline-${k} svg.timeline-strip`), `card ${k}: timeline strip`)
+    assert.ok((await count(page, `#strategy-risks-${k} .badge`)) >= 3, `card ${k}: risk badges`)
+    assert.ok(await visible(page, `#strategy-load-${k}`), `card ${k}: Load this strategy`)
+    assert.ok(await visible(page, `#strategy-compare-${k}`), `card ${k}: Compare`)
+    assert.equal(await count(page, `#race-now-${k}-2027, #race-now-${k}-2028`), 2, `card ${k}: Race now for both cars`)
+  }
+  const headline = await page.evaluate("[...document.querySelectorAll('.strategy-tiles .headline-stat .stat-value')].map((v) => v.textContent)")
+  assert.match(headline[0], /^\+0\.(09|10) s\+0\.3[67] s$/, `A plan-level: ${headline[0]}`)
+  assert.match(headline[1], /^\+0\.1[45] s\+0\.4[67] s$/, `B plan-level: ${headline[1]}`)
+  assert.match(headline[2], /^\+0\.1[34] s\+0\.4[67] s$/, `C plan-level: ${headline[2]}`)
+  assert.match(await text(page, "#strategy-timeline-B svg"), /GPU re-declaration 1 Jan 2028/)
+  assert.match(await text(page, "#strategy-decisions-B"), /20 Apr 2027/, "B's cutover slips from the 8 Mar target to 20 Apr 2027 at plan level")
+  // table and chart
+  assert.equal(await count(page, "#strategies-compare-table thead th"), 9, "Metric + four columns per season")
+  assert.ok((await count(page, "#strategies-compare-table td.best")) >= 10, "best values are marked")
+  assert.equal(await count(page, "#strategies-chart .chart-bar"), 6, "three strategies × two seasons")
+  assert.doesNotMatch(await bodyText(page), /Position swing|points?\b(?! of)|ladder/i, "nothing points-related renders")
+  // optimiser panel ids
+  for (const id of ["#optimiser", "#optimiser-objective", "#optimiser-run", "#optimiser-progress", "#optimiser-result"]) assert.ok((await count(page, id)) === 1, `${id} present`)
+  assert.equal(await count(page, "#optimiser-objective .seg"), 3, "three objectives (no points objective)")
+  assert.equal(await page.evaluate("document.querySelector('#optimiser-progress').hidden"), true)
+  await page.click("#optimiser-run")
+  await page.waitFor("document.querySelector('#optimiser-run').textContent !== 'Stop' && document.querySelector('#optimiser-diff')", 30_000, "the optimiser result")
+  assert.deepEqual(page.errors, [], "no JS errors from the optimiser")
+  const timing = await text(page, "#optimiser-progress-text")
+  assert.match(timing, /^[\d,]+ plans in \d+\.\d s \((web worker|main thread)\)/, timing)
+  assert.ok(Number(timing.match(/in ([\d.]+) s/)[1]) < 5, `the default search finishes in a few seconds (${timing})`)
+  assert.ok((await count(page, "#optimiser-diff tbody tr")) >= 2, "the diff table lists the changed controls")
+  const sec28 = await page.evaluate("document.querySelector('#optimiser-result .optimiser-season[data-season=\"2028\"] .headline-stat .stat-value').textContent")
+  assert.match(sec28, /^\+0\.(4[5-9]|5\d) s$/, `fastest 2028 from the default plan: ${sec28}`)
+  assert.ok(await visible(page, "#optimiser-load"), "Load is offered")
+  assert.ok(await visible(page, "#optimiser-save"), "Save as scenario is offered")
+  assert.ok(await visible(page, "#optimiser-copy"), "Copy link is offered")
+  assert.doesNotMatch(await bodyText(page), CLEAN, "the optimiser result is clean")
+  // Load the proposal → Overview, chip, fits
+  await page.click("#optimiser-load")
+  await page.waitFor("document.body.dataset.route === 'overview'", 5000, "Overview after Load")
+  await settle()
+  assert.equal(await text(page, "#preset-custom"), "Optimiser proposal")
+  assert.match(await text(page, "#envelope-health"), /Fits the 500 kW envelope: \d{3} \/ 500 kW \(2027\)/)
+  // Load strategy B → chip, edit → lineage, card shows edited with Reload / Keep
+  await go(page, "#/strategies")
+  await page.click("#strategy-load-B")
+  await page.waitFor("document.body.dataset.route === 'overview'", 5000, "Overview after Load this strategy")
+  await settle()
+  assert.equal(await text(page, "#preset-custom"), "Strategy B · Density and the 2028 GPU step-up")
+  assert.match(await text(page, "#envelope-health"), /401 \/ 500 kW \(2027\)[\s\S]*459 \/ 500 kW \(2028\)/)
+  await go(page, "#/compute")
+  const nodes = await page.evaluate("document.querySelector('#pc-nodes-2027').value")
+  await setRange(page, "#pc-nodes-2027", Number(nodes) - 1)
+  await settle()
+  assert.equal(await text(page, "#preset-custom"), "Custom (from B)")
+  await go(page, "#/strategies")
+  assert.equal(await page.evaluate("document.querySelector('#strategy-B').classList.contains('is-edited')"), true)
+  assert.equal(await text(page, "#strategy-B .strategy-head .badge"), "edited in the planner")
+  assert.equal(await text(page, "#strategy-load-B"), "Reload the strategy")
+  assert.ok(await visible(page, "#strategy-keep-B"))
+  await page.click("#strategy-keep-B")
+  await settle()
+  assert.equal(await text(page, "#preset-custom"), "Custom plan")
+  assert.equal(await page.evaluate("document.querySelector('#strategy-B').classList.contains('is-edited')"), false)
+  // Compare puts the strategy into the first free slot and opens the compare page
+  await page.click("#strategy-compare-C")
+  await page.waitFor("document.body.dataset.route === 'compare'", 5000, "Compare after the card's Compare")
+  await settle()
+  assert.match(await text(page, "#compare-table thead"), /A: Strategy C/)
+  // the cards follow the position slider (the only inputs they borrow)
+  await go(page, "#/fia")
+  await setRange(page, "#pc-position-2027", 5)
+  await go(page, "#/strategies")
+  const p5 = await page.evaluate("[...document.querySelectorAll('.strategy-tiles .headline-stat .stat-value')].map((v) => v.textContent)")
+  assert.notEqual(p5[1], headline[1], "strategy B re-evaluates at P5")
+  assert.deepEqual(page.errors, [], "no JS errors in the strategies flow")
 })
 
 test("the planning tool, the business case and the legacy pages hold together at 1024×768", { skip, timeout: 120_000 }, async () => {

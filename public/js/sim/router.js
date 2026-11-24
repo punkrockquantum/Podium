@@ -5,6 +5,7 @@
 
 export const ROUTES = [
   { id: "overview", label: "Overview", short: "Overview" },
+  { id: "strategies", label: "Strategies", short: "Strategies" },
   { id: "fia", label: "FIA envelope", short: "FIA" },
   { id: "compute", label: "Compute", short: "Compute" },
   { id: "facility", label: "Facility", short: "Facility" },

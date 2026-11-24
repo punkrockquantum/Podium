@@ -18,6 +18,8 @@ import { commercialsView } from "./views/commercials.js"
 import { compareView } from "./views/compare.js"
 import { modelView } from "./views/model.js"
 import { saView } from "./views/sa.js"
+import { strategiesView } from "./views/strategies.js"
+import { STRATEGIES, matchingStrategy } from "./strategies.js"
 import { solutionBrief } from "./sa.js"
 
 export function mountSim(root) {
@@ -109,7 +111,21 @@ export function mountSim(root) {
         render()
         toast(changes.length ? `Fitted ${year} to the envelope: ${changes.map((c) => `${CONTROLS[c.id].label.toLowerCase()} ${controlDisplay(c.id, c.from)} → ${controlDisplay(c.id, c.to)}`).join(", ")}${fits ? "" : " (still over: see plan health)"}` : fits ? `${year} already fits the envelope` : `${year} cannot be fitted by clamping alone: see plan health`)
       },
-      loadPlan(plan, note) { state.plan = normalizePlan(plan); render(); if (note) toast(note) },
+      loadPlan(plan, note, { route } = {}) { state.plan = normalizePlan(plan); state.loadedKey = planKey(state.plan); if (route && state.route !== route) router.go(route); render(); if (note) toast(note) },
+      savePlan(plan, name) { const p = renamePlan(plan, name || plan.meta.name); store.savePlan(p.meta.name, p); toast(`Saved "${p.meta.name}"`); renderDrawer() },
+      async copyLink(plan) {
+        const url = `${location.origin}${location.pathname}#/overview?${new URLSearchParams({ p: store.encodeParam(normalizePlan(plan)) })}`
+        try { await navigator.clipboard.writeText(url); toast("Link copied") } catch { toast("Could not copy: open Save / Load to keep the plan") }
+      },
+      compareStrategy(plan, label) {
+        const slot = !state.slots.A ? "A" : !state.slots.B ? "B" : "B"
+        state.slots[slot] = { plan: normalizePlan(plan), label, savedAt: Date.now() }
+        store.saveSlots(state.slots)
+        router.go("compare")
+        render()
+        toast(`${label} set as ${slot}`)
+      },
+      clearLineage() { const p = JSON.parse(JSON.stringify(state.plan)); delete p.meta.strategy; delete p.meta.origin; state.plan = normalizePlan(p); render() },
       toast,
       detach(id) { state.plan = planDetach(state.plan, id); render() },
       reattach(id) { state.plan = planReattach(state.plan, id); render() },
@@ -127,6 +143,7 @@ export function mountSim(root) {
       else if (route === "deployment") views[route] = deploymentView(ctx)
       else if (route === "commercials") views[route] = commercialsView(ctx)
       else if (route === "compare") views[route] = compareView(ctx)
+      else if (route === "strategies") views[route] = strategiesView(ctx)
       else if (route === "sa") views[route] = saView(ctx)
       else views[route] = modelView(ctx)
     }
@@ -191,6 +208,8 @@ export function mountSim(root) {
     history.replaceState(null, "", url.slice(location.origin.length))
   }
 
+  const planKey = (p) => JSON.stringify({ s: p.shared, y: p.seasons, t: p.timeline })
+
   function toast(text) {
     const t = el("div", { class: "toast", role: "status" }, text)
     document.body.append(t)
@@ -209,7 +228,14 @@ export function mountSim(root) {
   function syncBar() {
     const match = matchingPreset(state.plan)
     for (const b of presetBar.querySelectorAll(".chip[data-preset]")) b.setAttribute("aria-pressed", b.dataset.preset === match ? "true" : "false")
-    presetBar.querySelector("#preset-custom").hidden = Boolean(match)
+    const custom = presetBar.querySelector("#preset-custom")
+    custom.hidden = Boolean(match)
+    const strategy = match ? null : matchingStrategy(state.plan)
+    const lineage = state.plan.meta.strategy
+    custom.textContent = strategy ? `Strategy ${strategy} · ${STRATEGIES[strategy].name.replace(/^[A-C]\s*·\s*/, "")}`
+      : lineage ? `Custom (from ${lineage})` : state.plan.meta.origin === "optimiser" ? (state.loadedKey === planKey(state.plan) ? "Optimiser proposal" : "Custom (from the optimiser)") : "Custom plan"
+    custom.classList.toggle("chip-strategy", Boolean(strategy))
+    custom.dataset.strategy = strategy || ""
     if (document.activeElement !== nameInput) nameInput.value = state.plan.meta.name
     for (const b of viewSwitch.querySelectorAll(".seg")) b.setAttribute("aria-pressed", b.dataset.view === state.view ? "true" : "false")
     header.querySelector(".subtitle").textContent = state.view === "sa" ? "Solutions Architect view · 2027 & 2028 seasons" : "2027 & 2028 seasons · Hinwil · Digital Realty Zurich"

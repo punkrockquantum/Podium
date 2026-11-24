@@ -7,6 +7,7 @@ import { inputWidget, envelopeGauge, hinwilGauge, badge, readout } from "../widg
 import { swissMap, gantt } from "../visuals.js"
 import { healthList, ribbonRow, statusDot, statusLabel } from "./common.js"
 import { fmtDate, parseDate, cutoverOptions, isoDate } from "../timeline.js"
+import { matchingStrategy } from "../strategies.js"
 
 const COOLING = { air: "air", reardoor: "rear-door", dlc: "direct liquid" }
 const RED = { n: "N", n1: "N+1", "2n": "2N" }
@@ -136,7 +137,8 @@ export function raceCar(result, year, plan, { strategy } = {}) {
   const x = result.inputs[year]
   const where = x.location === "hinwil" ? "Hinwil" : "Digital Realty Zurich"
   const head = `${where} ${year} · `
-  const tag = strategy ? `Strategy ${strategy}` : PRESET_TAG[plan.meta.preset] || plan.meta.name
+  const lineage = plan.meta.strategy
+  const tag = strategy ? `Strategy ${strategy}` : PRESET_TAG[plan.meta.preset] || (lineage ? `Strategy ${lineage}${matchingStrategy(plan) === lineage ? "" : " (edited)"}` : plan.meta.origin === "optimiser" ? "Optimiser proposal" : plan.meta.name)
   const room = 48 - head.length
   const label = head + (tag.length > room ? `${tag.slice(0, Math.max(1, room - 1)).trimEnd()}…` : tag)
   return {
