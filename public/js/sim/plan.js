@@ -286,8 +286,10 @@ export function evaluatePlan(rawPlan) {
     cash: cash27 + cash28,
     todayCash: todayCash27 + todayCash28,
     cashDelta: cash27 + cash28 - todayCash27 - todayCash28,
+    // Steady state after the plan: the 2028 estate's 3-year TCO plus the 2027 one-offs it does not already carry,
+    // against today's room carried into 2028 (like for like: same estate size, same season)
     tco3: Math.round(sim28.money.tco3 + oneOffs27.filter((o) => !sim28.money.oneOffs.some((p) => p.id === o.id)).reduce((s, o) => s + o.chf, 0)),
-    todayTco3: today27.money.tco3,
+    todayTco3: today28.money.tco3,
     sec: round(perf27.sec + perf28.sec, 3),
     points: round(perf27.points + perf28.points, 1),
   }
