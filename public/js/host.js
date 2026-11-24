@@ -185,7 +185,7 @@ function renderRace() {
     }
     const found = team ? raceSeconds(team, s.settings.budget, s.settings.stations) : 0
     return panel("race-panel", el("h2", {}, "Race"),
-      el("p", { class: "muted small" }, `Two cars over ${C.FINALE.laps} laps: the ${team?.name || C.CUSTOMER_TEAM.name}'s ${WORDS.plan2027} (${found.toFixed(2)} s per lap from the approved tables so far) against ${WORDS.todayHinwil.toLowerCase()} at 0.00 s. Run it whenever the room is ready, with or without a timer. Running the race ends play; the projector shows it in 30 seconds.`),
+      el("p", { class: "muted small" }, `Two cars over ${C.FINALE.laps} laps: the ${team?.name || C.CUSTOMER_TEAM.name}'s ${WORDS.plan2027} (${found.toFixed(2)} s per lap from the approved tables so far) against ${WORDS.vsToday} at 0.00 s. Run it whenever the room is ready, with or without a timer. Running the race ends play; the projector shows it in 30 seconds.`),
       el("div", { class: "row" }, el("button", { class: "btn primary", id: "hostRunRace", onclick: go }, WORDS.runRace), seed))
   }
   const r = s.race.result

@@ -290,6 +290,8 @@ export const WORDS = {
   screenshot: "Take a screenshot now",
   plan2027: "2027 plan",
   todayHinwil: "Today's Hinwil setup",
+  /* The same phrase mid-sentence: Hinwil keeps its capital. */
+  vsToday: "today's Hinwil setup",
 }
 
 /** Primary (one per screen), secondary (default), go (positive) or danger buttons, all the same size. */

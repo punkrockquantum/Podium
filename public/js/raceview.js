@@ -187,7 +187,7 @@ function runRacePanel() {
   password.addEventListener("keydown", (e) => e.key === "Enter" && go())
   return el("div", { class: "panel", id: "runRacePanel" }, el("h3", {}, WORDS.runRace),
     el("div", { class: "row" }, password, el("button", { class: "btn primary", id: "runRaceBtn", onclick: go }, WORDS.runRace),
-      el("span", { class: "small muted" }, `The race password is the host PIN. ${C.FINALE.laps} laps: the ${WORDS.plan2027} against ${WORDS.todayHinwil.toLowerCase()}, at any time, with or without a timer.`)))
+      el("span", { class: "small muted" }, `The race password is the host PIN. ${C.FINALE.laps} laps: the ${WORDS.plan2027} against ${WORDS.vsToday}, at any time, with or without a timer.`)))
 }
 
 function renderWaiting() {
@@ -204,7 +204,7 @@ function renderWaiting() {
   app.replaceChildren(el("div", { class: "projector" },
     el("div", { class: "panel phase-panel" }, el("div", { class: "phase-name" }, info.name),
       info.id === "open" ? null : el("div", { class: "phase-clock", id: "phaseClock" }, lapBox.textContent), el("p", { class: "muted" }, info.line)),
-    el("div", { class: "panel" }, el("h2", {}, `Lap-time ladder · ${team?.name || C.CUSTOMER_TEAM.name}`), el("p", { class: "small muted" }, `Each table's car sits at the seconds per lap its approved design found; the ${WORDS.plan2027} adds them up and races against ${WORDS.todayHinwil.toLowerCase()}, which finds 0.00 s. FIT gauges are grey until the SA approves. The race runs on these seconds plus incidents.`),
+    el("div", { class: "panel" }, el("h2", {}, `Lap-time ladder · ${team?.name || C.CUSTOMER_TEAM.name}`), el("p", { class: "small muted" }, `Each table's car sits at the seconds per lap its approved design found; the ${WORDS.plan2027} adds them up and races against ${WORDS.vsToday}, which finds 0.00 s. FIT gauges are grey until the SA approves. The race runs on these seconds plus incidents.`),
       buildLadder(rows)),
     runRacePanel()))
 }
@@ -288,7 +288,7 @@ function startRace() {
     el("div", {}, el("div", { class: "panel track-panel", id: "trackPanel" }, svg, el("div", { class: "race-progress" }, progressBar)), el("div", { class: "panel", style: "margin-top:12px" }, el("h3", { style: "margin-bottom:6px" }, "Race control"), ticker)),
     el("div", {}, el("div", { class: "panel" }, el("h3", { style: "margin-bottom:8px" }, "Timing"), tower), el("div", { class: "row", style: "margin-top:10px" }, button("Skip to the result", () => finish())))))
   sub.dataset.phase = "race"
-  sub.textContent = `Lights out at the ${C.FINALE.race}: the ${WORDS.plan2027} against ${WORDS.todayHinwil.toLowerCase()}!`
+  sub.textContent = `Lights out at the ${C.FINALE.race}: the ${WORDS.plan2027} against ${WORDS.vsToday}!`
   const raceEnd = Math.max(...rows.map((r) => r.total))
   const leaderEnd = rows[0].total
   const shown = new Set()
@@ -378,7 +378,7 @@ function renderResults() {
   lapBox.textContent = "FLAG"
   sub.dataset.phase = "race"
   const finale = finaleSummary(result)
-  sub.textContent = `Chequered flag at the ${C.FINALE.race}: the ${WORDS.plan2027} ${finale.ahead ? `beats ${WORDS.todayHinwil.toLowerCase()} by ${finale.gap.toFixed(1)} s` : `finishes ${Math.abs(finale.gap).toFixed(1)} s behind ${WORDS.todayHinwil.toLowerCase()}`}.`
+  sub.textContent = `Chequered flag at the ${C.FINALE.race}: the ${WORDS.plan2027} ${finale.ahead ? `beats ${WORDS.vsToday} by ${finale.gap.toFixed(1)} s` : `finishes ${Math.abs(finale.gap).toFixed(1)} s behind ${WORDS.vsToday}`}.`
   const ids = state.settings.stations
   const classification = el("table", { class: "grid", id: "classification" },
     el("thead", {}, el("tr", {}, ["Pos", "Car", "Gap", "Tables approved", "Found per lap", "Best lap", "Pit stop", "Penalties"].map((h) => el("th", {}, h)))),

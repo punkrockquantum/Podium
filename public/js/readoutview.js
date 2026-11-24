@@ -11,7 +11,7 @@ export function readoutCard(readout, { compact = false } = {}) {
   return el("div", { class: `readout${compact ? " compact" : ""}`, id: `readout-${team.id}`, "data-team": team.id, style: `--team:${team.color}` },
     el("header", { class: "readout-head" },
       el("i", { style: `background:${team.color}` }),
-      el("div", {}, el("h2", {}, `${team.name} · readout`), el("span", { class: "muted small" }, `${result.approved} of ${result.tables} tables approved · ${WORDS.plan2027} against ${WORDS.todayHinwil.toLowerCase()}`)),
+      el("div", {}, el("h2", {}, `${team.name} · readout`), el("span", { class: "muted small" }, `${result.approved} of ${result.tables} tables approved · ${WORDS.plan2027} against ${WORDS.vsToday}`)),
       el("div", { class: "readout-result" },
         el("div", { class: "readout-seconds" }, el("b", {}, `${result.seconds.toFixed(2)} s`), el("span", {}, "found per lap")),
         el("div", { class: `readout-gap${result.ahead ? " ahead" : ""}` }, el("b", {}, signed(result.gap)), el("span", {}, `vs today after ${result.laps} laps`)),

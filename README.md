@@ -373,10 +373,11 @@ seconds. It is deterministic for a seed, so a rerun with the same seed gives the
 
 **Two cars.** The customer's **2027 plan** (id `t1`, Audi red: the boards the SAs approved, at their
 seconds found; any other table on today's setup) against **today's Hinwil setup** (id `today`, grey:
-every table on the customer's existing infrastructure, 0.00 s per lap, no cap breaches, no penalties).
-Both cars start from the same grid, pit once and run the same 56 laps, so the gap at the flag is the
-plan's seconds found per lap over 56 laps, less the pit stop and whatever incidents the plan's own
-dial settings caused. With nothing approved, both cars run today's setup and the gap is luck.
+every table on the customer's existing infrastructure, 0.00 s per lap, with the incidents and
+penalties today's own settings bring: a single route to Mission Control, a room over its power
+limit). Both cars start from the same grid, pit once and run the same 56 laps, so the gap at the flag
+is the plan's seconds found per lap over 56 laps, less the pit stop and the difference in incidents.
+With nothing approved, both cars run today's setup and the gap is luck.
 
 Lap pace is **96 s minus the car's seconds found per lap**: the sum over the four boards it raced.
 Strategy quality follows the Connectivity and CFD FITs. Before the race the projector shows the
