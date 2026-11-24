@@ -199,26 +199,26 @@ function networkScene(root, still) {
   root.append(s("g", { class: "cota", transform: "translate(34 96)" },
     s("path", { d: "M10 50 C 0 20, 30 0, 50 14 C 66 24, 80 4, 100 10 C 118 16, 112 46, 92 50 C 70 54, 60 70, 40 66 C 24 62, 18 58, 10 50 Z", class: "cota-track" }),
     text(56, 92, "Trackside · Austin", { class: "place-text", "text-anchor": "middle" })))
-  root.append(s("g", { class: "campus", transform: "translate(568 100)" },
+  root.append(s("g", { class: "campus", transform: "translate(536 100)" },
     s("rect", { x: 0, y: 0, width: 40, height: 44, rx: 4, class: "factory" }),
     [10, 22, 34].map((y) => s("rect", { x: 7, y, width: 26, height: 6, rx: 1.5, class: "rack-led" })),
     text(20, 66, "Zurich campus", { class: "place-text", "text-anchor": "middle" })))
   root.append(s("g", { transform: "translate(660 92)" },
     s("path", { d: "M0 60 L0 20 L30 4 L60 20 L60 0 L74 0 L74 60 Z", class: "factory" }),
-    s("path", { d: "M-52 30 L0 30", class: "route route-dark" }),
+    s("path", { d: "M-84 30 L0 30", class: "route route-dark" }),
     text(37, 82, "Hinwil Mission Control", { class: "place-text", "text-anchor": "middle" })))
   const paths = {
-    main: s("path", { id: `${id}-a`, d: "M150 122 C 300 112, 460 112, 566 122", class: "route" }),
-    second: s("path", { id: `${id}-b`, d: "M150 140 C 300 206, 460 206, 566 140", class: "route" }),
-    sat: s("path", { id: `${id}-c`, d: "M150 108 Q 360 -10 566 108", class: "route sat-route" }),
+    main: s("path", { id: `${id}-a`, d: "M150 122 C 300 112, 440 112, 534 122", class: "route" }),
+    second: s("path", { id: `${id}-b`, d: "M150 140 C 300 206, 440 206, 534 140", class: "route" }),
+    sat: s("path", { id: `${id}-c`, d: "M150 108 Q 342 -10 534 108", class: "route sat-route" }),
   }
   root.append(paths.main, paths.second, paths.sat)
-  const satellite = s("g", { class: "satellite off", transform: "translate(400 50)" },
+  const satellite = s("g", { class: "satellite off", transform: "translate(342 50)" },
     s("rect", { x: -10, y: -8, width: 20, height: 16, rx: 3 }), s("rect", { x: -34, y: -4, width: 20, height: 8 }), s("rect", { x: 14, y: -4, width: 20, height: 8 }))
-  const cloud = s("g", { class: "cloud off", transform: "translate(400 116)" },
+  const cloud = s("g", { class: "cloud off", transform: "translate(380 116)" },
     s("path", { d: "M-34 8 C -44 8, -44 -10, -30 -10 C -28 -24, -6 -26, 0 -14 C 8 -26, 30 -22, 28 -8 C 42 -8, 42 8, 30 8 Z" }),
     text(0, 4, "internet", { "text-anchor": "middle", class: "cloud-text" }))
-  const drops = s("g", { class: "drops off" }, [330, 470].map((x) => text(x, 116, "×", { class: "drop", "text-anchor": "middle" })))
+  const drops = s("g", { class: "drops off" }, [310, 450].map((x) => text(x, 116, "×", { class: "drop", "text-anchor": "middle" })))
   const packets = s("g", { class: "packets" })
   const lanes = { main: [], second: [], sat: [] }
   if (!still) {

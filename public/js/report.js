@@ -144,7 +144,7 @@ export function positivesFor(team, row, race, stationIds = C.STATIONS.map((s) =>
   return out.slice(0, 3)
 }
 
-/** The race incidents and FIA penalties that touched this team, in lap order. */
+/** The race incidents and penalties (FIA, finance, operations) that touched this team, in lap order. */
 export function incidentsFor(teamId, race) {
   return (race?.events || []).filter((e) => e.team === teamId && ["bad", "good", "penalty"].includes(e.kind)).map((e) => ({ lap: e.lap, kind: e.kind, text: e.text, lesson: e.lesson || null, station: e.station || null }))
 }

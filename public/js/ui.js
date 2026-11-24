@@ -175,7 +175,7 @@ export const INSTRUCTIONS = {
       "The counter shows Locked 1 of 3. When all three are locked the table locks itself and the only step left is Call the Solutions Architect.",
       "3 · Pitch: wait for the SA (they may be busy with another team), then pitch for 30 seconds: why each choice helps the customer and how a provider helps.",
       "Approved: this table counts in the race. Rejected: the SA's reason is shown, all three dials reopen with your last picks shown as “last time” ghosts, and you choose again and call the SA again. That takes time.",
-      "Over a cap or breaking an FIA rule is not allowed: 0.00 s counts. FIT 80+ means in the zone.",
+      "Over a cap, or breaking an FIA rule or an Audi F1 requirement, is not allowed: 0.00 s counts. FIT 80+ means in the zone.",
       "There is no timer unless the host starts one. When the race runs (or a timer reaches zero), any table not approved, including one still adjusting after a rejection, races on today's setup. After the race, open your readout: seconds found, attempts, lessons and what to do differently.",
     ],
   },

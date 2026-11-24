@@ -8,7 +8,7 @@ import { runRace, systemScore } from "./race.js"
 import { buildPlan } from "./plandata.js"
 
 export const DEMO_STEPS = [
-  { id: "brief", screen: "brief", title: "1. Add your team, then the brief", narration: "Nothing is set up first: a team types its name on any table's iPad, taps Add your team and is in (at the next table it just taps its name). Each table opens on its brief: the situation, the targets with their numbers, the FIA rules and both cost caps, what each setting does, and every term explained. Tune and Pitch stay closed until the team taps “I've read the brief”, which unlocks at the end of the brief or after 30 seconds. The warning is the point: each choice locks the moment you tap it." },
+  { id: "brief", screen: "brief", title: "1. Add your team, then the brief", narration: "Nothing is set up first: a team types its name on any table's iPad, taps Add your team and is in (at the next table it just taps its name). Each table opens on its brief: the situation, the targets with their numbers, the FIA rules, Audi F1's requirements and both cap lines, what each setting does, and every term explained. Tune and Pitch stay closed until the team taps “I've read the brief”, which unlocks at the end of the brief or after 30 seconds. The warning is the point: each choice locks the moment you tap it." },
   { id: "tune", screen: "tuneOff", title: "2. Tune: one tap locks a dial", narration: "No Lock-in button, no confirmation, no undo. The first tap on a dial locks it: the padlock appears, the other settings go quiet and the counter reads Locked 1 of 3. The scene, the gauges, the cap bars and the seconds found per lap update at once, so the team sees the consequence immediately. Tap a dial, or Lock a dial for me." },
   { id: "zone", screen: "tuneOn", title: "3. In the zone", narration: "Every gauge is green and every bar is under its cap line: the airflow is smooth and the tunnel shows the lap time found. In the zone is worth 0.25–0.35 s per lap; a cap or FIA breach is not allowed and finds nothing. When the third dial locks, the table locks itself." },
   { id: "pitch", screen: "plan", title: "4. All three locked: call the Solutions Architect", narration: "With all three locked the only step left is Call the Solutions Architect. The team joins the SA's queue (the SA may be busy with another team) and pitches for 30 seconds: why each choice helps the customer and how a provider helps." },
@@ -20,7 +20,7 @@ export const DEMO_STEPS = [
 
 const IDS = C.STATIONS.map((s) => s.id)
 const STATION = "compute"
-/** A CFD board one dial short of the zone: sized to the FIA cap, but the office NAS starves the nodes. */
+/** A CFD board one dial short of the zone: sized to the MAUh allowance, but the office NAS starves the nodes. */
 export const NEARLY = { size: "medium", chips: "cpu", storage: "basic" }
 const REJECT_REASON = "Storage starves the nodes: the cluster waits for data"
 

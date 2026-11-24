@@ -15,5 +15,5 @@ export function podiumGraphic(race) {
         el("span", {}, `Finished P${res?.position ?? "–"}`)))
   })
   return el("div", { class: "panel wide podium-panel", id: "podium" }, el("h2", {}, "Podium 2027 champions"), el("div", { class: "podium" }, steps),
-    el("p", { class: "small muted", style: "text-align:center" }, "Championship points: approved table points + race points × 4 − FIA penalties."))
+    el("p", { class: "small muted", style: "text-align:center" }, "Championship points: approved table points + race points × 4 − penalties."))
 }

@@ -78,7 +78,7 @@ export const BRIEFS = {
       "Hardware delivered in 12 weeks or less, before the Bahrain test.",
     ],
     rules: [
-      `The FIA sets no separate capital limit: bought kit enters the cost cap as straight-line depreciation (here over ${years} years), leases and as-a-service as the yearly charge [C3]. The capital envelope is Audi F1's own cash limit.`,
+      `The FIA sets no separate capital limit: bought kit enters the cost cap as straight-line depreciation (FIA D6.1.1.k; here over ${years} years), leases and as-a-service as the yearly charge [C3]. The capital envelope is Audi F1's own cash limit.`,
       `This table's caps: ${chf(3_000_000)} of 2027 capital and ${chf(1_900_000)} a year of cost-cap charge. Over either cap, the board counts for nothing.`,
     ],
     decisions: [
