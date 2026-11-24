@@ -4,18 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <title>Audi F1 Team × Digital Realty — Infrastructure performance simulator</title>
-  <meta name="description" content="Tweak the Restricted CFD cluster, the Digital Realty Zurich facility and the paddock link inside the FIA envelope and read the impact on the 2027 and 2028 seasons." />
+  <title>Audi F1 Team × Digital Realty — Swiss infrastructure planning tool</title>
+  <meta name="description" content="Plan the Audi F1 Team's Swiss infrastructure for the 2027 and 2028 seasons: the Restricted CFD cluster, the Digital Realty Zurich facility, connectivity, the deployment timeline and the commercials inside the FIA envelope, with a Solutions Architect view." />
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="/css/sim.css" />
 </head>
 <body class="sim-page">
-  <a class="skip" href="#controls">Skip to the controls</a>
+  <a class="skip" href="#main">Skip to the content</a>
   <div id="sim-root">
     <noscript>
       <div class="file-warning">This page needs JavaScript. Open it through the local server: <code>sh start.command</code>, then <a href="http://localhost:8090/">http://localhost:8090/</a>.</div>
     </noscript>
-    <div id="sim-loading" class="loading" aria-live="polite">Loading the simulator…</div>
+    <div id="sim-loading" class="loading" aria-live="polite">Loading the planning tool…</div>
   </div>
   <script>
     if (location.protocol === "file:") {
@@ -29,7 +29,7 @@
       mountSim(root)
     } catch (err) {
       const loading = document.getElementById("sim-loading")
-      if (loading) loading.textContent = `The simulator could not start: ${err && err.message ? err.message : err}`
+      if (loading) loading.textContent = `The planning tool could not start: ${err && err.message ? err.message : err}`
       console.error(err)
       throw err
     }

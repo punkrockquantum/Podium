@@ -120,6 +120,11 @@ export async function launchChrome({ width = 1024, height = 768 } = {}) {
       async type(selector, text) {
         await evaluate(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) throw new Error("no element " + ${JSON.stringify(selector)}); n.focus(); n.value = ${JSON.stringify(text)}; n.dispatchEvent(new Event("input", { bubbles: true })); n.dispatchEvent(new Event("change", { bubbles: true })); return true })()`)
       },
+      /** Render as if printing (`media: "print"`) or back to the screen (`media: ""`). */
+      async emulateMedia(media = "") {
+        await send("Emulation.setEmulatedMedia", { media }, sessionId)
+        await sleep(50)
+      },
       async screenshot(path) {
         const { data } = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId)
         mkdirSync(join(path, ".."), { recursive: true })

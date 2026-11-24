@@ -13,6 +13,7 @@ const read = (path) => readFileSync(new URL(path, root), "utf8")
 const publicFiles = () => [
   ...readdirSync(new URL("public/js/", root)).filter((f) => f.endsWith(".js")).map((f) => `public/js/${f}`),
   ...readdirSync(new URL("public/js/sim/", root)).filter((f) => f.endsWith(".js")).map((f) => `public/js/sim/${f}`),
+  ...readdirSync(new URL("public/js/sim/views/", root)).filter((f) => f.endsWith(".js")).map((f) => `public/js/sim/views/${f}`),
   ...readdirSync(new URL("public/", root)).filter((f) => f.endsWith(".html")).map((f) => `public/${f}`),
   "public/css/app.css", "public/css/sim.css", "server.mjs", "README.md",
 ]
@@ -148,7 +149,7 @@ test("the simulator is the front door; the legacy table picker lives at /home.ht
   assert.ok(!/station\.html|host\.html|race\.html|home\.html/.test(index), "no legacy game links on the front door")
   const sim = read("public/sim.html")
   assert.ok(sim.includes("/js/sim/app.js") && sim.includes("/css/sim.css"), "sim.html mounts the simulator")
-  for (const file of ["public/sim.html", ...readdirSync(new URL("public/js/sim/", root)).map((f) => `public/js/sim/${f}`)]) {
+  for (const file of ["public/sim.html", ...filesUnder("public/js/sim/")]) {
     assert.ok(!/station\.html|host\.html|race\.html|home\.html/.test(read(file)), `${file} links to a legacy game page`)
   }
   const start = read("start.command")

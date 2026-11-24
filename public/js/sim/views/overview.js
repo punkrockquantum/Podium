@@ -1,0 +1,165 @@
+/** The Overview: outcome ribbon for both seasons, the map, plan health, six decision cards, the compact timeline and the lap-time ladders. */
+import { CONTROLS } from "../model.js"
+import { K } from "../assumptions.js"
+import { FIGURES as F } from "../../customer.js"
+import { controlValue, controlDisplay, isDetached } from "../plan.js"
+import { el, clear, fmt } from "../dom.js"
+import { inputWidget, ladder, badge, readout } from "../widgets.js"
+import { swissMap, gantt } from "../visuals.js"
+import { healthList, ribbonRow, statusDot, statusLabel } from "./common.js"
+import { fmtDate, parseDate, cutoverOptions, isoDate } from "../timeline.js"
+
+const COOLING = { air: "air", reardoor: "rear-door", dlc: "direct liquid" }
+const RED = { n: "N", n1: "N+1", "2n": "2N" }
+const label = (id, v) => controlDisplay(id, v)
+
+const CARDS = [
+  {
+    id: "facility", route: "facility", title: "Where does the Restricted CFD estate run?",
+    summary: (x, s) => `${label("location", x.location)} · ${x.location === "hinwil" ? `${s.sim.fac.hinwilCapacity} kW room` : `${x.committedKW} kW committed${x.expansionRight ? " + expansion right" : ""}`} · ${RED[x.redundancy]} · ${COOLING[x.cooling]} at ${x.rackKW} kW/rack`,
+    quick: { id: "location" },
+  },
+  {
+    id: "compute", route: "compute", title: "What do we run?",
+    summary: (x, s) => `${x.nodes} nodes × ${x.coresPerNode} cores at ${x.clockGHz.toFixed(1)} GHz${x.gpus ? ` · ${x.gpus} GPUs (${s.sim.comp.gpuSolverN} in the solver)` : " · no GPUs"} · ${x.consumption === "greenlake" ? "HPE GreenLake" : "purchased"} · ${label("interconnect", x.interconnect)}`,
+    quick: { id: "nodes" },
+  },
+  {
+    id: "connectivity", route: "connectivity", title: "How do we connect it?",
+    summary: (x) => `${x.location === "hinwil" ? "no campus fibre" : `${x.fibrePairs === 2 ? "2 diverse fibre routes" : "1 fibre route"} · ${x.fibreGbps}G`} · ${label("trackside", x.trackside).toLowerCase()} · edge ${x.edge ? "on" : "off"} · on-ramps ${x.cloudOnRamp ? "on" : "off"}`,
+    quick: { id: "fibrePairs" },
+  },
+  {
+    id: "deployment", route: "deployment", title: "When do we move, and when do we step up?",
+    summary: null, // built from the timeline
+    quick: { id: "cutover" },
+  },
+  {
+    id: "fia", route: "fia", title: "What does the FIA allow?",
+    summary: (x, s) => `P${x.position} · ${fmt.num(s.sim.fia.allowance.mauh, 2)} MAUh per period (${s.sim.fia.pct} %) · ${Math.round(s.sim.comp.usage * 100)} % used · GPU solver ${s.sim.fia.gpuSolverAllowed ? "allowed" : "not before 2028"}`,
+    quick: { id: "position" },
+  },
+  {
+    id: "commercials", route: "commercials", title: "What does it cost, and where does it sit in the cap?",
+    summary: (x, s) => `${fmt.chf(s.money.yearly)} a year · ${fmt.chf(s.money.capCharge)} inside the cap (${fmt.chfDelta(s.money.capChargeDelta)} vs today) · one-offs ${fmt.chf(s.money.oneOffTotal)}`,
+    quick: { id: "propertySharePct" },
+  },
+]
+
+export function overviewView(ctx) {
+  const ribbon = el("section", { class: "card ribbon", id: "ribbon", "aria-live": "polite" })
+  const mapCard = el("section", { class: "card map-card", id: "map-card" })
+  const health = el("section", { class: "card health", id: "health" })
+  const cards = {}
+  const grid = el("div", { class: "decision-grid", id: "decisions" })
+  for (const c of CARDS) {
+    const summary27 = el("p", { class: "decision-summary s2027" })
+    const summary28 = el("p", { class: "decision-summary s2028" })
+    const dot = statusDot("ok", "OK")
+    const quickHost = el("div", { class: "quick" })
+    let quick = null
+    if (c.quick.id === "cutover") {
+      quick = el("select", { class: "select", "aria-label": "Cutover target" }, ...cutoverOptions().map((o) => el("option", { value: o.value }, o.label)))
+      quick.addEventListener("change", () => ctx.actions.setTimeline({ cutoverDate: quick.value }))
+      quick.sync = (v) => { quick.value = v }
+      quickHost.append(el("span", { class: "quick-label" }, "Cutover target"), quick)
+    } else {
+      const control = CONTROLS[c.quick.id]
+      quick = inputWidget(control, controlValue(ctx.getState().plan, 2027, control.id), (v) => ctx.actions.setControl(control.id === "position" || control.id === "propertySharePct" ? null : 2027, control.id, v), { id: `quick-${control.id}` })
+      quickHost.append(el("span", { class: "quick-label" }, `${control.label}${["position", "propertySharePct"].includes(control.id) ? "" : " · 2027"}`), quick)
+    }
+    const node = el("section", { class: "card decision", id: `decision-${c.id}`, dataset: { route: c.route } },
+      el("div", { class: "decision-head" }, dot, el("h3", {}, c.title)),
+      el("div", { class: "decision-seasons" }, el("div", { class: "decision-season" }, el("span", { class: "season-tag" }, "2027"), summary27), el("div", { class: "decision-season" }, el("span", { class: "season-tag" }, "2028"), summary28)),
+      quickHost,
+      el("button", { type: "button", class: "btn btn-small tune", onclick: () => ctx.navigate(c.route) }, "Tune the details →"))
+    cards[c.id] = { node, summary27, summary28, dot, quick, cfg: c }
+    grid.append(node)
+  }
+  const timelineCard = el("section", { class: "card timeline-card", id: "timeline-compact" })
+  const ladders = el("section", { class: "card ladders", id: "ladders" })
+  const node = el("div", { class: "view view-overview" },
+    el("div", { class: "overview-hero" }, ribbon, mapCard),
+    health,
+    el("div", { class: "view-head compact" }, el("h2", {}, "Six decisions"), el("p", { class: "card-sub" }, "Each card shows the 2027 choice and what 2028 inherits or changes. Tune the details in the component views.")),
+    grid,
+    timelineCard,
+    ladders)
+
+  function update(state) {
+    const { plan, result } = state
+    renderRibbon(ribbon, result, plan)
+    clear(mapCard).append(el("h3", {}, "Switzerland · where the estate runs"), swissMap(result), el("p", { class: "scene-caption" }, `Hinwil ↔ Digital Realty Zurich ≈ ${F.sites.campus.fibreKm} km of fibre; Neuburg carries the power unit, the UK Technology Centre composites and aero support.`))
+    clear(health).append(
+      el("div", { class: "health-head" }, el("h3", {}, "Plan health"), badge(result.health.status, statusLabel(result.health.status)), el("span", { class: "muted" }, result.health.headline)),
+      healthList(result.health, ctx.navigate))
+    for (const c of CARDS) {
+      const card = cards[c.id]
+      const s27 = result.seasons[2027]
+      const s28 = result.seasons[2028]
+      const items = result.health.items.filter((i) => i.route === c.route)
+      const worst = items.some((i) => i.level === "bad") ? "bad" : items.some((i) => i.level === "warn") ? "warn" : "ok"
+      card.dot.className = `status-dot level-${worst}`
+      card.dot.title = statusLabel(worst)
+      card.node.dataset.status = worst
+      if (c.id === "deployment") {
+        const t27 = result.timeline.seasons[2027]
+        const t28 = result.timeline.seasons[2028]
+        card.summary27.textContent = t27.changes ? `Contract ${fmtDate(parseDate(plan.timeline.contractDate))} → cutover ${fmtDate(t27.goLive)}${t27.atp ? ` (${t27.atBoundary ? "start of " : "inside "}${t27.atp.label})` : ""} · ${plan.timeline.parallelWeeks} wk parallel` : "No move: today's estate all season"
+        card.summary28.textContent = t28.changes ? `Step-up live ${fmtDate(t28.goLive)}${t28.earlyDays > 0 ? ` · ${Math.round(t28.earlyDays / 7)} wk before GPUs are allowed` : ""}${t28.slipDays > 0 ? ` · slips ${t28.slipDays} days` : ""}` : "Same estate as 2027 · no step-up"
+        card.quick.sync(plan.timeline.cutoverDate)
+      } else {
+        card.summary27.textContent = c.summary(result.inputs[2027], s27)
+        const changed = result.deltas.changed.some((id) => groupOf(id) === c.id)
+        card.summary28.textContent = changed ? c.summary(result.inputs[2028], s28) : c.id === "fia" || c.id === "commercials" ? c.summary(result.inputs[2028], s28) : "Same as 2027"
+        card.quick.sync(controlValue(plan, 2027, c.quick.id))
+      }
+    }
+    clear(timelineCard).append(
+      el("div", { class: "card-head row" }, el("h3", {}, "Deployment timeline"), el("button", { type: "button", class: "btn btn-small", onclick: () => ctx.navigate("deployment") }, "Open the Gantt →")),
+      gantt(result.timeline, { compact: true }),
+      el("p", { class: "scene-caption" }, result.timeline.flags.filter((f) => f.level !== "info").slice(0, 2).map((f) => f.title).join(" · ") || "Six Aerodynamic Testing Periods a year; the move lands at a period boundary."))
+    clear(ladders).append(
+      el("h3", {}, "Lap-time ladder"),
+      el("p", { class: "card-sub" }, `≈ ${K.performance.secPerPosition.toFixed(2)} s per constructors' position across the midfield; today at P${plan.shared.position}.`),
+      el("div", { class: "ladder-pair" }, ...[2027, 2028].map((y) => {
+        const s = result.seasons[y]
+        return el("div", { class: "ladder-col" }, el("h4", {}, `${y} · ${fmt.sec(s.perf.sec)}`), ladder({ rungs: s.perf.ladder, position: plan.shared.position, sec: s.perf.sec, scenarioPosition: s.perf.scenarioPosition }))
+      })))
+  }
+  return { node, update }
+}
+
+const GROUP_OF = { facility: ["location", "hinwilRetrofit", "committedKW", "expansionRight", "rackKW", "cooling", "redundancy", "pueMode", "pueValue", "tariffRp", "renewable", "heatReuse"], compute: ["nodes", "coresPerNode", "clockGHz", "memoryGB", "interconnect", "storage", "gpus", "solverGpus", "gpuModel", "gpuChargePct", "consumption", "committedPct", "termYears", "support", "refreshYears"], connectivity: ["fibrePairs", "fibreGbps", "trackside", "edge", "cloudOnRamp"] }
+const groupOf = (id) => Object.keys(GROUP_OF).find((g) => GROUP_OF[g].includes(id)) || null
+
+function renderRibbon(ribbon, result, plan) {
+  const s27 = result.seasons[2027]
+  const s28 = result.seasons[2028]
+  const tone = (s) => (s.perf.sec > 0.005 ? "good" : s.perf.sec < -0.005 ? "bad" : "flat")
+  clear(ribbon).append(
+    el("div", { class: "ribbon-head" },
+      el("div", { class: "headline-kicker" }, `${plan.meta.name} · vs today's setup at ${plan.shared.confidence} % confidence`),
+      el("div", { class: "ribbon-cols" }, el("span", {}), el("span", { class: "ribbon-year" }, "2027"), el("span", { class: "ribbon-year" }, "2028"))),
+    el("div", { class: "ribbon-big" },
+      el("div", { class: "ribbon-label" }, "Seconds per lap"),
+      el("div", { class: `headline-number tone-${tone(s27)}`, id: "sec-2027" }, fmt.sec(s27.perf.sec)),
+      el("div", { class: `headline-number tone-${tone(s28)}`, id: "sec-2028" }, fmt.sec(s28.perf.sec))),
+    ribbonRow("Position · points", `${fmt.position(plan.shared.position)} → ${fmt.position(s27.perf.scenarioPosition)}`, `${fmt.position(plan.shared.position)} → ${fmt.position(s28.perf.scenarioPosition)}`, { sub27: `${fmt.signed(s27.perf.points, 0)} pts`, sub28: `${fmt.signed(s28.perf.points, 0)} pts`, id: "ribbon-position" }),
+    ribbonRow("ATR allowance used", fmt.pct(s27.usage), fmt.pct(s28.usage), { sub27: `${fmt.num(s27.effectiveMauh, 2)} eff. MAUh`, sub28: `${fmt.num(s28.effectiveMauh, 2)} eff. MAUh`, id: "ribbon-atr" }),
+    ribbonRow("Cost-cap charge", fmt.chf(s27.money.capCharge), fmt.chf(s28.money.capCharge), { sub27: `${fmt.chfDelta(s27.money.capChargeDelta)} vs today`, sub28: `${fmt.chfDelta(s28.money.capChargeDelta)} vs today`, id: "ribbon-cap" }),
+    ribbonRow("Availability", fmt.availability(s27.availabilityPct / 100), fmt.availability(s28.availabilityPct / 100), { id: "ribbon-availability" }),
+    ribbonRow("CHF per year", fmt.chf(s27.money.yearly), fmt.chf(s28.money.yearly), { sub27: `${fmt.chf(s27.money.cash)} cash in 2027`, sub28: `${fmt.chf(s28.money.cash)} cash in 2028`, id: "ribbon-yearly" }),
+    ribbonRow("CO₂ (market-based)", `${fmt.num(s27.money.co2MarketT, 0)} t`, `${fmt.num(s28.money.co2MarketT, 0)} t`, { sub27: `${fmt.signed(s27.money.co2Delta, 0, " t")} vs today`, sub28: `${fmt.signed(s28.money.co2Delta, 0, " t")} vs today`, id: "ribbon-co2" }),
+    el("div", { class: "ribbon-foot muted small", id: "ribbon-foot" }, footLine(result)))
+}
+
+/** What 2028 does differently from 2027, in one line. */
+function footLine(result) {
+  const changed = result.deltas.changed
+  if (!changed.length) return "2028 runs the same estate as 2027 (nothing detached)."
+  const names = changed.map((id) => CONTROLS[id].label.toLowerCase()).slice(0, 4).join(", ") + (changed.length > 4 ? ` +${changed.length - 4} more` : "")
+  return `${changed.length} control${changed.length === 1 ? "" : "s"} differ${changed.length === 1 ? "s" : ""} in 2028 (${names}) · ${fmt.sec(result.deltas.sec)} and ${fmt.chfDelta(result.deltas.capCharge)} in the cap vs 2027.`
+}
+
+export { readout, isDetached, isoDate }

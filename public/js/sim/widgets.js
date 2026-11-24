@@ -5,11 +5,89 @@ import { el, svg, fmt } from "./dom.js"
 // Controls
 // ---------------------------------------------------------------------------------------------
 
-function readout(control, value) {
+export function readout(control, value) {
+  if (control.type === "toggle") return value ? "On" : "Off"
   if (control.format) return control.format(value)
   if (control.type === "range") return `${fmt.num(value, Number.isInteger(control.step) ? 0 : 1)}${control.unit ? ` ${control.unit}` : ""}`
   const opt = (control.options || []).find((o) => o.value === value)
   return opt ? opt.label : String(value)
+}
+
+/**
+ * Just the input for a control (slider, select, segmented buttons or toggle) with a `sync(value)` method
+ * on the returned node. `onChange(value)` fires on every change. Used by the plan's per-season rows.
+ */
+export function inputWidget(control, value, onChange, { id = `in-${control.id}`, describedBy } = {}) {
+  let node
+  if (control.type === "range") {
+    const input = el("input", { type: "range", id, min: control.min, max: control.max, step: control.step, value, class: "slider", "aria-valuetext": readout(control, value), "aria-describedby": describedBy, "aria-label": control.label })
+    input.addEventListener("input", () => { const v = Number(input.value); input.setAttribute("aria-valuetext", readout(control, v)); onChange(v) })
+    node = el("div", { class: "input-range" }, input, el("div", { class: "slider-ticks", "aria-hidden": "true" }, el("span", {}, readout(control, control.min)), el("span", {}, readout(control, control.max))))
+    node.sync = (v) => { input.value = String(v); input.setAttribute("aria-valuetext", readout(control, v)) }
+  } else if (control.type === "select") {
+    const select = el("select", { id, class: "select", "aria-describedby": describedBy, "aria-label": control.label },
+      ...control.options.map((o) => el("option", { value: String(o.value), selected: o.value === value }, o.label)))
+    select.addEventListener("change", () => { const opt = control.options.find((o) => String(o.value) === select.value); onChange(opt ? opt.value : select.value) })
+    node = select
+    node.sync = (v) => { select.value = String(v) }
+  } else if (control.type === "segmented") {
+    const group = el("div", { class: "segmented", role: "group", "aria-label": control.label, id })
+    for (const o of control.options) {
+      const btn = el("button", { type: "button", class: "seg", "aria-pressed": o.value === value ? "true" : "false", dataset: { value: String(o.value) } }, o.label)
+      btn.addEventListener("click", () => { for (const b of group.children) b.setAttribute("aria-pressed", b === btn ? "true" : "false"); onChange(o.value) })
+      group.append(btn)
+    }
+    node = group
+    node.sync = (v) => { for (const b of group.children) b.setAttribute("aria-pressed", b.dataset.value === String(v) ? "true" : "false") }
+  } else {
+    const btn = el("button", { type: "button", class: "toggle", id, role: "switch", "aria-checked": value ? "true" : "false", "aria-describedby": describedBy, "aria-label": control.label },
+      el("span", { class: "toggle-knob", "aria-hidden": "true" }), el("span", { class: "toggle-text" }, value ? "On" : "Off"))
+    btn.addEventListener("click", () => { const next = btn.getAttribute("aria-checked") !== "true"; btn.setAttribute("aria-checked", next ? "true" : "false"); btn.querySelector(".toggle-text").textContent = next ? "On" : "Off"; onChange(next) })
+    node = btn
+    node.sync = (v) => { btn.setAttribute("aria-checked", v ? "true" : "false"); btn.querySelector(".toggle-text").textContent = v ? "On" : "Off" }
+  }
+  return node
+}
+
+/**
+ * A plan control: one row holding the 2027 value and the 2028 value. 2028 shows "Same as 2027" until it is
+ * detached; shared controls (position, confidence, …) show a single input for both seasons.
+ * `handlers`: onChange(year, id, value), onDetach(id), onReattach(id). The node carries `sync(view)`.
+ */
+export function planControl(control, view, handlers) {
+  const base = `pc-${control.id}`
+  const row = el("div", { class: `control plan-control control-${control.type} ${view.shared ? "is-shared" : ""}`, dataset: { control: control.id, detached: view.detached ? "true" : "false" } })
+  const out27 = el("output", { class: "control-readout", id: `${base}-out-2027`, dataset: { season: "2027" } }, readout(control, view.v27))
+  const out28 = el("output", { class: "control-readout", id: `${base}-out-2028`, dataset: { season: "2028" } }, readout(control, view.v28))
+  const head = el("div", { class: "control-head" },
+    el("span", { class: "control-label", id: `${base}-label` }, control.label),
+    control.fia ? el("span", { class: "fia-badge", title: "FIA rule this control touches" }, control.fia) : null,
+    view.shared ? el("span", { class: "season-tag both" }, "Both seasons") : null,
+    el("span", { class: "readouts" }, view.shared ? out27 : [el("span", { class: "readout-pair" }, el("span", { class: "season-tag" }, "27"), out27), el("span", { class: "readout-pair" }, el("span", { class: "season-tag" }, "28"), out28)]),
+  )
+  const in27 = inputWidget(control, view.v27, (v) => handlers.onChange(view.shared ? null : 2027, control.id, v), { id: `${base}-2027`, describedBy: `${base}-why` })
+  const in28 = inputWidget(control, view.v28, (v) => handlers.onChange(2028, control.id, v), { id: `${base}-2028`, describedBy: `${base}-why` })
+  const row27 = el("div", { class: "season-row s2027" }, view.shared ? null : el("span", { class: "season-label" }, "2027"), in27)
+  const inherit = el("button", { type: "button", class: "inherit-pill", "aria-pressed": "true", title: "2028 follows 2027. Click to set a different value for 2028.", onclick: () => handlers.onDetach(control.id) }, el("span", { class: "inherit-check", "aria-hidden": "true" }, "✓"), "Same as 2027 · ", el("u", {}, "change for 2028"))
+  const reattach = el("button", { type: "button", class: "btn btn-tiny reattach", title: "Back to the 2027 value", onclick: () => handlers.onReattach(control.id) }, "Same as 2027")
+  const row28 = el("div", { class: "season-row s2028" }, el("span", { class: "season-label" }, "2028"), inherit, in28, reattach)
+  row.append(head, row27, view.shared ? null : row28, el("p", { class: "why", id: `${base}-why` }, control.why))
+  const apply = (v) => {
+    out27.textContent = readout(control, v.v27)
+    out28.textContent = readout(control, v.v28)
+    in27.sync(v.v27)
+    in28.sync(v.v28)
+    row.dataset.detached = v.detached ? "true" : "false"
+    inherit.hidden = Boolean(v.detached)
+    in28.hidden = !v.detached
+    reattach.hidden = !v.detached
+    row.hidden = v.hidden === true
+    row27.classList.toggle("na", v.na27 === true)
+    row28.classList.toggle("na", v.na28 === true)
+  }
+  apply(view)
+  row.sync = apply
+  return row
 }
 
 /**

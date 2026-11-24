@@ -218,8 +218,23 @@ function sourcesList(el) {
         el("td", {}, x.status === "VERIFIED" ? `[${x.ref}]${x.note ? ` ${x.note}` : ""}` : x.ref)))))))
 }
 
+/** Slider values from the query string (the planning tool links here with its own figures), clamped to each slider's range. */
+export function inputsFromQuery(search, defaults = DEFAULT_INPUTS) {
+  const out = { ...defaults }
+  let params
+  try { params = new URLSearchParams(search || "") } catch { return out }
+  for (const s of SLIDERS) {
+    const raw = params.get(s.id)
+    if (raw === null) continue
+    const v = Number(raw)
+    if (!Number.isFinite(v)) continue
+    out[s.id] = Math.min(s.max, Math.max(s.min, Math.round(v / s.step) * s.step))
+  }
+  return out
+}
+
 export function mountCase(root, el) {
-  const inputs = { ...DEFAULT_INPUTS }
+  const inputs = inputsFromQuery(typeof location !== "undefined" ? location.search : "")
   const out = el("div", { class: "case-out" })
   const controls = el("section", { class: "panel case-controls no-print-inputs", id: "caseControls" },
     el("h2", {}, "Assumptions you can move"),
