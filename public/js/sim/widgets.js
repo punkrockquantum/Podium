@@ -405,7 +405,9 @@ export function waterfall({ attribution, season, plainEnglish = true, cpuArch = 
   const M = MODES[mode] || MODES.sec
   const steps = attribution ? waterfallSteps(attribution, DRIVER_ORDER, { outcome: mode }) : []
   const rows = steps.filter((st) => st.kind === "driver" || (st.kind === "baseline" && Math.abs(st.value) > 1e-6))
-  const total = steps.find((st) => st.kind === "total") || { value: 0 }
+  const last = steps.find((st) => st.kind === "total") || { value: 0 }
+  // The total is the bars' running sum; shave the float noise so it rounds exactly as the headline does (0.425 → +0.42 s).
+  const total = { ...last, value: Math.round(last.value * 1e6) / 1e6 }
   const labelOf = (st) => (st.kind === "baseline" ? (season === 2028 ? "2027 estate until the step-up" : "Carried over") : L.barLabel(st.id, cpuArch))
   const W = compact ? 320 : 640
   const labelW = compact ? 118 : 236
