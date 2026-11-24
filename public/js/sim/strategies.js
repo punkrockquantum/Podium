@@ -17,7 +17,7 @@
  */
 import { evaluate } from "./model.js"
 import { K } from "./assumptions.js"
-import { SHARED_IDS } from "./plan.js"
+import { SHARED_IDS, normalizePlan } from "./plan.js"
 
 // ---------------------------------------------------------------------------------------------
 // The envelope (brief 1.1): the constants the model uses, re-exported for the cards and the optimiser
@@ -257,18 +257,43 @@ export const STRATEGY_TIMELINE = Object.freeze({ contractDate: "2026-11-24", cut
 export function toPlan(idOrKey) {
   const st = typeof idOrKey === "string" ? strategyByKey(idOrKey) : idOrKey
   if (!st) return null
+  return planFromSets(st, { name: st.name, strategy: st.key, timeline: { ...STRATEGY_TIMELINE } })
+}
+
+/**
+ * A plan.js plan from optimiser-shaped sets `{ shared, 2027, 2028 }`: plan-wide values (SHARED_IDS) go to `shared`,
+ * every other shared control becomes a 2027 value that 2028 inherits, and 2028 keeps only what differs from 2027.
+ */
+export function planFromSets(sets, { name = "Plan", preset = "custom", strategy = null, origin = null, timeline = null } = {}) {
   const shared = {}
   const season27 = {}
-  for (const [k, v] of Object.entries(st.shared)) (SHARED_IDS.includes(k) ? shared : season27)[k] = v
-  Object.assign(season27, st[2027])
+  for (const [k, v] of Object.entries(sharedOf(sets))) (SHARED_IDS.includes(k) ? shared : season27)[k] = v
+  Object.assign(season27, sets[2027] || {})
   const season28 = {}
-  for (const [k, v] of Object.entries(st[2028])) if (season27[k] !== v) season28[k] = v
-  return {
-    meta: { name: st.name, preset: "custom", strategy: st.key },
-    shared,
-    seasons: { 2027: season27, 2028: season28 },
-    timeline: { ...STRATEGY_TIMELINE },
-  }
+  for (const [k, v] of Object.entries(sets[2028] || {})) if (season27[k] !== v) season28[k] = v
+  for (const s of [season27, season28]) { delete s.season; delete s.ml; delete s.expansionRight; delete s.legacyExpansionRight }
+  const meta = { name, preset, ...(strategy ? { strategy } : {}), ...(origin ? { origin } : {}) }
+  return { meta, shared, seasons: { 2027: season27, 2028: season28 }, ...(timeline ? { timeline } : {}) }
+}
+
+/** The strategy as a plan.js plan carrying the simulator's position, confidence and venue (the only inputs the cards borrow). */
+export function strategyPlan(id, { position, confidence, venue } = {}) {
+  const plan = toPlan(id)
+  if (!plan) return null
+  for (const [k, v] of Object.entries({ position, confidence, venue })) if (v !== undefined && v !== null) plan.shared[k] = v
+  return plan
+}
+
+/**
+ * The strategy a plan.js plan is exactly equal to (inputs and timeline, at the plan's own position, confidence and
+ * venue), or null; `plan.meta.strategy` without a match means "edited in the planner".
+ */
+export function matchingStrategy(plan) {
+  const p = normalizePlan(plan)
+  const key = (q) => JSON.stringify({ s: q.shared, y: q.seasons, t: q.timeline })
+  const pk = key(p)
+  for (const id of STRATEGY_ORDER) if (key(normalizePlan(strategyPlan(id, p.shared))) === pk) return id
+  return null
 }
 
 /**

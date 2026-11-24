@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import {
-  STRATEGIES, STRATEGY_ORDER, SEASONS, COMMON, ENVELOPE, STRATEGY_TIMELINE, strategyByKey, planInputs, planFromInputs, sharedOf, toPlan,
+  STRATEGIES, STRATEGY_ORDER, SEASONS, COMMON, ENVELOPE, STRATEGY_TIMELINE, strategyByKey, planInputs, planFromInputs, sharedOf, toPlan, planFromSets, strategyPlan, matchingStrategy,
   evaluateStrategy, evaluateStrategies, evaluatePlan, envelopeEvaluate, envelopeCheck, envelopeOf, summary, clearStrategyCache,
 } from "../public/js/sim/strategies.js"
 import { K } from "../public/js/sim/assumptions.js"
@@ -285,4 +285,32 @@ test("strategies: evaluatePlan takes any plan shape, follows position / confiden
   assert.ok(Math.abs(re[2028].envelope.drIT - 405) < 1)
   assert.ok(!re[2027].envelope.fits, "the same set in 2027 has solver GPUs before they are legal")
   assertNoNaN(summary(re[2028]), "summary")
+})
+
+test("strategies: planFromSets splits plan-wide values from season values; strategyPlan borrows position/confidence/venue; matchingStrategy detects exact loads and edits", () => {
+  const sets = { shared: { position: 7, confidence: 70, venue: "melbourne", location: "dr", cooling: "dlc", season: 2027 }, 2027: { nodes: 10, ml: 0 }, 2028: { nodes: 10, gpus: 4, solverGpus: 2 } }
+  const plan = planFromSets(sets, { name: "X", strategy: "B", origin: "test", timeline: { ...STRATEGY_TIMELINE } })
+  assert.deepEqual(plan.shared, { position: 7, confidence: 70, venue: "melbourne" })
+  assert.deepEqual(plan.seasons[2027], { location: "dr", cooling: "dlc", nodes: 10 }, "season 2027 gets the non-plan-wide shared values; season/ml keys are dropped")
+  assert.deepEqual(plan.seasons[2028], { gpus: 4, solverGpus: 2 }, "2028 keeps only what differs from 2027")
+  assert.deepEqual(plan.meta, { name: "X", preset: "custom", strategy: "B", origin: "test" })
+  const n = normalizePlan(plan)
+  assert.equal(n.meta.strategy, "B")
+  assert.equal(n.meta.origin, "test")
+  for (const key of STRATEGY_ORDER) {
+    const p = normalizePlan(toPlan(key))
+    assert.equal(matchingStrategy(p), key, `${key} loads as itself`)
+    const borrowed = normalizePlan(strategyPlan(key, { position: 5, confidence: 80, venue: "melbourne" }))
+    assert.equal(borrowed.shared.position, 5)
+    assert.equal(borrowed.shared.confidence, 80)
+    assert.equal(borrowed.shared.venue, "melbourne")
+    assert.equal(matchingStrategy(borrowed), key, `${key} at P5 is still strategy ${key} (the cards borrow position, confidence and venue)`)
+    const edited = normalizePlan({ ...p, seasons: { ...p.seasons, 2027: { ...p.seasons[2027], nodes: p.seasons[2027].nodes - 1 } } })
+    assert.equal(matchingStrategy(edited), null, `${key} edited is no longer an exact match`)
+    assert.equal(edited.meta.strategy, key, "but the lineage survives normalisation")
+    const timelineEdit = normalizePlan({ ...p, timeline: { ...p.timeline, parallelWeeks: 4 } })
+    assert.equal(matchingStrategy(timelineEdit), null, "a timeline edit counts as an edit")
+  }
+  assert.equal(matchingStrategy(presetPlanLike()), null)
+  function presetPlanLike() { return { meta: { name: "p" }, shared: { position: 8 }, seasons: { 2027: { nodes: 12 }, 2028: {} } } }
 })

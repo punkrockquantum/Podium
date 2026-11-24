@@ -101,8 +101,11 @@ export function normalizePlan(raw = {}) {
   // A plan saved before the 500 kW envelope may still carry the removed expansion-right control: it is ignored,
   // and remembered only so plan health can say so (an info note, never a change to the figures)
   const legacy = meta.legacyExpansionRight === true || [sharedRaw, s27raw, s28raw].some((o) => o.expansionRight === true || o.legacyExpansionRight === true)
+  // lineage: the strategy (A/B/C) or the optimiser proposal this plan was loaded from; the chip reads "Custom (from B)" once edited
+  const strategy = typeof meta.strategy === "string" && /^[A-Z]$/.test(meta.strategy) ? meta.strategy : null
+  const origin = typeof meta.origin === "string" && meta.origin ? meta.origin.slice(0, 40) : null
   return {
-    meta: { name, preset, version: PLAN_VERSION, ...(meta.updatedAt ? { updatedAt: String(meta.updatedAt) } : {}), ...(legacy ? { legacyExpansionRight: true } : {}) },
+    meta: { name, preset, version: PLAN_VERSION, ...(meta.updatedAt ? { updatedAt: String(meta.updatedAt) } : {}), ...(legacy ? { legacyExpansionRight: true } : {}), ...(strategy ? { strategy } : {}), ...(origin ? { origin } : {}) },
     shared,
     seasons: { 2027: s27, 2028: s28 },
     timeline: normalizeTimeline(r.timeline),
