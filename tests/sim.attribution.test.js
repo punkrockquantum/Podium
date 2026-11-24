@@ -224,3 +224,50 @@ test("attribution: inputs are normalised before comparison (strings, clamping) a
   assert.deepEqual(a.inputs, normalize(presetInputs("dr2027")))
   assert.equal(b.cached, true)
 })
+
+// ---------------------------------------------------------------------------------------------
+// Plan-level attribution (integration pass): the bars on the Overview and the strategy cards
+// ---------------------------------------------------------------------------------------------
+
+import { PLAN_PRESET_ORDER, presetPlan, normalizePlan, evaluatePlan as evaluateTwoSeasonPlan, seasonInputs, seasonAttributionFn, setTimeline } from "../public/js/sim/plan.js"
+import { STRATEGY_ORDER as STRATEGY_KEYS, strategyPlan } from "../public/js/sim/strategies.js"
+
+test("attribution: seasonAttributionFn makes the bars sum exactly to the plan-level headline for every preset and strategy", () => {
+  const plans = [...PLAN_PRESET_ORDER.map((p) => presetPlan(p)), ...STRATEGY_KEYS.map((k) => strategyPlan(k))]
+  for (const raw of plans) {
+    const plan = normalizePlan(raw)
+    const result = evaluateTwoSeasonPlan(plan)
+    for (const year of [2027, 2028]) {
+      const a = attribute(seasonInputs(plan, year), { evaluateFn: seasonAttributionFn(result, year), cache: false })
+      const sum = a.drivers.reduce((acc, d) => acc + d.sec, 0) + a.baseline.sec
+      assert.ok(Math.abs(sum - result.seasons[year].perf.sec) < 1e-9, `${plan.meta.name} ${year}: Σ ${sum} vs plan-level ${result.seasons[year].perf.sec}`)
+      for (const d of a.drivers) for (const k of OUTCOMES) assert.ok(Number.isFinite(d[k]), `${plan.meta.name} ${year} ${d.id}.${k}`)
+      assert.ok(a.ms < 400, `${plan.meta.name} ${year}: ${a.ms} ms`)
+    }
+  }
+})
+
+test("attribution: at plan level the go-live blend is held fixed, so 2027 differs from steady state and Today stays at zero", () => {
+  const plan = normalizePlan(presetPlan("dr2027"))
+  const result = evaluateTwoSeasonPlan(plan)
+  const planLevel = attribute(seasonInputs(plan, 2027), { evaluateFn: seasonAttributionFn(result, 2027), cache: false })
+  const steady = attribute(seasonInputs(plan, 2027), { cache: false })
+  assert.ok(planLevel.total.sec < steady.total.sec, "2027 is blended by the go-live date, so it is worth less than a full season on the new estate")
+  assert.ok(Math.abs(planLevel.baseline.sec) < 1e-9, "no carried estate in 2027: the baseline step is zero")
+  assert.equal(planLevel.drivers.filter((d) => d.pruned).map((d) => d.id).length, steady.drivers.filter((d) => d.pruned).length, "the same drivers are active")
+
+  const today = normalizePlan(presetPlan("today"))
+  const tr = evaluateTwoSeasonPlan(today)
+  for (const year of [2027, 2028]) {
+    const a = attribute(seasonInputs(today, year), { evaluateFn: seasonAttributionFn(tr, year), cache: false })
+    assert.ok(Math.abs(a.total.sec) < 1e-9 && a.drivers.every((d) => d.pruned), `Today ${year}: nothing to attribute`)
+  }
+
+  // a late 2028 step-up carries the 2027 estate for part of the season: that share is the baseline step, not a driver
+  const late = normalizePlan(setTimeline(presetPlan("gl2028"), { stepUpDate: "2028-05-01" }))
+  const lr = evaluateTwoSeasonPlan(late)
+  const la = attribute(seasonInputs(late, 2028), { evaluateFn: seasonAttributionFn(lr, 2028), cache: false })
+  assert.ok(lr.seasons[2028].blend.shareCarry > 0, "part of 2028 runs on the 2027 estate")
+  assert.ok(la.baseline.sec > 0, `the carried 2027 estate shows as a baseline step (${la.baseline.sec})`)
+  assert.ok(Math.abs(la.baseline.sec + la.drivers.reduce((acc, d) => acc + d.sec, 0) - lr.seasons[2028].perf.sec) < 1e-9)
+})

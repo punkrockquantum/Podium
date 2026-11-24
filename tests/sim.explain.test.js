@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
   EXPLAIN, fillTemplate, labels, explainContext, explainText, CPU_ARCH,
-  CONTROL_IDS, TILE_IDS, FLAG_IDS, DRIVER_IDS, STRATEGY_IDS, TERM_IDS, PENDING_IDS, PLAN_IDS,
+  CONTROL_IDS, TILE_IDS, FLAG_IDS, DRIVER_IDS, STRATEGY_IDS, TERM_IDS, MILESTONE_IDS, PENDING_IDS, PLAN_IDS,
 } from "../public/js/sim/explain.js"
+import { presetPlan, normalizePlan, evaluatePlan as evaluateTwoSeasonPlan, seasonInputs } from "../public/js/sim/plan.js"
 import { CONTROLS, PRESET_ORDER, presetInputs, evaluate, simulate, DEFAULTS } from "../public/js/sim/model.js"
 import { DRIVERS, attribute } from "../public/js/sim/attribution.js"
 import { STRATEGIES, STRATEGY_ORDER } from "../public/js/sim/strategies.js"
@@ -26,7 +27,7 @@ function uiSources(dir = simDir) {
   return out
 }
 const uiSource = uiSources().join("\n")
-const kinds = { control: CONTROL_IDS, tile: TILE_IDS, flag: FLAG_IDS, driver: DRIVER_IDS, strategy: STRATEGY_IDS, term: TERM_IDS }
+const kinds = { control: CONTROL_IDS, tile: TILE_IDS, flag: FLAG_IDS, driver: DRIVER_IDS, strategy: STRATEGY_IDS, term: TERM_IDS, milestone: MILESTONE_IDS }
 const entriesOf = (kind) => kinds[kind].map((id) => [`${kind}.${id}`, EXPLAIN[`${kind}.${id}`]])
 
 // Acronyms that must not appear unexpanded in a one-liner (brief 3.0) unless the title itself expands them.
@@ -233,4 +234,26 @@ test("explain: explainContext derives the plain-English facts the templates need
   assert.equal(ctx.x.confidence, DEFAULTS.confidence)
   assert.equal(ctx.a.n, undefined, "no attribution → no bars")
   assert.throws(() => explainContext({}), /needs an evaluate\(\) result/)
+})
+
+test("explain: every deployment milestone has an entry whose template fills from the plan, and strategy copy carries no figures", () => {
+  const timelineSource = readFileSync(join(simDir, "timeline.js"), "utf8")
+  const emitted = [...timelineSource.matchAll(/milestone\("([a-z0-9-]+)"/g)].map((m) => m[1])
+  assert.ok(emitted.length >= 7, `timeline.js emits milestones (${emitted.length})`)
+  for (const id of new Set(emitted)) assert.ok(EXPLAIN[`milestone.${id}`], `milestone.${id} missing`)
+  assert.deepEqual([...new Set(emitted)].sort(), [...MILESTONE_IDS].sort())
+  for (const preset of ["dr2027", "gl2028", "today"]) {
+    const plan = normalizePlan(presetPlan(preset))
+    const r = evaluateTwoSeasonPlan(plan)
+    for (const year of [2027, 2028]) {
+      const s = r.seasons[year]
+      const ctx = explainContext({ result: { scenario: s.sim, today: s.today, perf: s.perf }, both: { 2027: { perf: r.seasons[2027].perf }, 2028: { perf: r.seasons[2028].perf } }, plan: r, fmt })
+      for (const id of MILESTONE_IDS) {
+        const text = explainText(`milestone.${id}`, ctx)
+        assert.ok(typeof text === "string", `milestone.${id} ${preset} ${year}`)
+        assert.doesNotMatch(text, /\{|undefined|NaN|Infinity/, `milestone.${id} ${preset} ${year}: ${text}`)
+      }
+    }
+  }
+  for (const id of STRATEGY_IDS) for (const para of EXPLAIN[`strategy.${id}`].more) assert.doesNotMatch(para, /[+−-]\d+\.\d+ s|CHF \d/, `strategy.${id} 'more' must not carry figures (the card does): ${para}`)
 })

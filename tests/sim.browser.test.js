@@ -339,7 +339,7 @@ test("Copy link restores the route and the plan; saved plans and A/B compare wor
   await page.click("#share-link")
   await sleep(200)
   const hash = await page.evaluate("location.hash")
-  assert.match(hash, /^#\/compute\?p=[A-Za-z0-9_-]+$/, "the link carries the route and the plan")
+  assert.match(hash, /^#\/compute\?p=[A-Za-z0-9_-]+&pe=[01]$/, "the link carries the route, the plan and the Plain English setting")
 
   const fresh = await chrome.page()
   await fresh.goto(`${base}/sim.html`)
@@ -518,4 +518,110 @@ test("the planning tool, the business case and the legacy pages hold together at
   } finally {
     await small.close()
   }
+})
+
+test("Explainers: ? on controls, tiles, flags and bars opens one shared panel; waterfall, Plain English and the printed appendix", { skip, timeout: 90_000 }, async () => {
+  const page = await chrome.page()
+  await openFresh(page)
+  await page.evaluate("document.querySelector('#preset-gl2028').click()")
+  await settle()
+  const ev = (s) => page.evaluate(s)
+
+  // the affordance: a 20 px glyph with a 44 × 44 hit target, labelled for assistive tech
+  assert.ok((await count(page, ".explain-btn")) >= 10, "the Overview carries ? buttons on its tiles")
+  const btnBox = await ev("(() => { const b = document.querySelector('[data-explain=\"tile.envelope\"]'); const r = b.getBoundingClientRect(); const a = getComputedStyle(b, '::after'); return { w: Math.round(r.width), h: Math.round(r.height), inset: a.inset || a.top, label: b.getAttribute('aria-label'), popup: b.getAttribute('aria-haspopup'), expanded: b.getAttribute('aria-expanded') } })()")
+  assert.equal(btnBox.w, 20); assert.equal(btnBox.h, 20)
+  assert.match(btnBox.inset, /-12px/, "the hit target extends 12 px around the glyph (44 × 44)")
+  assert.match(btnBox.label, /^Explain: /); assert.equal(btnBox.popup, "dialog"); assert.equal(btnBox.expanded, "false")
+
+  // open → side panel at 1440 px, focus moves in, live 'In this plan' lines per season
+  await ev("document.querySelector('[data-explain=\"tile.envelope\"]').click()")
+  await page.waitFor("!document.querySelector('#explain-panel').hidden", 3000, "the explainer panel opens")
+  assert.equal(await ev("document.querySelector('#explain-panel').dataset.mode"), "side")
+  assert.equal(await ev("document.querySelector('#explain-panel').getAttribute('role')"), "dialog")
+  assert.equal(await ev("document.querySelector('[data-explain=\"tile.envelope\"]').getAttribute('aria-expanded')"), "true")
+  assert.equal(await ev("document.querySelector('#explain-panel').contains(document.activeElement)"), true, "focus moves into the panel")
+  assert.equal(await text(page, "#explain-title"), "Share of the 500 kW offer")
+  assert.match(await text(page, "#explain-inplan"), /2027: \d{3} kW of 500 \(\d+ %\)/)
+  assert.match(await text(page, "#explain-inplan"), /2028: \d{3} kW of 500/)
+  assert.ok((await count(page, "#explain-panel .chip-source")) >= 1, "source chips")
+  assert.equal(await ev("document.querySelector('#explain-panel details').open"), true, "Plain English on: More is expanded")
+
+  // one at a time: a second ? replaces the first; the live line follows the plan
+  await ev("document.querySelector('[data-explain=\"tile.gauge-mauh\"]').click()")
+  await settle()
+  assert.equal(await count(page, "[aria-expanded=\"true\"]"), 1, "only one ? is expanded")
+  assert.equal(await text(page, "#explain-title"), "Computing allowance used")
+  const before = await text(page, "#explain-inplan")
+  await ev("const i = document.querySelector('#quick-position'); i.value = 5; i.dispatchEvent(new Event('input', { bubbles: true }))")
+  await sleep(300)
+  assert.notEqual(await text(page, "#explain-inplan"), before, "the 'In this plan' line updates live")
+  assert.equal(await ev("document.querySelector('#explain-panel').hidden"), false, "the panel stays open through a re-render")
+
+  // Escape closes and returns focus to the (re-rendered) opener; a click outside closes too
+  await ev("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await settle()
+  assert.equal(await ev("document.querySelector('#explain-panel').hidden"), true, "Escape closes")
+  assert.equal(await ev("document.activeElement === document.querySelector('[data-explain=\"tile.gauge-mauh\"]')"), true, "focus returns to the ?")
+  await ev("document.querySelector('[data-explain=\"tile.envelope\"]').click()")
+  await settle()
+  await ev("document.querySelector('#main').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))")
+  await settle()
+  assert.equal(await ev("document.querySelector('#explain-panel').hidden"), true, "a click outside closes")
+
+  // the waterfall: one per season, bars in the fixed order, a hidden table, a bar opens the driver explainer
+  await page.waitFor("document.querySelectorAll('#waterfall-2028 .wf-row.kind-driver').length > 0", 5000, "the 2028 waterfall")
+  const bars = await ev("[...document.querySelectorAll('#waterfall-2028 .wf-row.kind-driver')].map((g) => g.dataset.driver)")
+  assert.ok(bars.length >= 6, `active drivers drawn (${bars.length})`)
+  const order = ["power", "cpuArch", "processor", "clock", "gpu", "data", "cooling", "resilience", "timing", "energy", "commercial", "connectivity"]
+  assert.deepEqual(bars, order.filter((id) => bars.includes(id)), "bars keep the fixed driver order")
+  assert.equal(await count(page, "#waterfall-2028 .waterfall-table tbody tr"), bars.length + 1, "the hidden table repeats every bar plus the total")
+  assert.match(await text(page, "#waterfall-2028 .wf-value.total"), /^\+0\.\d\d s$/)
+  assert.match(await text(page, "#waterfall-card"), /Unchanged from Today/)
+  await ev("document.querySelector('#waterfall-2028 .wf-row[data-driver=\"gpu\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))")
+  await settle()
+  assert.equal(await text(page, "#explain-title"), "Graphics processors on the solver")
+  assert.match(await text(page, "#explain-inplan"), /2028: /)
+  await ev("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await ev("document.querySelector('.wf-modes [data-mode=\"savedCHF\"]').click()")
+  await settle()
+  assert.equal(await ev("document.querySelector('#waterfall-2027').dataset.mode"), "savedCHF")
+  assert.match(await text(page, "#waterfall-2027 .wf-value.total"), /CHF/)
+
+  // Plain English: default on for the Team view; off swaps the labels back, persists and travels in the link
+  assert.equal(await ev("document.querySelector('#plain-english').getAttribute('aria-checked')"), "true")
+  await go(page, "#/compute")
+  assert.equal(await text(page, "#pc-nodes-label"), "Processor servers")
+  assert.equal(await ev("document.querySelector('#pc-nodes-label').title"), "CPU nodes", "the model term stays on hover")
+  await ev("document.querySelector('#plain-english').click()")
+  await settle()
+  assert.equal(await text(page, "#pc-nodes-label"), "CPU nodes")
+  assert.equal(await ev("localStorage.getItem('podium.sim.plainEnglish')"), "0")
+  await page.click("#share-link")
+  await sleep(200)
+  assert.match(await ev("location.hash"), /&pe=0$/, "the link carries pe=0")
+  await ev("location.hash = '#/overview?pe=1'")
+  await sleep(400)
+  assert.equal(await ev("document.querySelector('#plain-english').getAttribute('aria-checked')"), "true", "pe=1 in a link turns it on")
+
+  // the Solutions Architect view defaults to off when nothing is stored
+  await ev("localStorage.removeItem('podium.sim.plainEnglish')")
+  await page.goto("about:blank") // a hash-only change would not be a page load
+  await openFresh(page, "/sim.html#/sa")
+  assert.equal(await ev("document.querySelector('#plain-english').getAttribute('aria-checked')"), "false")
+
+  // the printed 'Explained' appendix: every active bar and flag, hidden on screen, one line each
+  await page.goto("about:blank")
+  await openFresh(page)
+  await page.evaluate("document.querySelector('#preset-gl2028').click()")
+  await sleep(400)
+  assert.equal(await ev("getComputedStyle(document.querySelector('#explained-appendix')).display"), "none")
+  await page.emulateMedia("print")
+  await sleep(200)
+  assert.equal(await ev("getComputedStyle(document.querySelector('#explained-appendix')).display"), "block")
+  assert.ok((await count(page, "#explained-appendix li")) >= 10, "driver bars and flags for both seasons")
+  assert.equal(await ev("getComputedStyle(document.querySelector('.explain-btn')).display"), "none", "no ? in print")
+  assert.doesNotMatch(await text(page, "#explained-appendix"), CLEAN)
+  await page.emulateMedia("")
+  assert.deepEqual(page.errors, [], "no JS errors")
 })
