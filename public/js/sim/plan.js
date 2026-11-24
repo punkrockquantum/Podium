@@ -19,6 +19,15 @@ export const TIMELINE_IDS = ["leadWeeks", "migrationTiming"]
 export const SEASON_IDS = GROUPS.flatMap((g) => g.controls.map((c) => c.id)).filter((id) => id !== "season" && !SHARED_IDS.includes(id) && !TIMELINE_IDS.includes(id))
 export const NAME_MAX = 60
 
+/** A plan name within NAME_MAX: longer names are cut at a word boundary and end with an ellipsis, never mid-word. */
+export function fitName(raw) {
+  const s = String(raw ?? "").trim().replace(/\s+/g, " ")
+  if (s.length <= NAME_MAX) return s
+  const cut = s.slice(0, NAME_MAX - 1)
+  const at = cut.lastIndexOf(" ")
+  return `${(at > NAME_MAX / 2 ? cut.slice(0, at) : cut).replace(/[\s·,;:–-]+$/, "")}…`
+}
+
 const round = (x, d = 3) => Math.round(x * 10 ** d) / 10 ** d
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x))
 const pick = (obj, ids) => Object.fromEntries(ids.filter((id) => obj[id] !== undefined).map((id) => [id, obj[id]]))
@@ -96,7 +105,7 @@ export function normalizePlan(raw = {}) {
   const x28 = normalize({ ...x27, ...pick(s28raw, detached), season: 2028 })
   const s28 = pick(x28, detached)
   const meta = r.meta && typeof r.meta === "object" ? r.meta : {}
-  const name = String(meta.name ?? "").trim().slice(0, NAME_MAX) || "Untitled plan"
+  const name = fitName(meta.name) || "Untitled plan"
   const preset = typeof meta.preset === "string" && PLAN_PRESETS[meta.preset] ? meta.preset : "custom"
   // A plan saved before the 500 kW envelope may still carry the removed expansion-right control: it is ignored,
   // and remembered only so plan health can say so (an info note, never a change to the figures)

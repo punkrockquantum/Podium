@@ -5,7 +5,7 @@
  *
  *   postMessage({ type: "run", id, options })   options: start, objective, locked, restarts, maxPlans, seed, fill
  *   postMessage({ type: "stop", id })            the best plan so far comes back with `stopped: true`
- *   ← { type: "progress", id, done, total, bestScore }
+ *   ← { type: "progress", id, done, total, fraction, bestScore }
  *   ← { type: "result", id, result }  |  { type: "error", id, message }
  */
 import { optimiseAsync } from "./optimiser.js"
@@ -22,7 +22,7 @@ self.onmessage = async (event) => {
     const r = await optimiseAsync({
       ...options,
       signal: controller.signal,
-      onProgress: (p) => self.postMessage({ type: "progress", id, done: p.done, total: p.total, bestScore: p.bestScore }),
+      onProgress: (p) => self.postMessage({ type: "progress", id, done: p.done, total: p.total, fraction: p.fraction, bestScore: p.bestScore }),
     })
     self.postMessage({ type: "result", id, result: {
       objective: r.objective, best: r.best, score: r.score, fits: r.fits, start: r.start, startScore: r.startScore,

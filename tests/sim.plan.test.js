@@ -107,7 +107,7 @@ test("plan: setting a 2027 control flows into 2028 unless detached; detaching fr
 
 test("plan: normalizePlan fills, clamps and drops junk", () => {
   const p = normalizePlan({ meta: { name: "  x".repeat(80) }, shared: { position: 99, confidence: -5 }, seasons: { 2027: { nodes: 999, interconnect: "warp" }, 2028: { gpus: 500, bogus: 1, solverGpus: 3 } }, timeline: { contractDate: "garbage", parallelWeeks: 50 } })
-  assert.equal(p.meta.name.length, 60)
+  assert.ok(p.meta.name.length <= 60 && p.meta.name.endsWith("…") && !/\s…$/.test(p.meta.name), `a long name is cut at a word boundary with an ellipsis: ${JSON.stringify(p.meta.name)}`)
   assert.equal(p.meta.preset, "custom")
   assert.equal(p.shared.position, 11)
   assert.equal(p.shared.confidence, 0)
@@ -557,4 +557,17 @@ test("race weekends at risk read as words everywhere on screen; the JSON exports
       assert.ok(/fmt\.weekends(Short)?\(/.test(line) && !/fmt\.num\([^)]*weekends|weekends\w*\.toFixed/.test(line), `${name}: ${line.trim().slice(0, 120)}`)
     }
   }
+})
+
+test("plan names longer than NAME_MAX are cut at a word boundary with an ellipsis, never mid-word; short names are untouched", async () => {
+  const { fitName, NAME_MAX, renamePlan } = await import("../public/js/sim/plan.js")
+  const long = "Optimiser proposal · Balanced: lap time, cap headroom, availability, data-to-decision"
+  assert.equal(fitName(long), "Optimiser proposal · Balanced: lap time, cap headroom…")
+  assert.equal(fitName(fitName(long)), fitName(long), "stable on a second pass")
+  assert.equal(fitName("Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028"), "Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028", "the long preset name fits as it is")
+  assert.equal(fitName("  spaced   out  "), "spaced out")
+  assert.equal(fitName("x".repeat(90)).length, NAME_MAX, "one unbroken word is cut at the limit")
+  assert.equal(normalizePlan({ meta: { name: long } }).meta.name, "Optimiser proposal · Balanced: lap time, cap headroom…")
+  assert.equal(renamePlan(presetPlan("dr2027"), long).meta.name, "Optimiser proposal · Balanced: lap time, cap headroom…")
+  for (const id of ["today", "dr2027", "gl2028"]) assert.equal(presetPlan(id).meta.name.length <= NAME_MAX, true)
 })

@@ -314,7 +314,8 @@ function normaliseLocked(locked) {
  * @param options.maxPlans     hard cap on model evaluations (default 6000)
  * @param options.seed         PRNG seed (default 2027)
  * @param options.fill         derive `nodes` from the allowance (default true)
- * @param options.onProgress   ({ done, total, bestScore, best, restart, sweep }) every 100 evaluations and at the end
+ * @param options.onProgress   ({ done, total, fraction, bestScore, best, restart, restarts, sweep }) every 100 evaluations and
+ *                             at the end; `fraction` (0 → 1) walks the restarts, since a search converges long before `maxPlans`
  * @param options.shouldStop   () → boolean, checked before every evaluation; the best so far is returned
  */
 export function optimise(options = {}) {
@@ -358,8 +359,12 @@ function* optimiseSteps(options = {}) {
   let stopped = false
   let best = null
   const trace = []
-
-  const progress = (restart, sweep) => { if (onProgress) onProgress({ done: evaluations, total: maxPlans, bestScore: best ? best.score : -Infinity, best: best ? best.plan : null, restart, sweep }) }
+  // where the search is: a restart usually converges within three sweeps, so the fraction walks the restarts
+  // evenly and each sweep inside one adds a quarter; the last call reports 1 whatever ended the search
+  const pos = { restart: 0, sweep: 0 }
+  const fraction = () => Math.min(1, (pos.restart + Math.min(pos.sweep, 3) / 4) / Math.max(1, restarts))
+  const snapshot = () => ({ done: evaluations, total: maxPlans, fraction: fraction(), bestScore: best ? best.score : -Infinity, best: best ? best.plan : null, restart: pos.restart, restarts, sweep: pos.sweep })
+  const progress = () => { if (onProgress) onProgress(snapshot()) }
 
   const score = (plan) => {
     const p = clampPlan(clone(plan))
@@ -398,13 +403,15 @@ function* optimiseSteps(options = {}) {
     ...SEASONS.flatMap((y) => Object.keys(SEARCH_SPACE.season).filter((id) => !isLocked(locked, "season", id) && !(fill && SEARCH_SPACE.season[id].derived)).map((id) => [y, id])),
   ]
   let nextYield = chunk
-  const snapshot = () => ({ done: evaluations, total: maxPlans, bestScore: best ? best.score : -Infinity, best: best ? best.plan : null })
 
   outer: for (const [restart, s0] of starts.entries()) {
+    pos.restart = restart
+    pos.sweep = 0
     let current = score(s0)
     if (!current) break
     consider(current, restart, 0, "restart")
     for (let sweep = 1; sweep <= maxSweeps; sweep++) {
+      pos.sweep = sweep
       let improved = false
       for (const [scope, id] of moves) {
         const values = allowedValues(current.plan, scope, id)
@@ -426,6 +433,8 @@ function* optimiseSteps(options = {}) {
       if (!improved) break
     }
   }
+  pos.restart = restarts
+  pos.sweep = 0
   progress()
   const ms = performance.now() - t0
   return {

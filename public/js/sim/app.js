@@ -78,8 +78,13 @@ export function mountSim(root) {
     el("div", { class: "spacer" }),
     viewSwitch,
     nav)
-  const nameInput = el("input", { type: "text", class: "text plan-name", id: "plan-name", maxlength: NAME_MAX, "aria-label": "Plan name" })
-  nameInput.addEventListener("change", () => { state.plan = renamePlan(state.plan, nameInput.value); render() })
+  // a one-row textarea rather than an input so a long preset name wraps onto a second line instead of clipping
+  const nameInput = el("textarea", { class: "text plan-name", id: "plan-name", rows: "1", maxlength: NAME_MAX, spellcheck: "false", "aria-label": "Plan name" })
+  const fitNameField = () => { nameInput.style.height = "0"; nameInput.style.height = `${nameInput.scrollHeight + 2}px` }
+  nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); nameInput.blur() } })
+  nameInput.addEventListener("input", fitNameField)
+  nameInput.addEventListener("change", () => { state.plan = renamePlan(state.plan, nameInput.value.replace(/\s+/g, " ").trim()); render() })
+  window.addEventListener("resize", fitNameField)
   const presetBar = el("div", { class: "plan-bar", id: "plan-bar" },
     el("div", { class: "plan-id" }, el("span", { class: "presets-label" }, "Plan"), nameInput, el("span", { class: "chip chip-custom", id: "preset-custom", hidden: true }, "Custom plan")),
     el("nav", { class: "presets", id: "presets", "aria-label": "Presets" },
@@ -327,6 +332,7 @@ export function mountSim(root) {
     custom.classList.toggle("chip-strategy", Boolean(strategy))
     custom.dataset.strategy = strategy || ""
     if (document.activeElement !== nameInput) nameInput.value = state.plan.meta.name
+    fitNameField()
     for (const b of viewSwitch.querySelectorAll(".seg")) b.setAttribute("aria-pressed", b.dataset.view === state.view ? "true" : "false")
     header.querySelector(".subtitle").textContent = state.view === "sa" ? "Solutions Architect view · 2027 & 2028 seasons" : "2027 & 2028 seasons · Hinwil · Digital Realty Zurich"
     presetBar.querySelector("#plan-health-badge")?.remove()

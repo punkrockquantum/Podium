@@ -41,7 +41,7 @@ export function createOptimiserRunner({ workerUrl = new URL("./optimiser.worker.
       const onMessage = (event) => {
         const m = event.data || {}
         if (m.id !== id) return
-        if (m.type === "progress") onProgress?.({ done: m.done, total: m.total, bestScore: m.bestScore })
+        if (m.type === "progress") onProgress?.({ done: m.done, total: m.total, fraction: m.fraction, bestScore: m.bestScore })
         else if (m.type === "result") { cleanup(); resolve(m.result) }
         else if (m.type === "error") { cleanup(); reject(new Error(m.message)) }
       }
@@ -59,7 +59,7 @@ export function createOptimiserRunner({ workerUrl = new URL("./optimiser.worker.
     const controller = new AbortController()
     current = { id, stop: () => controller.abort() }
     try {
-      const r = await optimiseAsync({ ...options, signal: controller.signal, yieldEvery: 200, onProgress: (p) => onProgress?.({ done: p.done, total: p.total, bestScore: p.bestScore }) })
+      const r = await optimiseAsync({ ...options, signal: controller.signal, yieldEvery: 200, onProgress: (p) => onProgress?.({ done: p.done, total: p.total, fraction: p.fraction, bestScore: p.bestScore }) })
       return r
     } finally {
       if (current && current.id === id) current = null

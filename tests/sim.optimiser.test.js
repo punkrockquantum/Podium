@@ -210,6 +210,25 @@ test("optimiser: shouldStop, maxPlans and onProgress are honoured and the best s
   assert.ok(ticks.length >= 2, "progress at every 100 evaluations and at the end")
   assert.equal(ticks.at(-1).done, r.evaluations)
   assert.equal(ticks[0].total, DEFAULTS.maxPlans)
+  assert.equal(ticks.at(-1).fraction, 1, "the last report is 100 % even when the search was stopped")
+})
+
+test("optimiser: the progress fraction walks the restarts from 0 to 1, never backwards, and ends at 1 when the search converges before maxPlans", () => {
+  const ticks = []
+  const r = optimise({ start: STRATEGIES.A, objective: "fastest2028", onProgress: (p) => ticks.push(p) })
+  assert.equal(r.stopped, false)
+  assert.ok(r.evaluations < DEFAULTS.maxPlans / 2, `a default search converges well inside the cap (${r.evaluations} of ${DEFAULTS.maxPlans})`)
+  assert.ok(ticks.length >= 5)
+  for (const [i, p] of ticks.entries()) {
+    assert.ok(p.fraction >= 0 && p.fraction <= 1, `fraction in range (${p.fraction})`)
+    assert.equal(p.restarts, DEFAULTS.restarts)
+    assert.ok(Number.isInteger(p.restart) && p.restart >= 0 && p.restart <= DEFAULTS.restarts)
+    if (i) assert.ok(p.fraction >= ticks[i - 1].fraction, `monotonic at tick ${i}`)
+  }
+  assert.ok(ticks[0].fraction < 0.5, "it starts near the beginning")
+  assert.ok(ticks.some((p) => p.fraction > 0.3 && p.fraction < 0.9), "it moves through the middle")
+  assert.equal(ticks.at(-1).fraction, 1)
+  assert.equal(ticks.at(-1).restart, DEFAULTS.restarts)
   assert.ok(ticks.every((t) => Number.isFinite(t.bestScore) && t.best && t.best.shared))
   const immediate = optimise({ start: STRATEGIES.A, shouldStop: () => true })
   assert.equal(immediate.evaluations, 0)

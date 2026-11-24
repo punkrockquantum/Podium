@@ -294,12 +294,13 @@ function planDiff(startPlan, proposal) {
 function optimiserPanel(ctx, host) {
   const runner = createOptimiserRunner()
   const opt = { objective: "fastest2028", startFrom: "current", unlocked: new Set(), thorough: false, running: false, result: null, error: null }
-  let lastShared = null
+  let lastPlanKey = null
 
   const objectivePicker = el("div", { class: "segmented objective-picker", id: "optimiser-objective", role: "radiogroup", "aria-label": "Objective" },
     ...OBJECTIVE_ORDER.map((id) => el("button", { type: "button", class: "seg", role: "radio", dataset: { objective: id }, "aria-checked": String(id === opt.objective), "aria-pressed": String(id === opt.objective), title: `${OBJECTIVES[id].formula} · ${OBJECTIVES[id].sideCondition}`, onclick: () => { opt.objective = id; syncControls() } }, OBJECTIVES[id].label)))
+  const currentOption = el("option", { value: "current" }, "the current plan")
   const startPicker = el("select", { class: "select", id: "optimiser-start", "aria-label": "Start from", onchange: (e) => { opt.startFrom = e.target.value } },
-    el("option", { value: "current" }, "the current plan"),
+    currentOption,
     ...STRATEGY_ORDER.map((k) => el("option", { value: k }, `Strategy ${k} · ${nameOf(STRATEGIES[k])}`)))
   const unlockList = el("ul", { class: "unlock-list" }, ...LOCK_IDS.map(({ scope, id }) => {
     const box = el("input", { type: "checkbox", id: `unlock-${id}`, onchange: (e) => { if (e.target.checked) opt.unlocked.add(id); else opt.unlocked.delete(id) } })
@@ -348,16 +349,16 @@ function optimiserPanel(ctx, host) {
     opt.result = null
     syncControls()
     progress.hidden = false
-    progress.value = 0
+    progress.removeAttribute("value") // indeterminate until the first progress report
     progressText.textContent = "starting…"
     renderResult(state)
     const t0 = performance.now()
     try {
       const r = await runner.run({ start: sets, objective: opt.objective, locked, thorough: opt.thorough, seed: DEFAULTS.seed }, {
-        onProgress: ({ done, total, bestScore }) => {
-          progress.max = String(total)
-          progress.value = String(done)
-          progressText.textContent = `${fmt.num(done)} of ${fmt.num(total)} plans · best score ${Number.isFinite(bestScore) ? bestScore.toFixed(3) : "—"}`
+        onProgress: ({ done, fraction, bestScore }) => {
+          progress.max = "1"
+          progress.value = String(Number.isFinite(fraction) ? fraction : 0)
+          progressText.textContent = `${fmt.num(done)} plans · best score ${Number.isFinite(bestScore) ? bestScore.toFixed(3) : "—"}`
         },
       })
       const wallMs = performance.now() - t0
@@ -365,13 +366,15 @@ function optimiserPanel(ctx, host) {
       const result = evaluatePlan(proposal)
       const startResult = evaluatePlan(startPlan)
       opt.result = { raw: r, proposal, result, startPlan, startResult, startLabel: opt.startFrom === "current" ? state.plan.meta.name : `Strategy ${opt.startFrom}`, dropped, wallMs, mode: runner.mode, objective: opt.objective, diff: planDiff(startPlan, proposal) }
+      progress.max = "1"
+      progress.value = "1"
       progressText.textContent = `${fmt.num(r.evaluations)} plans in ${(wallMs / 1000).toFixed(1)} s (${runner.mode === "worker" ? "web worker" : "main thread"})${r.stopped ? " · stopped early" : ""}`
     } catch (err) {
       opt.error = err && err.message ? err.message : String(err)
       progressText.textContent = ""
     } finally {
       opt.running = false
-      progress.hidden = true
+      progress.hidden = !opt.result
       syncControls()
       renderResult(ctx.getState())
       host.dispatchEvent(new CustomEvent("optimiser-result", { bubbles: true }))
@@ -415,14 +418,21 @@ function optimiserPanel(ctx, host) {
       el("div", { class: "table-wrap" }, diffTable),
       el("div", { class: "actions-row" },
         el("button", { type: "button", class: "btn btn-primary", id: "optimiser-load", onclick: () => ctx.actions.loadPlan(proposal, "Optimiser proposal loaded", { route: "overview" }) }, "Load"),
-        el("button", { type: "button", class: "btn", id: "optimiser-save", onclick: () => ctx.actions.savePlan(proposal, `Optimiser proposal · ${OBJECTIVES[R.objective].label}`) }, "Save as scenario"),
+        el("button", { type: "button", class: "btn", id: "optimiser-save", onclick: () => ctx.actions.savePlan(proposal, `Optimiser proposal · ${OBJECTIVES[R.objective].label.replace(/:.*$/, "")}`) }, "Save as scenario"),
         el("button", { type: "button", class: "btn", id: "optimiser-copy", onclick: () => ctx.actions.copyLink(proposal) }, "Copy link")),
       ...notes.map((n) => el("p", { class: "muted small" }, n)))
   }
 
   function update(state) {
-    // the "start from" default follows the last loaded strategy; the panel itself keeps its own state
-    if (state.plan.meta.strategy && lastShared !== state.plan.meta.strategy) { opt.startFrom = state.plan.meta.strategy; startPicker.value = opt.startFrom; lastShared = state.plan.meta.strategy }
+    // "Start from" follows whatever is loaded: a strategy while the plan still is that strategy, else the plan
+    // itself (a preset, a saved plan, an edited strategy); the user's own pick holds until the plan changes
+    const key = JSON.stringify([state.plan.shared, state.plan.seasons, state.plan.timeline, state.plan.meta.name])
+    if (key !== lastPlanKey) {
+      lastPlanKey = key
+      const st = state.plan.meta.strategy && matchingStrategy(state.plan) === state.plan.meta.strategy ? state.plan.meta.strategy : "current"
+      if (!opt.running) { opt.startFrom = st; startPicker.value = st }
+    }
+    currentOption.textContent = `the current plan · ${state.plan.meta.name}`
     if (!opt.running && opt.result === null) renderResult(state)
   }
   update(ctx.getState())
