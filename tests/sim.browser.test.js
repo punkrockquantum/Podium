@@ -566,6 +566,8 @@ const SEGMENT_BOXES = (selector) => `[...document.querySelectorAll(${JSON.string
   const range = document.createRange(); range.selectNodeContents(n); const t = range.getBoundingClientRect(); const b = n.getBoundingClientRect()
   return { text: n.innerText.trim().replace(/\\s+/g, ' '), left: t.left, right: t.right, top: t.top, bottom: t.bottom, inside: t.left >= b.left - 0.5 && t.right <= b.right + 0.5 && t.top >= b.top - 0.5 && t.bottom <= b.bottom + 0.5 }
 })`
+/** The boxes of the visible elements matching `selector` (empty blocks, e.g. an unused tools slot, are skipped). */
+const RECTS = (selector) => `[...document.querySelectorAll(${JSON.stringify(selector)})].map((n) => { const r = n.getBoundingClientRect(); return { text: n.textContent.trim().slice(0, 40), left: r.left, right: r.right, top: r.top, bottom: r.bottom } }).filter((r) => r.right > r.left && r.bottom > r.top)`
 const apart = (a, b) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top
 /** Labels that share a row must not intersect: every pair of boxes is disjoint. */
 function assertDisjoint(boxes, label) {
@@ -579,7 +581,7 @@ function assertSegmentsLegible(segs, texts, label) {
   for (const s of segs) assert.equal(s.inside, true, `${label}: "${s.text}" stays inside its own segment`)
 }
 
-test("layout at 1440 and 1024: the strategy chart captions and the location segments keep to their own cells", { skip, timeout: 120_000 }, async () => {
+test("layout at 1440 and 1024: the strategy chart captions and the location segments keep to their own cells, the race title wraps", { skip, timeout: 120_000 }, async () => {
   const small = await launchChrome({ width: 1024, height: 768 })
   const LOCATIONS = ["Hinwil room", "Digital Realty Zurich", "Hybrid"]
   try {
@@ -601,6 +603,15 @@ test("layout at 1440 and 1024: the strategy chart captions and the location segm
       assertSegmentsLegible(await page.evaluate(SEGMENT_BOXES('[data-control="location"] .segmented .seg')), LOCATIONS, `${width}: facility location segments`)
       await go(page, "#/overview")
       assertSegmentsLegible(await page.evaluate(SEGMENT_BOXES("#quick-location .seg")), LOCATIONS, `${width}: overview location segments`)
+      // the legacy race page's title wraps instead of clipping, and the top bar's blocks stay apart
+      await page.goto(`${base}/race.html`)
+      await sleep(400)
+      const title = await page.evaluate("(() => { const n = document.querySelector('.station-title h1'); return { text: n.textContent, clipped: n.scrollWidth > n.clientWidth + 1 || n.scrollHeight > n.clientHeight + 1, lines: Math.round(n.getBoundingClientRect().height / (parseFloat(getComputedStyle(n).fontSize) * 1.2)) } })()")
+      assert.match(title.text, /Grand Prix · Circuit of the Americas$/)
+      assert.equal(title.clipped, false, `${width}: the race title is not clipped`)
+      assert.equal(title.lines, width === 1024 ? 2 : 1, `${width}: the race title runs to ${title.lines} line(s)`)
+      assertDisjoint(await page.evaluate(RECTS(".topbar > *")), `${width}: race top bar`)
+      assert.equal(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, `${width}: no horizontal overflow on /race.html`)
       assert.deepEqual(page.errors, [], `${width}: no JS errors`)
       await page.close()
     }
