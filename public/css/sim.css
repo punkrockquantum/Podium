@@ -107,7 +107,8 @@ h1, h2, h3, h4 { margin: 0; line-height: 1.15; }
 .slider-ticks { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: -4px; }
 .select { width: 100%; min-height: 38px; margin-top: 6px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel2); }
 .control .segmented { display: flex; width: 100%; margin-top: 6px; flex-wrap: wrap; }
-.segmented .seg { flex: 1; min-width: 60px; white-space: nowrap; }
+/* A label wider than its segment ("Digital Realty Zurich" at 1024 px) wraps onto a second line instead of running into the next segment */
+.segmented .seg { flex: 1; min-width: 60px; white-space: normal; line-height: 1.2; padding: 5px 10px; }
 .toggle { margin-top: 6px; display: inline-flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px 0 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel2); font-weight: 700; }
 .toggle-knob { width: 28px; height: 28px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
 .toggle[aria-checked="true"] .toggle-knob { background: var(--dr); transform: translateX(4px); }

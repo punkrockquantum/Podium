@@ -561,6 +561,11 @@ const CAPTION_BOXES = `[...document.querySelectorAll('#strategies-chart-wrap .ch
   const bars = [...document.querySelectorAll('#strategies-chart .chart-bar rect')].slice(i * 2, i * 2 + 2).map((r) => r.getBoundingClientRect())
   return { text: n.innerText.trim().replace(/\\s+/g, ' '), left: t.left, right: t.right, top: t.top, bottom: t.bottom, barsCentre: (bars[0].left + bars[1].right) / 2, clipped: n.scrollWidth > n.clientWidth + 1 || n.scrollHeight > n.clientHeight + 1 }
 })`
+/** The visible segments of a segmented control: the text box of each label (a Range) and whether it stays inside its own button. */
+const SEGMENT_BOXES = (selector) => `[...document.querySelectorAll(${JSON.stringify(selector)})].filter((n) => n.offsetParent !== null).map((n) => {
+  const range = document.createRange(); range.selectNodeContents(n); const t = range.getBoundingClientRect(); const b = n.getBoundingClientRect()
+  return { text: n.innerText.trim().replace(/\\s+/g, ' '), left: t.left, right: t.right, top: t.top, bottom: t.bottom, inside: t.left >= b.left - 0.5 && t.right <= b.right + 0.5 && t.top >= b.top - 0.5 && t.bottom <= b.bottom + 0.5 }
+})`
 const apart = (a, b) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top
 /** Labels that share a row must not intersect: every pair of boxes is disjoint. */
 function assertDisjoint(boxes, label) {
@@ -568,9 +573,15 @@ function assertDisjoint(boxes, label) {
     assert.ok(apart(boxes[i], boxes[j]), `${label}: "${boxes[i].text}" (${Math.round(boxes[i].left)}–${Math.round(boxes[i].right)}) runs into "${boxes[j].text}" (${Math.round(boxes[j].left)}–${Math.round(boxes[j].right)})`)
   }
 }
+function assertSegmentsLegible(segs, texts, label) {
+  assert.deepEqual(segs.map((s) => s.text), texts, `${label}: the three options`)
+  assertDisjoint(segs, label)
+  for (const s of segs) assert.equal(s.inside, true, `${label}: "${s.text}" stays inside its own segment`)
+}
 
-test("layout at 1440 and 1024: the strategy chart captions keep their own cells", { skip, timeout: 120_000 }, async () => {
+test("layout at 1440 and 1024: the strategy chart captions and the location segments keep to their own cells", { skip, timeout: 120_000 }, async () => {
   const small = await launchChrome({ width: 1024, height: 768 })
+  const LOCATIONS = ["Hinwil room", "Digital Realty Zurich", "Hybrid"]
   try {
     for (const [width, open] of [[1440, () => chrome.page()], [1024, () => small.page()]]) {
       const page = await open()
@@ -585,6 +596,11 @@ test("layout at 1440 and 1024: the strategy chart captions keep their own cells"
         assert.ok(c.right - c.left >= 60, `${width}: "${c.text}" is readable (${c.right - c.left}px wide)`)
       }
       assert.equal(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, `${width}: no horizontal overflow on #/strategies`)
+      // "Where the servers live" on the Facility view, and the same control on the Overview's decision card: a long label wraps inside its segment
+      await go(page, "#/facility")
+      assertSegmentsLegible(await page.evaluate(SEGMENT_BOXES('[data-control="location"] .segmented .seg')), LOCATIONS, `${width}: facility location segments`)
+      await go(page, "#/overview")
+      assertSegmentsLegible(await page.evaluate(SEGMENT_BOXES("#quick-location .seg")), LOCATIONS, `${width}: overview location segments`)
       assert.deepEqual(page.errors, [], `${width}: no JS errors`)
       await page.close()
     }
