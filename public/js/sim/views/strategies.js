@@ -26,6 +26,8 @@ const label = (id, v) => controlDisplay(id, v)
 const SEASONS = [2027, 2028]
 const letterOf = (key) => key
 const nameOf = (st) => st.name.replace(/^[A-C]\s*·\s*/, "")
+/** Chart captions at narrow widths: the letter and a short name; the full names stay on the cards. */
+const SHORT_NAME = { A: "Consolidate + de-risk", B: "Density + GPU 2028", C: "Hybrid cloud" }
 
 // ---------------------------------------------------------------------------------------------
 // Plan-level evaluation of a strategy, memoised on the three borrowed inputs
@@ -230,7 +232,7 @@ function compareTable(columns) {
 
 function chart(columns, proposal) {
   const W = 560
-  const H = 170
+  const H = 158
   const left = 44
   const groups = columns.filter((c) => c.key !== "today")
   const maxSec = Math.max(0.6, ...groups.flatMap((c) => SEASONS.map((y) => c.result.seasons[y].perf.sec)), proposal ? proposal.seasons[2028].perf.sec : 0) * 1.1
@@ -238,7 +240,7 @@ function chart(columns, proposal) {
   const ys = (v) => y0 - (v / maxSec) * 92
   const gw = (W - left - 20) / groups.length
   const capMax = Math.max(...groups.flatMap((c) => SEASONS.map((y) => c.result.seasons[y].money.capCharge)))
-  return svg("svg", { class: "strategies-chart", id: "strategies-chart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Seconds per lap vs Today per strategy and season, with the cost-cap charge as dots" },
+  const plot = svg("svg", { class: "strategies-chart", id: "strategies-chart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Seconds per lap vs Today per strategy and season, with the cost-cap charge as dots" },
     ...[0, 0.2, 0.4, 0.6].filter((v) => v <= maxSec).map((v) => svg("g", {}, svg("line", { x1: left, x2: W - 16, y1: ys(v), y2: ys(v), class: "chart-grid" }), svg("text", { x: left - 6, y: ys(v) + 4, "text-anchor": "end", class: "chart-axis" }, `+${v.toFixed(1)} s`))),
     ...groups.flatMap((c, i) => {
       const gx = left + i * gw + gw / 2
@@ -251,16 +253,20 @@ function chart(columns, proposal) {
             svg("text", { x: bx + 14, y: ys(v) - 4, "text-anchor": "middle", class: "chart-value" }, fmt.sec(v)),
             svg("text", { x: bx + 14, y: y0 + 13, "text-anchor": "middle", class: "chart-axis" }, String(y)))
         }),
-        svg("text", { x: gx, y: y0 + 28, "text-anchor": "middle", class: "chart-group" }, `${c.key} · ${nameOf(STRATEGIES[c.key])}`),
         ...SEASONS.map((y, j) => svg("g", { class: "chart-dot-group" },
-          svg("circle", { cx: gx - 30 + j * 60, cy: y0 + 40, r: 2.5 + 4 * (c.result.seasons[y].money.capCharge / capMax), class: "chart-dot" }),
-          svg("text", { x: gx - 22 + j * 60, y: y0 + 43, class: "chart-axis" }, fmt.chf(c.result.seasons[y].money.capCharge).replace("CHF ", "")))),
+          svg("circle", { cx: gx - 30 + j * 60, cy: y0 + 28, r: 2.5 + 4 * (c.result.seasons[y].money.capCharge / capMax), class: "chart-dot" }),
+          svg("text", { x: gx - 22 + j * 60, y: y0 + 31, class: "chart-axis" }, fmt.chf(c.result.seasons[y].money.capCharge).replace("CHF ", "")))),
       ]
     }),
-    svg("text", { x: left, y: y0 + 44, "text-anchor": "end", class: "chart-axis" }, "cap CHF"),
+    svg("text", { x: left, y: y0 + 32, "text-anchor": "end", class: "chart-axis" }, "cap CHF"),
     proposal ? svg("g", { class: "chart-proposal" },
       svg("line", { x1: left, x2: W - 16, y1: ys(proposal.seasons[2028].perf.sec), y2: ys(proposal.seasons[2028].perf.sec), class: "chart-dashed" }),
       svg("text", { x: W - 18, y: ys(proposal.seasons[2028].perf.sec) - 4, "text-anchor": "end", class: "chart-value" }, `optimiser best 2028 ${fmt.sec(proposal.seasons[2028].perf.sec)}`)) : null)
+  // The column captions are HTML cells under the plot (one per strategy, aligned with its bars) so they wrap instead of running together
+  const captions = el("div", { class: "chart-captions", style: { paddingLeft: `${(left / W) * 100}%`, paddingRight: `${(20 / W) * 100}%` } },
+    ...groups.map((c) => el("div", { class: "chart-caption", dataset: { strategy: c.key }, title: `${c.key} · ${nameOf(STRATEGIES[c.key])}` },
+      el("b", {}, c.key), " · ", el("span", { class: "caption-full" }, nameOf(STRATEGIES[c.key])), el("span", { class: "caption-short" }, SHORT_NAME[c.key] || nameOf(STRATEGIES[c.key])))))
+  return el("figure", { class: "chart-figure" }, plot, captions)
 }
 
 // ---------------------------------------------------------------------------------------------

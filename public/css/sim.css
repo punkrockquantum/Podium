@@ -674,10 +674,17 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .strategies-table th.s2027 { border-bottom: 2px solid var(--line); }
 .strategies-table th.s2028 { color: var(--info); border-bottom: 2px solid var(--info); }
 .chart-wrap { margin-top: 12px; }
+.chart-figure { margin: 0; max-width: 760px; }
 .strategies-chart { width: 100%; max-width: 760px; height: auto; display: block; }
+/* One caption cell per strategy, tiling the plot's three groups exactly (the row's padding mirrors the plot's axis and
+   right margin); each cell pads its text so neighbouring captions keep a gap instead of running together; the full
+   name wraps, and below 760 px the letter + short name takes its place. */
+.chart-captions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 2px; }
+.chart-caption { min-width: 0; padding: 0 10px; text-align: center; font-size: 13px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.chart-caption .caption-short { display: none; }
+@media (max-width: 760px) { .chart-caption .caption-full { display: none; } .chart-caption .caption-short { display: inline; } }
 .chart-grid { stroke: var(--line); stroke-width: 1; }
 .chart-axis { fill: var(--muted); font-size: 9.5px; }
-.chart-group { fill: var(--text); font-size: 10px; font-weight: 700; }
 .chart-value { fill: var(--text); font-size: 9.5px; font-weight: 700; }
 .chart-bar.s2027 rect { fill: var(--muted); opacity: 0.8; }
 .chart-bar.s2028 rect { fill: var(--info); }

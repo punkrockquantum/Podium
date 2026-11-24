@@ -555,6 +555,44 @@ test("Strategies: three plan-level cards, the side-by-side table, Load / edited 
   assert.deepEqual(page.errors, [], "no JS errors in the strategies flow")
 })
 
+/** The strategy chart's column captions: the text box of each (a Range over the cell), the centre of the bar group under it, and whether the cell clips. */
+const CAPTION_BOXES = `[...document.querySelectorAll('#strategies-chart-wrap .chart-caption')].map((n, i) => {
+  const range = document.createRange(); range.selectNodeContents(n); const t = range.getBoundingClientRect()
+  const bars = [...document.querySelectorAll('#strategies-chart .chart-bar rect')].slice(i * 2, i * 2 + 2).map((r) => r.getBoundingClientRect())
+  return { text: n.innerText.trim().replace(/\\s+/g, ' '), left: t.left, right: t.right, top: t.top, bottom: t.bottom, barsCentre: (bars[0].left + bars[1].right) / 2, clipped: n.scrollWidth > n.clientWidth + 1 || n.scrollHeight > n.clientHeight + 1 }
+})`
+const apart = (a, b) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top
+/** Labels that share a row must not intersect: every pair of boxes is disjoint. */
+function assertDisjoint(boxes, label) {
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    assert.ok(apart(boxes[i], boxes[j]), `${label}: "${boxes[i].text}" (${Math.round(boxes[i].left)}–${Math.round(boxes[i].right)}) runs into "${boxes[j].text}" (${Math.round(boxes[j].left)}–${Math.round(boxes[j].right)})`)
+  }
+}
+
+test("layout at 1440 and 1024: the strategy chart captions keep their own cells", { skip, timeout: 120_000 }, async () => {
+  const small = await launchChrome({ width: 1024, height: 768 })
+  try {
+    for (const [width, open] of [[1440, () => chrome.page()], [1024, () => small.page()]]) {
+      const page = await open()
+      await openFresh(page, "/sim.html#/strategies")
+      await page.waitFor("document.querySelectorAll('#strategies-chart .chart-bar').length === 6", 10_000, "the strategy chart")
+      const caps = await page.evaluate(CAPTION_BOXES)
+      assert.deepEqual(caps.map((c) => c.text), ["A · Consolidate and de-risk", "B · Density and the 2028 GPU step-up", "C · Cost-cap-optimised hybrid cloud"], `${width}: the chart captions carry the full names`)
+      assertDisjoint(caps, `${width}: chart captions`)
+      for (const c of caps) {
+        assert.equal(c.clipped, false, `${width}: "${c.text}" is not clipped`)
+        assert.ok(Math.abs((c.left + c.right) / 2 - c.barsCentre) < 6, `${width}: "${c.text}" is centred under its bars (${(c.left + c.right) / 2} vs ${c.barsCentre})`)
+        assert.ok(c.right - c.left >= 60, `${width}: "${c.text}" is readable (${c.right - c.left}px wide)`)
+      }
+      assert.equal(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, `${width}: no horizontal overflow on #/strategies`)
+      assert.deepEqual(page.errors, [], `${width}: no JS errors`)
+      await page.close()
+    }
+  } finally {
+    await small.close()
+  }
+})
+
 test("the planning tool, the business case and the legacy pages hold together at 1024×768", { skip, timeout: 120_000 }, async () => {
   const small = await launchChrome({ width: 1024, height: 768 })
   try {
