@@ -16,7 +16,7 @@ export function saView(ctx) {
   const risksCard = el("section", { class: "card", id: "sa-risks" })
   const checklistCard = el("section", { class: "card", id: "sa-checklist" })
   const briefCard = el("section", { class: "card", id: "sa-brief" })
-  const node = el("div", { class: "view view-sa" }, head, el("div", { class: "sa-grid" }, reqCard, servicesCard, risksCard, rolesCard, checklistCard, briefCard))
+  const node = el("div", { class: "view view-sa" }, head, el("div", { class: "sa-grid" }, reqCard, servicesCard, rolesCard, risksCard, checklistCard, briefCard))
 
   // The checklist is built once; notes persist per item
   const noted = el("span", { class: "badge level-info", id: "notes-count" })
@@ -50,19 +50,29 @@ export function saView(ctx) {
         stat("2028 IT load at the campus", `${Math.round(result.seasons[2028].sim.fac.drIT)} kW`, result.inputs[2028].location === "hinwil" ? "stays in Hinwil" : `${result.seasons[2028].sim.hw.racks} rack(s) · ${result.inputs[2028].cooling} · ${result.inputs[2028].redundancy.toUpperCase().replace("N1", "N+1")}`),
         stat("Suite ready by", result.timeline.seasons[2027].goLive ? fmtDate(result.timeline.seasons[2027].feasible) : "—", result.timeline.seasons[2027].goLive ? `cutover ${fmtDate(result.timeline.seasons[2027].goLive)}` : "no move in this plan"),
         stat("Open risks", String(risks.filter((k) => k.status !== "mitigated").length), `${risks.filter((k) => k.status === "triggered").length} triggered by the current plan`)))
-    const reqRow = (q, changed) => el("tr", { class: `${q.status === "ASSUMPTION" ? "status-assumption" : ""} ${changed ? "changed" : ""}` },
-      el("td", {}, q.area), el("td", {}, el("b", {}, q.label), el("div", { class: "muted small" }, q.detail)), el("td", {}, q.value), el("td", { class: "small" }, q.service || "—"), el("td", { class: "small" }, roleLabel(q.owner)), el("td", {}, badge(q.status === "VERIFIED" ? "ok" : q.status === "ASSUMPTION" ? "info" : "warn", q.status === "derived" ? "from plan" : q.status)))
+    // One row per requirement: the 2027 value, then what 2028 changes (highlighted) or "same"
+    const statusBadge = (q) => badge(q.status === "VERIFIED" ? "ok" : q.status === "ASSUMPTION" ? "info" : "warn", q.status === "derived" ? "from plan" : q.status)
+    const detailCell = (q) => el("td", {}, el("b", {}, q.label), el("div", { class: "muted small" }, q.detail))
+    const rows28 = new Map(r28.map((q) => [q.id, q]))
+    const changedCount = r28.filter((q) => q.changed).length
+    const onlyIn28 = r28.filter((q) => !r27.some((p) => p.id === q.id))
     clear(reqCard).append(
-      el("h3", {}, "Requirements derived from the plan"),
-      el("p", { class: "card-sub" }, "2027 first; 2028 lists only what changes (highlighted) or confirms the same requirement."),
-      el("h4", {}, "2027"),
+      el("div", { class: "card-head row" }, el("h3", {}, "Requirements derived from the plan"), badge(changedCount ? "warn" : "ok", changedCount ? `${changedCount} change${changedCount === 1 ? "" : "s"} in 2028` : "2028 same as 2027")),
+      el("p", { class: "card-sub" }, "Every line comes from the plan; the 2028 column shows only what differs from 2027 (highlighted)."),
       el("div", { class: "table-wrap" }, el("table", { class: "table req-table", id: "req-2027" },
-        el("thead", {}, el("tr", {}, el("th", {}, "Area"), el("th", {}, "Requirement"), el("th", {}, "Value"), el("th", {}, "Service"), el("th", {}, "Owner"), el("th", {}, "Status"))),
-        el("tbody", {}, ...r27.map((q) => reqRow(q, false))))),
-      el("h4", {}, "2028"),
-      el("div", { class: "table-wrap" }, el("table", { class: "table req-table", id: "req-2028" },
-        el("thead", {}, el("tr", {}, el("th", {}, "Area"), el("th", {}, "Requirement"), el("th", {}, "Value"), el("th", {}, "Service"), el("th", {}, "Owner"), el("th", {}, "Status"))),
-        el("tbody", {}, ...r28.map((q) => reqRow(q, q.changed))))))
+        el("thead", {}, el("tr", {}, el("th", {}, "Area"), el("th", {}, "Requirement"), el("th", {}, "2027"), el("th", {}, "2028"), el("th", {}, "Service"), el("th", {}, "Owner"), el("th", {}, "Status"))),
+        el("tbody", {}, ...r27.map((q) => {
+          const n = rows28.get(q.id)
+          const changed = Boolean(n && n.changed)
+          return el("tr", { class: `${q.status === "ASSUMPTION" ? "status-assumption" : ""} ${changed ? "changed" : ""}`, dataset: { req: q.id } },
+            el("td", {}, q.area), detailCell(q), el("td", { class: "y27" }, q.value),
+            el("td", { class: `y28 ${changed ? "diff" : "same"}` }, n ? (changed ? n.value : "same") : "—"),
+            el("td", { class: "small" }, q.service || "—"), el("td", { class: "small" }, roleLabel(q.owner)), el("td", {}, statusBadge(q)))
+        })))),
+      onlyIn28.length ? el("div", { class: "table-wrap", id: "req-2028" }, el("h4", {}, "Only in 2028"), el("table", { class: "table req-table" },
+        el("thead", {}, el("tr", {}, el("th", {}, "Area"), el("th", {}, "Requirement"), el("th", {}, "2028"), el("th", {}, "Service"), el("th", {}, "Owner"), el("th", {}, "Status"))),
+        el("tbody", {}, ...onlyIn28.map((q) => el("tr", { class: "changed", dataset: { req: q.id } }, el("td", {}, q.area), detailCell(q), el("td", { class: "y28 diff" }, q.value), el("td", { class: "small" }, q.service || "—"), el("td", { class: "small" }, roleLabel(q.owner)), el("td", {}, statusBadge(q)))))))
+        : el("p", { class: "muted small", id: "req-2028" }, `2028 adds no requirement of its own${changedCount ? `; ${changedCount} of the ${r27.length} above change value` : ""}.`))
     clear(servicesCard).append(
       el("h3", {}, "Service mapping"),
       el("p", { class: "card-sub" }, "Public Digital Realty service names, each keyed to a fact-pack row; carrier fibre and HPE are partner services."),

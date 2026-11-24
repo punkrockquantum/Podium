@@ -461,8 +461,14 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .sa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .sa-grid { grid-template-columns: 1fr; } }
 #sa-requirements, #sa-risks { grid-column: 1 / -1; }
+.sa-grid > .card { min-width: 0; }
 .req-table td { font-size: 13px; }
+.req-table th:nth-child(2) { min-width: 180px; }
+.req-table td.y27, .req-table td.y28 { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.req-table td.y28.same { color: var(--muted); font-style: italic; }
+.req-table td.y28.diff { color: var(--info); font-weight: 700; }
 .req-table tr.changed td { background: rgba(56, 189, 248, 0.08); }
+#sa-requirements h4 { margin: 14px 0 6px; }
 .fia-badge.src { background: rgba(74, 222, 128, 0.12); color: var(--dr); border-color: rgba(74, 222, 128, 0.4); margin-left: 6px; }
 .service-list, .role-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .service { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--panel2); border-left: 3px solid var(--dr); }
@@ -471,6 +477,7 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .service-name { font-weight: 700; }
 .role-item { display: grid; grid-template-columns: 90px 1fr auto; gap: 4px 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--panel2); }
 .role-item .small { grid-column: 2 / -1; }
+.role-item .badge { grid-column: 3; grid-row: 1; }
 .role-side { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .role-item.side-dr .role-side { color: var(--dr); }
 .risk-table td { font-size: 13px; }
@@ -497,7 +504,14 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
   .atp-band.odd { fill: #e5e7eb; } .atp-band.even { fill: #f3f4f6; }
   .atp-text, .marker-text, .task-weeks, .map-link-text, .map-inset-title { fill: #444 !important; }
   .map-inset { fill: #fff; }
-  .health-item, .service, .role-item, .check-item, .quick, .signby, .decision, .season-card, .role { background: #fff !important; border-color: #bbb !important; color: #111; break-inside: avoid; }
+  .health-item, .service, .role-item, .check-item, .quick, .signby, .decision, .season-card, .role, .footnote { background: #fff !important; border: 1px solid #bbb !important; color: #111; break-inside: avoid; }
+  .service { border-left: 3px solid #15803d !important; } .service.external { border-left-color: #0369a1 !important; }
+  .req-table td.y28.same { color: #666; } .req-table td.y28.diff { color: #0369a1; }
+  .req-table tr.changed td { background: #e0f2fe !important; }
+  .badge { border: 1px solid #999; background: none !important; color: #111 !important; }
+  .badge.level-bad { border-color: #a00; color: #a00 !important; } .badge.level-warn { border-color: #b45309; color: #b45309 !important; } .badge.level-ok { border-color: #15803d; color: #15803d !important; }
+  #sa-brief .actions-row { display: none !important; }
+  #sa-brief .card-sub::after { content: " Generated from the planning tool; figures are planning estimates (see the Model & sources page)."; }
   .linkish { color: #111; text-decoration: none; }
   .note { border-color: #bbb; color: #111; background: #fff; }
   .season-tag { border: 1px solid #999; background: none; color: #111; }
