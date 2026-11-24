@@ -434,6 +434,7 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .milestone.status-warn { fill: var(--amber); }
 .milestone.ms-stepup, .milestone.ms-cutover { fill: var(--info); }
 .milestone-text { fill: var(--text); font-size: 9.5px; font-weight: 600; }
+.milestone-leader { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 2; }
 .gantt.compact .milestone-text { font-size: 9px; }
 .gantt-legend { display: flex; gap: 8px 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
 .lg::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; background: #1a2233; border: 1px solid var(--line); }

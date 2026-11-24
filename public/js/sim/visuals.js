@@ -73,42 +73,66 @@ export function gantt(timeline, { compact = false, width = 960 } = {}) {
   const right = width - 12
   const { start, end } = timeline.range
   const xOf = (ms) => left + ((Math.min(Math.max(ms, start), end) - start) / (end - start)) * (right - left)
+  const charW = compact ? 5.6 : 6.2 // approximate glyph width at the label font size, for collision checks
+  const laneH = compact ? 13 : 14
   const bandTop = 18
   const bandH = 22
   const markerTop = bandTop + bandH + 4
+  // Marker labels (tests, Round 1, GPU legality, today) go into lanes so they never overlap
+  const markerLabels = timeline.markers
+    .filter((m) => !compact || m.kind !== "test")
+    .map((m) => ({ ...m, x: xOf(m.date), text: compact ? (m.kind === "race" ? "R1" : m.kind === "rule" ? "GPU" : m.kind === "today" ? "Today" : m.label) : m.label }))
+    .sort((a, b) => a.x - b.x)
+  const markerLanes = placeInLanes(markerLabels.map((m) => ({ x: m.x + 3, w: m.text.length * charW })), compact ? 2 : 3)
+  const markerLaneCount = Math.max(1, ...markerLanes.map((l) => l + 1))
   const rows = compact ? [] : timeline.tasks
   const rowH = 24
-  const rowsTop = markerTop + 20
+  const rowsTop = markerTop + 6 + markerLaneCount * laneH
   const msTop = rowsTop + rows.length * rowH + (rows.length ? 10 : 0)
-  const height = msTop + 44
+  // Milestone labels likewise; a label near the right edge flips to the left of its diamond
+  const onChart = timeline.milestones.filter((m) => !m.offChart && m.date >= start && m.date <= end)
+  const msLabels = onChart.map((m) => {
+    const x = xOf(m.date)
+    const text = compact ? shortMilestone(m) : `${m.label} · ${fmtDate(m.date)}`
+    const w = text.length * charW
+    const flip = x + 4 + w > right
+    return { m, x, text, w, flip, x0: flip ? x - 4 - w : x + 4 }
+  }).sort((a, b) => a.x0 - b.x0)
+  const msLanes = placeInLanes(msLabels.map((l) => ({ x: l.x0, w: l.w })), compact ? 3 : 4)
+  const msLaneCount = Math.max(1, ...msLanes.map((l) => l + 1))
+  const height = msTop + 22 + msLaneCount * laneH + 8
   const node = svg("svg", { viewBox: `0 0 ${width} ${height}`, class: `gantt ${compact ? "compact" : ""}`, role: "img", "aria-label": compact ? "Deployment timeline: FIA periods and the plan's milestones" : "Deployment Gantt chart: FIA periods, lead-time tasks and milestones" })
 
-  // Year labels and ATP bands
+  // ATP bands and year lines
   for (const atp of timeline.atps) {
     const x1 = xOf(atp.start)
     const x2 = xOf(atp.end)
     node.append(svg("rect", { class: `atp-band ${atp.index % 2 ? "odd" : "even"}`, x: x1.toFixed(1), y: bandTop, width: Math.max(0, x2 - x1).toFixed(1), height: bandH }))
     if (x2 - x1 > 34) node.append(svg("text", { class: "atp-text", x: ((x1 + x2) / 2).toFixed(1), y: bandTop + 15, "text-anchor": "middle" }, compact ? `P${atp.index}` : `ATP ${atp.index}`))
   }
+  const yearX = {}
   for (const y of [2027, 2028]) {
     const x = xOf(Date.UTC(y, 0, 1))
+    yearX[y] = x
     node.append(svg("line", { class: "year-line", x1: x, y1: 4, x2: x, y2: height - 4 }))
     node.append(svg("text", { class: "year-text", x: x + 4, y: 12 }, String(y)))
   }
-  node.append(svg("text", { class: "year-text", x: left, y: 12 }, "Nov 2026"))
+  if (yearX[2027] - left > 60) node.append(svg("text", { class: "year-text", x: left, y: 12 }, "Nov 2026"))
   // Shutdowns
   for (const w of timeline.windows) {
     const x1 = xOf(w.start)
     const x2 = xOf(w.end)
     if (x2 <= x1) continue
-    node.append(svg("rect", { class: `shutdown ${w.kind}`, x: x1.toFixed(1), y: bandTop, width: Math.max(2, x2 - x1).toFixed(1), height: compact ? bandH : height - bandTop - 24 }))
+    node.append(svg("rect", { class: `shutdown ${w.kind}`, x: x1.toFixed(1), y: bandTop, width: Math.max(2, x2 - x1).toFixed(1), height: compact ? bandH : msTop - bandTop }))
   }
-  // Markers: tests, Round 1, GPU legality, today
+  // Markers
   for (const m of timeline.markers) {
     const x = xOf(m.date)
-    node.append(svg("line", { class: `marker-line ${m.kind}`, x1: x, y1: markerTop, x2: x, y2: compact ? height - 24 : height - 24 }))
-    if (!compact || m.kind !== "test") node.append(svg("text", { class: `marker-text ${m.kind}`, x: x + 3, y: markerTop + 10 }, compact ? (m.kind === "race" ? "R1" : m.kind === "rule" ? "GPU" : m.kind === "today" ? "Today" : m.label) : m.label))
+    node.append(svg("line", { class: `marker-line ${m.kind}`, x1: x, y1: markerTop, x2: x, y2: msTop + 2 }))
   }
+  markerLabels.forEach((m, i) => {
+    node.append(svg("text", { class: `marker-text ${m.kind}`, x: m.x + 3, y: markerTop + 10 + markerLanes[i] * laneH }, m.text))
+  })
   // Tasks
   rows.forEach((t, i) => {
     const y = rowsTop + i * rowH
@@ -119,16 +143,29 @@ export function gantt(timeline, { compact = false, width = 960 } = {}) {
     node.append(svg("text", { class: "task-weeks", x: (x2 + 4).toFixed(1), y: y + 15 }, `${t.weeks} wk · ${OWNER_LABEL[t.owner] || t.owner}`))
   })
   // Milestones
-  const onChart = timeline.milestones.filter((m) => !m.offChart && m.date >= start && m.date <= end)
-  onChart.forEach((m, i) => {
-    const x = xOf(m.date)
+  // Diamonds sit on one row; every label hangs below it in its lane, joined by a short leader
+  msLabels.forEach((l, i) => {
     const y = msTop + 8
-    node.append(svg("path", { class: `milestone status-${m.status} ms-${m.id}`, d: `M ${x} ${y - 7} L ${x + 7} ${y} L ${x} ${y + 7} L ${x - 7} ${y} Z` }))
-    const label = compact ? shortMilestone(m) : `${m.label} · ${fmtDate(m.date)}`
-    const flip = x > right - 140
-    node.append(svg("text", { class: "milestone-text", x: flip ? x - 10 : x + 10, y: y + 4 + (i % 2) * 14, "text-anchor": flip ? "end" : "start" }, label))
+    const labelY = y + 20 + msLanes[i] * laneH
+    node.append(svg("path", { class: `milestone status-${l.m.status} ms-${l.m.id}`, d: `M ${l.x} ${y - 7} L ${l.x + 7} ${y} L ${l.x} ${y + 7} L ${l.x - 7} ${y} Z` }))
+    node.append(svg("line", { class: "milestone-leader", x1: l.x, y1: y + 7, x2: l.x, y2: labelY - 8 }))
+    node.append(svg("text", { class: "milestone-text", x: l.flip ? l.x - 4 : l.x + 4, y: labelY, "text-anchor": l.flip ? "end" : "start" }, l.text))
   })
   return node
+}
+
+/**
+ * Greedy lane assignment for horizontal labels: each label takes the first lane where it does not overlap the
+ * label already there; beyond `maxLanes` the lanes wrap (rare, and still readable). Returns a lane per label.
+ */
+function placeInLanes(boxes, maxLanes) {
+  const laneRight = []
+  return boxes.map(({ x, w }) => {
+    let lane = laneRight.findIndex((r) => x >= r + 6)
+    if (lane === -1) lane = laneRight.length < maxLanes ? laneRight.length : laneRight.indexOf(Math.min(...laneRight))
+    laneRight[lane] = x + w
+    return lane
+  })
 }
 
 const shortMilestone = (m) => ({ contract: "Contract", cutover: "Cutover", declaration: "Declare", "stepup-order": "Order step-up", stepup: "Step-up", declaration28: "Declare", refresh: "Refresh" }[m.id] || m.label) + ` ${fmtDate(m.date, { year: false })}`
