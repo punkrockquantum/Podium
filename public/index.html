@@ -15,23 +15,32 @@
   <main class="home">
     <section class="home-tables">
       <h1>Pick your table</h1>
-      <p class="muted">Four tables, one Audi F1 decision each: where the 2027 estate lives, how it connects, what to buy and how big the CFD cluster can be. Tap the table you are sitting at. Nothing to set up: the game is open.</p>
+      <p class="muted">One customer, the Audi F1 Team, plays the four tables: where the 2027 estate lives, how it connects, what to buy and how big the CFD cluster can be. Tap the table you are sitting at. Nothing to set up: the game is open and the Audi F1 Team is already in it.</p>
       <div class="tiles" id="stations"></div>
     </section>
     <section>
       <h2>How to play</h2>
       <ol class="home-how" id="howToPlay">
-        <li><b>Add your team:</b> type a name, tap once. At every other table, tap your team in the list.</li>
-        <li><b>Brief:</b> read it together. It holds every number you need.</li>
+        <li><b>Brief:</b> each table opens on its brief. Read it together: it holds every number you need.</li>
         <li><b>Tune:</b> three dials. Each choice locks the moment you tap it, so decide first.</li>
         <li><b>Pitch:</b> Call the Solutions Architect. Approved tables find seconds per lap for the race.</li>
+        <li><b>Race:</b> the Audi F1 Team's 2027 plan against today's Hinwil setup, 56 laps at Austin, then one readout.</li>
       </ol>
+    </section>
+    <section class="home-roles" aria-label="Who is in the room">
+      <h2>Who is in the room</h2>
+      <div class="roles" id="roles">
+        <button class="role-button" data-role="table"><b>The customer's table</b><span>Four iPads, one per table: brief, three one-tap locks, then call the SA.</span></button>
+        <button class="role-button" data-role="architect"><b>Solutions Architects</b><span>One per table, on the host page with the host PIN: hear the pitch, approve or reject.</span></button>
+        <button class="role-button" data-role="host"><b>Session host</b><span>Host controls: the optional timer, the four-table grid, the race and the restart.</span></button>
+        <button class="role-button" data-role="projector"><b>Projector</b><span>The lap-time ladder, the 56-lap race and the customer's readout.</span></button>
+      </div>
+      <p class="small muted">Tap a role for its full instructions.</p>
     </section>
     <nav class="home-links" aria-label="Run the room">
       <a href="/race.html" id="projectorLink">Projector</a>
       <a href="/host.html" id="hostLink">Host controls and Solutions Architects</a>
       <a href="/case.html" id="caseLink">Business case: Hinwil vs the Zurich campus</a>
-      <button class="btn small-btn" data-role="team">Full instructions</button>
     </nav>
   </main>
   <script>

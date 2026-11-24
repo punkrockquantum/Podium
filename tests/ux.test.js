@@ -11,7 +11,7 @@ import { DEFAULT_PINS } from "../server.mjs"
 const root = new URL("../", import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), "utf8")
 const publicFiles = () => [
-  ...readdirSync(new URL("public/js/", root)).map((f) => `public/js/${f}`),
+  ...readdirSync(new URL("public/js/", root)).filter((f) => f.endsWith(".js")).map((f) => `public/js/${f}`),
   ...readdirSync(new URL("public/", root)).filter((f) => f.endsWith(".html")).map((f) => `public/${f}`),
   "public/css/app.css", "server.mjs", "README.md",
 ]
