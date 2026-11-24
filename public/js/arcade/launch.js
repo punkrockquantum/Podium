@@ -49,6 +49,7 @@ export function normalizeCar(raw) {
   }
   if (Array.isArray(raw.drivers)) spec.drivers = raw.drivers.slice(0, 4).map((d) => ({ name: text(d?.name, 32), seconds: num(d?.seconds, 0) })).filter((d) => d.name)
   if (typeof raw.id === "string") spec.id = text(raw.id, 16)
+  for (const key of Object.keys(spec)) if (spec[key] === undefined) delete spec[key]
   return spec
 }
 

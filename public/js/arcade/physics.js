@@ -191,7 +191,8 @@ export function stepCar(car, input, track, dt = DT, t = 0, rng = null) {
     if (vf > 0) vf = 0
   } else {
     const power = throttle * P.accel * (glitching ? P.glitchPower : 1) * (car.onGrass ? BASE.grassPower : 1)
-    const envelope = Math.max(0, 1 - (Math.max(vf, 0) / maxSpeed) ** 2)
+    /* Negative above the cap: drag wins and a car coming off the boost eases back to its top speed. */
+    const envelope = 1 - (Math.max(vf, 0) / maxSpeed) ** 2
     const kick = car.boosting && !car.onGrass && vf < maxSpeed ? P.boostAccel * (glitching ? P.glitchPower : 1) : 0
     const a = power * envelope + kick - brake * P.brake - resist
     vf += a * dt
