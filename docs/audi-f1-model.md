@@ -125,15 +125,15 @@ strategy points from section 4. The lap-time ladder shows the P5–P11 rungs aro
 
 "Today's setup" is the Hinwil room as it is, carried into the selected season: 12 nodes at 3.7 GHz on 200G Ethernet
 and NAS storage, air cooling, N redundancy, a five-year-old fleet, one carrier circuit to the paddock. In 2027 it is
-≈ 95 kW short of the estate; in 2028 ≈ 480 kW short, which is why the 2028 deltas are large.
+≈ 94 kW short of the estate; in 2028 ≈ 479 kW short, which is why the 2028 deltas are large.
 
 ## 7. Presets (headline at 60 % confidence, P8)
 
 | Preset | Season | Effective MAUh / ATP | Seconds per lap vs Today | Cost-cap charge Δ | Notes |
 |---|---|---|---|---|---|
 | Today: Hinwil on-prem | 2027 | 3.84 | 0 | 0 | 99 % of 6.3 MAUh used; room 94 kW short, NAS-starved, N redundancy |
-| Digital Realty Zurich 2027 | 2027 | 6.15 | ≈ +0.13 s | ≈ +CHF 1.1 M | 12 nodes, InfiniBand NDR, parallel storage, rear-door rows, N+1, two fibre routes, edge |
-| Digital Realty + HPE GreenLake 2028 | 2028 | 7.21 | ≈ +0.36 s | ≈ +CHF 2.3 M | 8 nodes at 3.0 GHz + 2 solver GPUs (6 unrestricted), Slingshot, flash, direct liquid, 2N, expansion right |
+| Digital Realty Zurich 2027 | 2027 | 6.15 | ≈ +0.14 s (P8 → P7) | ≈ +CHF 0.95 M | 12 nodes, InfiniBand NDR, parallel storage, rear-door rows, N+1, two fibre routes, edge |
+| Digital Realty + HPE GreenLake 2028 | 2028 | 7.21 | ≈ +0.39 s (P8 → P5) | ≈ +CHF 1.4 M | 8 nodes at 3.0 GHz + 2 solver GPUs (6 unrestricted), Slingshot, flash, direct liquid, 2N, expansion right |
 
 The headline numbers move with every slider; `npm test` pins their direction (monotonicity) and their order, not the
 decimals.
