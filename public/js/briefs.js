@@ -116,7 +116,7 @@ export const BRIEFS = {
   dc: {
     title: "Datacenter & Power brief",
     situation: [
-      `Audi F1's 2027 IT estate needs about ${kw} kW: CFD, simulators, design and Mission Control [B-a]. Today it lives in the Hinwil data room: about ${F.room.capacityKW} kW on one utility feed at a PUE near ${F.room.pue} [A-a, A-b]. In 2028 the Hinwil load nearly doubles to ${F.load.it2028KW} kW as GPUs join the solver [B-b]. Electricity counts in the cost cap [C3].`,
+      `Audi F1's 2027 IT estate needs about ${kw} kW: CFD, simulators, design and Mission Control [B-a]. Today it lives in the Hinwil data room: about ${F.room.capacityKW} kW on one feed at a PUE near ${F.room.pue} [A-a, A-b]. In 2028 the Hinwil load nearly doubles to ${F.load.it2028KW} kW as GPUs join the solver [B-b]. Electricity counts in the cost cap [C3].`,
     ],
     wants: [
       "Power and cooling for 100% of the 2027 IT load.",
@@ -130,24 +130,24 @@ export const BRIEFS = {
       `Yearly power bill ≈ IT kW × PUE × price per kW a year: about ${Math.round(F.tariffs.hinwilCHFPerKWh * 100)} Rp per kWh on EKZ in Hinwil, ${Math.round(F.tariffs.campusCHFPerKWh * 100)} Rp on ewz at the campus [D2, D3, D-a, D-b].`,
     ],
     decisions: [
-      d("Where the 2027 cluster lives", "The site sets the power price, the supply, the backup and the 2028 headroom.", [
+      d("Where the 2027 cluster lives", "The site sets the power price, supply, backup and 2028 headroom.", [
         `Hinwil data room (today): ${chf(300_000)} to patch up, no fee, power ${chfFull(kwYearCHF(F.tariffs.hinwilCHFPerKWh))} per kW a year, a ${F.room.capacityKW} kW supply, PUE +0.15, single feed.`,
         `Zurich campus, ${F.offer.committedKW} kW: ${chf(F.offer.fitOutCHF + F.offer.migrationCHF)} fit-out and migration, ${chfFull(F.offer.feeCHFPerKWMonth)} per kW a month, power ${chfFull(kwYearCHF(F.tariffs.campusCHFPerKWh))} per kW a year, 2N power, N+1 cooling, a hard 500 kW envelope, no expansion right [D-d].`,
-        `Remote low-cost region: ${chf(900_000)} to fit out, ${chfFull(110)} per kW a month, power ${chfFull(kwYearCHF(F.tariffs.remoteCHFPerKWh))} per kW a year, a 2,000 kW supply, PUE −0.05, single grid feed, 900 km away.`,
+        `Remote low-cost region: ${chf(900_000)} to fit out, ${chfFull(110)} per kW a month, power ${chfFull(kwYearCHF(F.tariffs.remoteCHFPerKWh))} per kW a year, a 2,000 kW supply, PUE −0.05, single feed, 900 km away.`,
       ], "Cheap power tempts, but only the campus has the backup Audi F1 requires and 2028 headroom."),
       d("Cooling", "How the heat leaves the racks: each option cools a fixed amount and sets the PUE.", [
         "Air: free, cools 300 kW, PUE 1.45.",
         `Rear-door water: ${chf(F.offer.rearDoorCHF)}, cools 420 kW, PUE 1.28.`,
-        `Direct-to-chip liquid: ${chf(F.offer.liquidLoopCHF)}, cools 1,000 kW, PUE 1.12, 2028 GPU-ready [D9].`,
+        `Direct-to-chip liquid: ${chf(F.offer.liquidLoopCHF)}, cools all ${F.offer.committedKW} kW on offer (plant sized well beyond it), PUE 1.12, 2028 GPU-ready [D9].`,
       ], "Better cooling costs more up front but cuts the yearly power bill."),
-      d("Power setting", "How hard the chips run: it changes the kW the site must power and cool.", [
+      d("Power setting", "How hard the chips run: it changes the kW to power and cool.", [
         `Capped at 85%: ${Math.round(kw * 0.85)} kW, about 4% slower.`,
         `Standard: ${kw} kW.`,
         `Max boost: ${Math.round(kw * 1.1)} kW, about 5% faster.`,
       ], "Running harder needs more cooling and costs more every year."),
     ],
     provider: [
-      `A ${F.offer.committedKW} kW commitment in the Zurich campus buys 2N power, N+1 cooling and liquid-ready rows for a monthly fee instead of a ${chf(F.room.upgradeCapexCHF, 0)} building project in Hinwil [A-e], with the 2028 GPU step-up inside it and waste heat to district heating [D5].`,
+      `A ${F.offer.committedKW} kW commitment in the Zurich campus buys 2N power, N+1 cooling and liquid-ready rows for a monthly fee instead of a ${chf(F.room.upgradeCapexCHF, 0)} Hinwil building project [A-e], with the 2028 GPU step-up inside it and waste heat to district heating [D5].`,
       "Power is metered per rack at the ewz tariff: a power cap is a lower bill and cost-cap charge.",
     ],
     words: [
