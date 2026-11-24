@@ -1,17 +1,24 @@
 /**
- * The tuning model: from a table's three dials to its gauges, cap bars, FIA chips and FIT score.
+ * The tuning model: from a table's three dials to its gauges, cap bars, rule chips and FIT score.
  * Pure and deterministic; the iPads, the host, the server, the race and the tests share it, so the
  * board a team sees is exactly the board the SA approves and the race uses.
  *
  * FIT (0–100): every target in its zone and inside every cap scores 80–100 (more spare budget,
- * higher FIT). Otherwise FIT is 70 × the mean closeness to each target. Any cap or FIA breach caps
- * FIT at 40, so an over-cap board can never score high.
+ * higher FIT). Otherwise FIT is 70 × the mean closeness to each target. Any cap, FIA-rule or
+ * Audi F1 requirement breach caps FIT at 40, so an over-cap board can never score high.
+ *
+ * Money is in Swiss francs. The two money lines per table are the 2027 capital envelope (one-off
+ * cash) and the yearly cost-cap charge: operating cost plus straight-line depreciation of anything
+ * bought, which is how purchased kit reaches the FIA cost cap (Financial Regulations D6.1.1.k).
  */
 import * as C from "./catalog.js"
+import { FIGURES as F, chf } from "./customer.js"
 
 const clamp = (value, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, value))
-export const millions = (value) => `$${(value / 1e6).toFixed(1)}M`
-const money = (value) => (Math.abs(value) >= 1e6 ? millions(value) : `$${Math.round(value / 1e3)}k`)
+export const millions = (value) => `CHF ${(value / 1e6).toFixed(1)}M`
+const money = (value) => chf(value)
+/** Straight-line depreciation, zero residual value (IAS 16 as the FIA requires). */
+const depreciation = (price, years) => price / years
 
 export const FIT_ZONE = 80
 export const FIT_BREACH_MAX = 40
@@ -34,18 +41,22 @@ export const pickedOption = (decisionId, choices) => {
   return d.options.find((o) => o.id === choices?.[decisionId]) || d.options.find((o) => o.id === d.today)
 }
 
-/** One table's raw physics: target values, money, power and FIA rules broken. */
+/** A breach chip from an option that carries a rule: FIA article or Audi F1 requirement. */
+const ruleOf = (option, dial) => ({ rule: option.rule, label: option.ruleLabel || `FIA ${option.rule}`, text: option.ruleText, dial })
+
+/** One table's raw physics: target values, money, power and the rules or requirements broken. */
 const PHYSICS = {
   network(o) {
     const link = o("link")
     const path = o("path")
     const garage = o("garage")
-    const fia = [link, garage].filter((x) => x.fia)
+    const broken = [["link", link], ["garage", garage]].filter(([, x]) => x.rule)
+    const capex = link.capex + path.capex + garage.capex
     return {
-      values: { latency: path.ms + garage.ms, availability: link.avail, fia: fia.length === 0 },
-      capex: link.capex + path.capex + garage.capex,
-      opex: link.opex + path.opex + garage.opex,
-      fia: fia.map((x) => ({ rule: x.fia, text: x.fiaText, dial: C.DECISIONS.find((d) => d.options.includes(x)).id })),
+      values: { latency: path.ms + garage.ms, availability: link.avail, fia: broken.length === 0 },
+      capex,
+      opex: link.opex + path.opex + garage.opex + depreciation(capex, F.fia.depreciationYearsIT),
+      fia: broken.map(([dial, x]) => ruleOf(x, dial)),
       notes: [],
     }
   },
@@ -56,10 +67,11 @@ const PHYSICS = {
     const support = o("support")
     const price = vendor.price
     const supportRate = pay.id === "aas" ? support.aasRate : support.rate
+    const yearly = pay.id === "buy" ? depreciation(price, F.fia.depreciationYearsIT) : price * pay.rate
     return {
       values: { perf: vendor.perf, fix: support.hours, lead: pay.id === "aas" && vendor.aasLead ? vendor.aasLead : vendor.lead },
       capex: pay.id === "buy" ? price : 0,
-      opex: price * (pay.rate + supportRate),
+      opex: yearly + price * supportRate,
       fia: [],
       notes: pay.id !== chosen.id ? [`${vendor.name} has no as-a-service programme: this is priced as a lease.`] : [],
       payment: pay.id,
@@ -72,16 +84,19 @@ const PHYSICS = {
     const station = C.byId(C.STATIONS, "dc")
     const need = station.need * plan.needMult
     const pue = Math.round((cool.pue + site.pueAdd) * 100) / 100
-    const delivered = Math.min(cool.coolKW, site.siteKW / pue)
+    const delivered = Math.min(cool.coolKW, site.siteKW)
     const facilityKW = need * pue
+    const capex = site.capex + cool.capex
     return {
       values: { capacity: (delivered / need) * 100, pue, nplus1: site.nplus1 },
-      capex: site.capex + cool.capex,
-      opex: facilityKW * site.kwPrice,
-      power: { name: "Facility power vs site supply", used: facilityKW, cap: site.siteKW, unit: "kW" },
-      fia: site.fia ? [{ rule: site.fia, text: site.fiaText, dial: "location" }] : [],
-      notes: [],
+      capex,
+      opex: site.fee + facilityKW * site.kwPrice + depreciation(capex, site.plantYears),
+      power: { name: site.id === "colo" ? `IT load vs the ${site.siteKW} kW commitment` : `IT load vs the site's ${site.siteKW} kW`, used: need, cap: site.siteKW, unit: "kW" },
+      fia: [],
+      notes: site.note ? [site.note] : [],
       need,
+      facilityKW,
+      headroom2028: (site.expansionKW || site.siteKW) - F.load.it2028KW,
       speed: plan.speed,
     }
   },
@@ -94,12 +109,16 @@ const PHYSICS = {
     const usage = nodes * chips.capShare
     const feed = Math.min(1, storage.bandwidth / (nodes * chips.io)) * 100
     const itKW = nodes * chips.nodeKW + storage.kw
+    const capex = nodes * chips.nodePrice + storage.price
+    const fia = []
+    if (chips.rule) fia.push(ruleOf(chips, "chips"))
+    if (usage > 100) fia.push({ rule: "F4.6.1", label: "FIA F4.6.1", text: `FIA F4.6.1: the solver may use at most ${F.fia.mauhAllowance} MAUh per period (${F.fia.atrPercent}% of the 6 MAUh baseline); over-use cuts the next period's limits (F4.6.10).`, dial: "size" })
     return {
       values: { cycles: nodes * chips.cycles * (feed / 100), usage, feed },
-      capex: nodes * chips.nodePrice + storage.price,
-      opex: nodes * chips.nodeOpex + storage.opex,
-      power: { name: "Cluster power vs the 400 kW hall", used: itKW, cap: station.hallKW, unit: "kW" },
-      fia: usage > 100 ? [{ rule: "2.4", text: "FIA 2.4: aero CFD must stay inside the compute allowance.", dial: "size" }] : [],
+      capex,
+      opex: nodes * chips.nodeOpex + storage.opex + depreciation(capex, F.fia.depreciationYearsIT),
+      power: { name: `Cluster power vs the ${station.hallKW} kW CFD allocation`, used: itKW, cap: station.hallKW, unit: "kW" },
+      fia,
       notes: [],
     }
   },
@@ -125,14 +144,14 @@ function scoreCore(stationId, choices, budgetId) {
     return { id: t.id, name: t.name, kind: t.kind, target: t.target, lo: t.lo, hi: t.hi, zone: t.zone, value, display: t.fmt(value), ok: close >= 1, closeness: close }
   })
   const caps = [
-    { id: "capex", name: "CapEx", used: phys.capex, cap: station.caps.capex * mult, unit: "$" },
-    { id: "opex", name: "Yearly OpEx", used: phys.opex, cap: station.caps.opex * mult, unit: "$" },
+    { id: "capex", name: "2027 capital envelope", used: phys.capex, cap: station.caps.capex * mult, unit: "CHF" },
+    { id: "opex", name: "Yearly cost-cap charge", used: phys.opex, cap: station.caps.opex * mult, unit: "CHF" },
   ]
   if (phys.power) caps.push({ id: "power", name: phys.power.name, used: phys.power.used, cap: phys.power.cap, unit: "kW" })
   for (const c of caps) c.over = Math.max(0, c.used - c.cap)
   const met = targets.every((t) => t.ok)
   const breached = caps.some((c) => c.over > 0) || phys.fia.length > 0
-  const moneyCaps = caps.filter((c) => c.unit === "$")
+  const moneyCaps = caps.filter((c) => c.unit === "CHF")
   const headroom = moneyCaps.reduce((sum, c) => sum + clamp((c.cap - c.used) / c.cap / FULL_HEADROOM), 0) / moneyCaps.length
   let fit = met ? FIT_ZONE + (100 - FIT_ZONE) * headroom : FIT_OFF_MAX * (targets.reduce((sum, t) => sum + t.closeness, 0) / targets.length)
   if (breached) fit = Math.min(fit, FIT_BREACH_MAX)
@@ -174,8 +193,8 @@ export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
     const out = { ...c, today: today.caps[i].used, display: capText(c) }
     if (c.over > 0) {
       const fix = fixFor(stationId, full, budgetId, (alt) => alt.caps[i].over <= 0)
-      const what = c.id === "capex" ? `Over the CapEx envelope by ${money(c.over)}: the FIA would reject this budget.`
-        : c.id === "opex" ? `Over the yearly OpEx allowance by ${money(c.over)}: a breach of the $215M cost cap.`
+      const what = c.id === "capex" ? `Over the 2027 capital envelope by ${money(c.over)}: the finance board would not sign it.`
+        : c.id === "opex" ? `Over the yearly cost-cap charge line by ${money(c.over)}: it pushes Relevant Costs towards the USD 215M cap (FIA D4.1).`
           : `Draws ${Math.round(c.used)} kW, more than the ${Math.round(c.cap)} kW available: it would trip and throttle.`
       out.consequence = `${what}${fix ? ` ${capitalise(fix.as)} would bring it back.` : ""}`
       out.fix = fix
@@ -183,8 +202,8 @@ export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
     return out
   })
   const breaches = [
-    ...caps.filter((c) => c.over > 0).map((c) => ({ kind: "cap", id: c.id, title: c.id === "power" ? "Over the power limit" : `Over the ${c.id === "capex" ? "CapEx" : "OpEx"} cap`, text: c.consequence })),
-    ...core.phys.fia.map((f) => ({ kind: "fia", id: `fia-${f.rule}`, rule: f.rule, dial: f.dial, title: `FIA ${f.rule}`, text: f.text })),
+    ...caps.filter((c) => c.over > 0).map((c) => ({ kind: "cap", id: c.id, title: c.id === "power" ? "Over the power limit" : `Over the ${c.id === "capex" ? "capital envelope" : "cost-cap charge line"}`, text: c.consequence })),
+    ...core.phys.fia.map((f) => ({ kind: "fia", id: `fia-${f.rule}`, rule: f.rule, label: f.label, dial: f.dial, title: f.label, text: f.text })),
   ]
   const status = core.inZone ? "zone" : breaches.some((b) => b.kind === "cap") ? "over" : breaches.length ? "fia" : "off"
   const metCount = targets.filter((t) => t.ok).length
@@ -192,9 +211,9 @@ export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
     zone: () => "In the zone and inside both caps.",
     over: () => {
       const b = breaches.find((x) => x.kind === "cap")
-      return `${b.title}: ${b.id === "power" ? "the site would trip and throttle" : "the FIA would reject this budget"}.`
+      return `${b.title}: ${b.id === "power" ? "the site would trip and throttle" : b.id === "capex" ? "the finance board would not sign it" : "the cost cap would not take it"}.`
     },
-    fia: () => `Breaks FIA ${breaches.find((b) => b.kind === "fia").rule}: a rule breach cannot win approval.`,
+    fia: () => `Breaks ${breaches.find((b) => b.kind === "fia").label}: a breach cannot win approval.`,
     off: () => `${metCount} of ${targets.length} targets in the zone, inside the caps.`,
   }[status]()
 
@@ -206,7 +225,7 @@ export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
   const worst = [...targets].filter((t) => !t.ok).sort((a, b) => a.closeness - b.closeness)[0]
   if (fia) {
     hintFix = fixFor(stationId, full, budgetId, (alt) => !alt.phys.fia.some((f) => f.rule === fia.rule))
-    hint = `Breaks FIA ${fia.rule}${hintFix ? `: ${hintFix.as} would fix that.` : "."}`
+    hint = `Breaks ${fia.label}${hintFix ? `: ${hintFix.as} would fix that.` : "."}`
   } else if (cap) {
     hintFix = cap.fix
     hint = cap.fix ? `${capitalise(cap.fix.as)} would bring it back under the cap line.` : cap.consequence
@@ -243,6 +262,7 @@ export function boardFor(stationId, choices, budgetId = C.DEFAULT_BUDGET) {
     hintFix,
     payment: core.phys.payment || null,
     speed: core.phys.speed || 1,
+    headroom2028: Number.isFinite(core.phys.headroom2028) ? core.phys.headroom2028 : null,
     values: { ...core.phys.values },
     ...outcomeOf(station, { status, inZone: core.inZone, fit: core.fit, todayFit: today.fit, targets, caps, breaches }),
   }
@@ -259,10 +279,10 @@ const SECONDS_OFF_MAX = 0.2
 const IMPACT = {
   latency: "the strategy call arrives too late",
   availability: "the pit wall goes blind when a link drops",
-  perf: "too few simulations per dollar",
+  perf: "too few simulations per franc",
   fix: "Saturday's failure could miss Sunday's race",
-  lead: "the kit arrives after the season starts",
-  capacity: "the GPUs throttle",
+  lead: "the kit arrives after the Bahrain test",
+  capacity: "the estate throttles",
   pue: "the power bill eats the cost cap",
   cycles: "too few aero upgrades this season",
   feed: "nodes sit idle waiting for data",
@@ -280,28 +300,28 @@ const SHORT_MISS = {
   pue: "PUE too high",
   nplus1: "No N+1 backup",
   cycles: "Too few design cycles",
-  usage: "Over the FIA compute cap",
+  usage: "Over the MAUh allowance",
   feed: "Storage too slow",
-  fia: "Breaks an FIA rule",
+  fia: "Breaks a rule or requirement",
 }
 
 const CAP_OUTCOME = {
-  capex: "Over the CapEx cap: the FIA would reject this.",
-  opex: "Over the OpEx cap: a breach of the cost cap.",
+  capex: "Over the capital envelope: the finance board would not sign it.",
+  opex: "Over the cost-cap charge line: the USD 215M cap would not take it.",
   power: "Over the power limit: the site would trip.",
 }
 
 /**
  * Seconds found per lap: 0.00 on today's setup, up to 0.20 s closing in on the targets, and
- * 0.25–0.35 s in the zone (more budget spare, more time). A cap or FIA breach is not allowed and
- * finds no time.
+ * 0.25–0.35 s in the zone (more budget spare, more time). A cap, FIA-rule or requirement breach is
+ * not allowed and finds no time.
  */
 function outcomeOf(station, b) {
   const fmt = (s) => `${s.toFixed(2)} s`
   if (b.status === "over" || b.status === "fia") {
     const cap = b.caps.find((c) => c.over > 0)
     const fia = b.breaches.find((x) => x.kind === "fia")
-    return { seconds: 0, allowed: false, outcome: cap ? CAP_OUTCOME[cap.id] : `Breaks FIA ${fia.rule}: not allowed, so no time counts.` }
+    return { seconds: 0, allowed: false, outcome: cap ? CAP_OUTCOME[cap.id] : `Breaks ${fia.label}: not allowed, so no time counts.` }
   }
   if (b.inZone) {
     const seconds = Math.round((SECONDS_ZONE + (SECONDS_MAX - SECONDS_ZONE) * clamp((b.fit - FIT_ZONE) / (100 - FIT_ZONE))) * 100) / 100
@@ -329,20 +349,27 @@ export function evaluate(team, budgetId = C.DEFAULT_BUDGET, stationIds = C.STATI
   return { choices, budget: C.budgetFor(budgetId).id, boards, fit, seconds, secondsTotal: secondsTotal({ boards }, stationIds), system, penalties: penaltiesFor(boards) }
 }
 
-/** FIA and cost-cap penalties the race stewards may hand out, with the chance of being caught. */
-const FIA_PENALTY = {
-  "5.3": { id: "tunnel", p: 0.6, points: 5, seconds: 0, text: "Only one encrypted tunnel to the factory (FIA 5.3 asks for two on separate paths)." },
-  "5.2": { id: "wifi", p: 0.8, points: 6, seconds: 5, text: "Car data dumped over garage Wi-Fi instead of the wired umbilical (FIA 5.2)." },
-  "4.1": { id: "nplus1", p: 0.5, points: 6, seconds: 0, text: "Race-critical infrastructure without N+1 power and cooling (FIA 4.1)." },
-  "2.4": { id: "overrun", p: 0.5, points: 8, seconds: 0, text: "The cluster ran CFD beyond the FIA compute allowance (FIA 2.4)." },
+/**
+ * What a breach costs in the race, with the chance of it biting. Real FIA articles are stewards'
+ * matters (`by: "FIA"`); an Audi F1 requirement that was ignored bites operationally (`by: "ops"`);
+ * an envelope overrun is a finance review (`by: "finance"`).
+ */
+const RULE_PENALTY = {
+  "req-paths": { id: "tunnel", by: "ops", p: 0.6, points: 5, seconds: 0, text: "Race-critical links to Mission Control on a single route, against the team's own requirement." },
+  "req-wired": { id: "wifi", by: "ops", p: 0.8, points: 0, seconds: 5, text: "car data over unmanaged garage Wi-Fi stalled the download before the stop" },
+  "F4.4.1": { id: "gpuSolver", by: "FIA", p: 0.6, points: 8, seconds: 0, text: "The RCFD solver ran on GPU cores before 1 January 2028 (FIA F4.4.1)." },
+  "F4.6.1": { id: "overrun", by: "FIA", p: 0.6, points: 8, seconds: 0, text: `The solver used more than the ${F.fia.mauhAllowance} MAUh allowance; the FIA cut the next period's limits (F4.6.1, F4.6.10).` },
 }
 
 function penaltiesFor(boards) {
   const out = []
   for (const board of Object.values(boards)) {
     for (const b of board.breaches) {
-      if (b.kind === "fia" && FIA_PENALTY[b.rule]) out.push({ ...FIA_PENALTY[b.rule], station: board.station, dial: b.dial })
-      if (b.kind === "cap" && b.id !== "power") out.push({ id: `${board.station}-${b.id}`, station: board.station, dial: board.caps.find((c) => c.id === b.id)?.fix?.decision || C.decisionsFor(board.station)[0].id, p: 1, points: 10, seconds: 0, text: b.text.split(":")[0] + ` at ${C.byId(C.STATIONS, board.station).name}.` })
+      if (b.kind === "fia" && RULE_PENALTY[b.rule]) out.push({ ...RULE_PENALTY[b.rule], station: board.station, dial: b.dial })
+      if (b.kind === "cap" && b.id !== "power") {
+        const by = b.id === "opex" ? "FIA" : "finance"
+        out.push({ id: `${board.station}-${b.id}`, by, station: board.station, dial: board.caps.find((c) => c.id === b.id)?.fix?.decision || C.decisionsFor(board.station)[0].id, p: 1, points: 10, seconds: 0, text: b.text.split(":")[0] + ` at ${C.byId(C.STATIONS, board.station).name}.` })
+      }
     }
   }
   return out

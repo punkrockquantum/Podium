@@ -8,6 +8,7 @@
  */
 import { PITCH_MAX, STATIONS, FINALE } from "./catalog.js"
 import { secondsTotal } from "./model.js"
+import { FIGURES as F } from "./customer.js"
 
 export const LAPS = FINALE.laps
 /** The animation on the race screen lasts this long. */
@@ -63,7 +64,9 @@ export function systemScore(ev, stationIds = STATIONS.map((s) => s.id)) {
 /** How well the pit wall reads the race: fast, reliable data plus a strong simulation programme. */
 const strategyOf = (ev) => 0.45 + 0.55 * (((ev.fit.network ?? 50) + (ev.fit.compute ?? 50)) / 200)
 
-const PLACE = { factory: "factory server room", cheap: "remote cheap-power hall" }
+const PLACE = { factory: "Hinwil data room", cheap: "remote low-cost hall" }
+/** Who hands out a penalty: FIA stewards for FIA articles, the finance board for envelope overruns, operations for the team's own requirements. */
+const PENALTY_BY = { FIA: "FIA penalty", finance: "Finance review", ops: "Operations review" }
 const COOLING = { air: "air cooling", reardoor: "rear-door cooling", liquid: "liquid cooling" }
 
 export const pitchMax = (stationIds = STATIONS.map((s) => s.id)) => stationIds.length * PITCH_MAX
@@ -84,13 +87,13 @@ function carIncidents(ev, r) {
     if (r.next() < p) out.push({ lap: r.int(6, LAPS - 6), ...inc })
   }
   if (board("network")) {
-    if (ch.link === "single") add(0.35, { id: "tunnel", loss: 4.0, station: "network", dial: "link", cause: "their single factory tunnel dropped for 40 s: no telemetry, no strategy calls", lesson: "FIA 5.3 asks for two tunnels on separate paths for a reason." })
-    if (ch.path === "public" && r.next() < 0.55) out.push({ id: "jitter", lap: null, undercut: true, loss: 2.4, station: "network", dial: "path", cause: "public-internet jitter delayed their undercut call by a lap", lesson: "A private path keeps the pit wall's timing honest." })
-    if (ch.garage === "edge") add(0.5, { id: "edge", loss: -1.0, station: "network", dial: "garage", cause: "their garage edge cache kept telemetry flowing through a link blip", lesson: "Data close to the car keeps engineers working when the link wobbles." })
+    if (ch.link === "single") add(0.35, { id: "tunnel", loss: 4.0, station: "network", dial: "link", cause: "their single route to Mission Control dropped for 40 s: no telemetry, no strategy calls", lesson: "The Audi F1 requirement for two diverse paths exists for a reason." })
+    if (ch.path === "public" && r.next() < 0.55) out.push({ id: "jitter", lap: null, undercut: true, loss: 2.4, station: "network", dial: "path", cause: "public-internet jitter delayed their undercut call by a lap", lesson: "A private circuit into the campus keeps the pit wall's timing honest." })
+    if (ch.garage === "edge") add(0.5, { id: "edge", loss: -1.0, station: "network", dial: "garage", cause: "their garage edge node kept telemetry flowing through a link blip", lesson: "Data close to the car keeps engineers working when the link wobbles." })
   }
   if (board("oem")) {
-    if (!target("oem", "perf").ok) add(0.5, { id: "oldKit", loss: 1.5, station: "oem", dial: "vendor", cause: "their last-generation servers ran too few what-ifs before the stop", lesson: "Performance per dollar is why customers refresh." })
-    if (!target("oem", "lead").ok) add(0.6, { id: "lateKit", loss: 2.0, station: "oem", dial: "vendor", cause: "their new systems arrived after the season started, so the aero upgrade came late", lesson: "Lead time matters as much as speed." })
+    if (!target("oem", "perf").ok) add(0.5, { id: "oldKit", loss: 1.5, station: "oem", dial: "vendor", cause: "their last-generation servers ran too few what-ifs before the stop", lesson: "Performance per franc is why customers refresh." })
+    if (!target("oem", "lead").ok) add(0.6, { id: "lateKit", loss: 2.0, station: "oem", dial: "vendor", cause: "their new systems arrived after the Bahrain test, so the aero upgrade came late", lesson: "Lead time matters as much as speed." })
     if (r.next() < 0.4) {
       const node = {
         "4h": { loss: 0, good: true, cause: "a node failed on Saturday, but 4-hour support had it back before the race", lesson: "The support contract decides how long a failure lasts." },
@@ -108,7 +111,7 @@ function carIncidents(ev, r) {
     if (!target("compute", "cycles").ok) add(0.6, { id: "fewCycles", loss: 2.0, station: "compute", dial: "size", cause: "too few design cycles a week, so their aero upgrade was a race late", lesson: "Design cycles per week are the aero programme." })
     if (!target("compute", "feed").ok) add(0.5, { id: "slowStorage", loss: 1.6, station: "compute", dial: "storage", cause: "slow storage left nodes waiting, so the overnight runs came late", lesson: "Fast storage keeps expensive nodes busy." })
     if (ch.storage === "cache") add(0.6, { id: "cache", loss: -1.2, station: "compute", dial: "storage", cause: "their flash cache answered repeat what-ifs instantly, so they called the stop a lap earlier", lesson: "Caching repeat questions turns into faster decisions." })
-    if (board("compute").caps.find((c) => c.id === "power")?.over > 0) add(0.5, { id: "hallTrip", loss: 2.0, station: "compute", dial: "size", cause: "the cluster tripped the hall's 400 kW limit mid-session", lesson: "Size the cluster to the power the hall has." })
+    if (board("compute").caps.find((c) => c.id === "power")?.over > 0) add(0.5, { id: "hallTrip", loss: 2.0, station: "compute", dial: "size", cause: `the cluster tripped the room's ${F.room.cfdAllocationKW} kW CFD allocation mid-session`, lesson: "Size the cluster to the power the room has." })
   }
   return out
 }
@@ -117,8 +120,8 @@ function carIncidents(ev, r) {
 function fibreIncident(ev) {
   if (!ev.boards.network) return null
   if (ev.choices.link === "satellite") return { id: "fibreSafe", loss: 0, good: true, station: "network", dial: "link", cause: "their satellite backup kept them online through the fibre cut", lesson: "A path that shares no ground route turns a cut into a non-event." }
-  if (ev.choices.link === "redundant") return { id: "fibreCut", loss: 0.8, station: "network", dial: "link", cause: "the fibre cut forced a fail-over to their second diverse path", lesson: "Diverse paths (FIA 5.3) cost seconds, not the race." }
-  return { id: "fibreCut", loss: 4.0, station: "network", dial: "link", cause: "the fibre cut took out their single factory tunnel for 40 s", lesson: "One tunnel is one cut away from a blind pit wall." }
+  if (ev.choices.link === "redundant") return { id: "fibreCut", loss: 0.8, station: "network", dial: "link", cause: "the fibre cut forced a fail-over to their second diverse route", lesson: "Diverse routes cost seconds, not the race." }
+  return { id: "fibreCut", loss: 4.0, station: "network", dial: "link", cause: "the fibre cut took out their single route to Mission Control for 40 s", lesson: "One route is one cut away from a blind pit wall." }
 }
 
 function heatIncident(ev) {
@@ -208,7 +211,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     const ahead = [...cars].sort((a, b) => a.total - b.total)
     const deltas = new Map(cars.map((car) => [car, []]))
     if (sc && lap === sc.lap) events.push({ lap, team: null, kind: "sc", text: `Safety Car! Lap ${lap}: the field bunches up. Who has the data to call a cheap stop?` })
-    if (fibreCut === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: a contractor cut a fibre trunk near Austin. Every team's link is tested.` })
+    if (fibreCut === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: a contractor cut a fibre trunk between Hinwil and Zurich. Every team's link is tested.` })
     if (heat === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: track and data-centre temperatures spike. Who stays cool?` })
 
     for (const car of cars) {
@@ -258,7 +261,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
       }
       if (car.pitLap === lap && car.timePenalty) {
         const why = Object.values(car.caught).filter((p) => p.seconds).map((p) => p.text.replace(/\.$/, "")).join(" and ")
-        events.push({ lap, team: car.id, kind: "penalty", incident: "timePenalty", station: "network", dial: "garage", text: `${car.name} serve a ${car.timePenalty} s FIA time penalty at their stop: ${why}.`, lesson: "FIA 5.2: car data goes over the wired umbilical." })
+        events.push({ lap, team: car.id, kind: "bad", incident: "wifiStall", station: "network", dial: "garage", text: `${car.name}. Lost ${car.timePenalty.toFixed(1)} s at their stop: ${why}.`, lesson: "Audi F1 requirement: car data goes over the managed wired umbilical." })
       }
       car.lapTimes.push(t)
       car.total += t
@@ -296,7 +299,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
 
   for (const car of cars) {
     for (const pen of Object.values(car.caught)) {
-      if (pen.points) events.push({ lap: LAPS, team: car.id, kind: "penalty", incident: pen.id, station: pen.station, dial: pen.dial, text: `${car.name}: FIA penalty, −${pen.points} points. ${pen.text}` })
+      if (pen.points) events.push({ lap: LAPS, team: car.id, kind: "penalty", incident: pen.id, station: pen.station, dial: pen.dial, text: `${car.name}: ${PENALTY_BY[pen.by] || PENALTY_BY.FIA}, −${pen.points} points. ${pen.text}` })
     }
   }
 

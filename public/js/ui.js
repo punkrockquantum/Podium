@@ -17,12 +17,13 @@ export function el(tag, attrs = {}, ...children) {
   return node
 }
 
+/** Swiss francs, the currency the customer sees: "CHF 1.2M", "CHF 450k", "CHF 12". */
 export function money(value, digits = 1) {
   const sign = value < 0 ? "−" : ""
   const abs = Math.abs(value)
-  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(digits)}M`
-  if (abs >= 1e3) return `${sign}$${Math.round(abs / 1e3)}k`
-  return `${sign}$${Math.round(abs)}`
+  if (abs >= 1e6) return `${sign}CHF ${(abs / 1e6).toFixed(digits)}M`
+  if (abs >= 1e3) return `${sign}CHF ${Math.round(abs / 1e3)}k`
+  return `${sign}CHF ${Math.round(abs)}`
 }
 
 export function delta(value, fmt = money) {

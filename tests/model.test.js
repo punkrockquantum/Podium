@@ -80,16 +80,16 @@ test("FIT: in the zone scores 80–100; crossing a cap or an FIA rule caps it at
   assert.ok(overCap.fit <= FIT_BREACH_MAX, `over the CapEx cap: FIT ${overCap.fit}`)
   const capex = overCap.caps.find((c) => c.id === "capex")
   assert.ok(capex.over > 0)
-  assert.match(capex.consequence, /Over the CapEx envelope by \$[\d.]+[kM]: the FIA would reject this budget\./)
+  assert.match(capex.consequence, /Over the 2027 capital envelope by CHF [\d.]+[kM]: the finance board would not sign it\./)
   assert.ok(capex.fix, "a cap breach names a one-dial fix")
   assert.match(capex.consequence, /would bring it back/)
   const fia = boardFor("network", { ...pick("network"), garage: "wifi" })
   assert.equal(fia.status, "fia")
   assert.ok(fia.fit <= FIT_BREACH_MAX)
-  assert.ok(fia.breaches.some((b) => b.kind === "fia" && b.rule === "5.2" && b.dial === "garage"))
-  assert.match(fia.hint, /^Breaks FIA 5\.2: .+ would fix that\.$/)
+  assert.ok(fia.breaches.some((b) => b.kind === "fia" && b.rule === "req-wired" && b.label === "Audi F1 requirement" && b.dial === "garage"))
+  assert.match(fia.hint, /^Breaks Audi F1 requirement: .+ would fix that\.$/)
   const power = boardFor("compute", { size: "large", chips: "gpu", storage: "cache" })
-  assert.ok(power.caps.find((c) => c.id === "power").over > 0, "28 GPU nodes trip the 400 kW hall")
+  assert.ok(power.caps.find((c) => c.id === "power").over > 0, "20 GPU nodes trip the 120 kW CFD allocation")
   assert.ok(power.fit <= FIT_BREACH_MAX)
   const off = boardFor("network", { link: "redundant", path: "public", garage: "umbilical" })
   assert.equal(off.status, "off")
@@ -167,7 +167,7 @@ test("seconds found per lap: 0.00 on today's setup, 0.25–0.35 in the zone, bre
         if (b.status === "over" || b.status === "fia") {
           assert.equal(b.allowed, false)
           assert.equal(b.seconds, 0, "a breach finds no time")
-          assert.match(b.outcome, /cap|limit|FIA/)
+          assert.match(b.outcome, /cap|limit|FIA|Audi F1 requirement/)
         } else if (b.inZone) {
           assert.ok(b.allowed && b.seconds >= 0.25 && b.seconds <= 0.35, `${s.id}: in-zone ${b.seconds}`)
           assert.match(b.outcome, /^You've found 0\.\d\d s per lap and you're inside (both|every) caps?\.$/)
@@ -180,7 +180,7 @@ test("seconds found per lap: 0.00 on today's setup, 0.25–0.35 in the zone, bre
   const ref = Object.fromEntries(IDS.map((id) => [id, boardFor(id, GOOD).seconds]))
   assert.ok(Object.values(ref).every((v) => v >= 0.25), "the reference build finds time at every table")
   assert.match(boardFor("network", { ...GOOD, path: "public" }).outcome, /strategy call arrives too late/)
-  assert.match(boardFor("compute", { ...GOOD, size: "large" }).outcome, /FIA 2\.4|cap/)
+  assert.match(boardFor("compute", { ...GOOD, size: "large" }).outcome, /FIA F4\.6\.1|cap/)
 })
 
 test("the team total adds up the boards the race sees", () => {

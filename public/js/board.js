@@ -1,7 +1,7 @@
 /**
  * The tuning board: one component on every table, the SA's screen, the plan page, demo mode
  * and the readout. Problem, gauges with a green target zone and a grey "today" needle, cap-line
- * bars, FIA chips, the FIT ring and three dials. SVG and CSS only.
+ * bars, rule chips (FIA articles and Audi F1 requirements), the FIT ring and three dials. SVG and CSS only.
  *
  * createBoard() builds the DOM once and update() moves needles and bars in place, so every dial
  * turn animates instead of re-rendering.
@@ -23,7 +23,7 @@ const money = (v) => (Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Mat
 /* ------------------------------------------------------------ FIT ring */
 
 export const fitTone = (fit, status) => (status === "zone" ? "zone" : status === "over" || status === "fia" ? "bad" : fit >= 60 ? "close" : "far")
-export const STATUS_WORD = { zone: WORDS.inZone, off: "Not in the zone yet", over: WORDS.overCap, fia: "FIA breach" }
+export const STATUS_WORD = { zone: WORDS.inZone, off: "Not in the zone yet", over: WORDS.overCap, fia: "Rule breach" }
 
 function ringSvg(size, stroke) {
   const r = (size - stroke) / 2
@@ -109,7 +109,7 @@ function capBar(c) {
 function dial(d, { interactive, onDial }) {
   const setting = el("span", { class: "dial-setting" })
   const buttons = d.options.map((o) => el("button", { class: "seg-btn", "data-option": o.id, role: "radio", type: "button", onclick: (e) => interactive && !e.currentTarget.disabled && onDial?.(d.id, o.id) },
-    el("span", {}, o.name), o.id === d.today ? el("small", { class: "seg-today" }, "today") : null, o.fia ? el("small", { class: "seg-fia" }, o.illegal ? `Breaks FIA ${o.fia}` : `FIA ${o.fia}`) : null,
+    el("span", {}, o.name), o.id === d.today ? el("small", { class: "seg-today" }, "today") : null, o.rule ? el("small", { class: "seg-fia" }, o.illegal ? `Breaks ${o.ruleLabel || `FIA ${o.rule}`}` : o.ruleLabel || `FIA ${o.rule}`) : null,
     el("small", { class: "seg-ghost" }, WORDS.lastTime), el("small", { class: "seg-lock", "aria-label": WORDS.locked }, "🔒")))
   const node = el("div", { class: "dial", "data-dial": d.id },
     el("div", { class: "dial-head" }, el("b", {}, d.name), setting),
@@ -240,7 +240,7 @@ export function createBoard({ stationId, budget = C.DEFAULT_BUDGET, interactive 
     hint.textContent = deciding ? WORDS.hintWaits : current.status === "zone" && !current.hint.startsWith("In the zone.") ? "" : current.hint
     current.targets.forEach((t, i) => gauges[i].set(t))
     current.caps.forEach((c, i) => bars[i].set(c, { deciding }))
-    chips.replaceChildren(...current.breaches.filter((b) => b.kind === "fia").map((b) => el("span", { class: "chip fia" }, el("b", {}, `FIA ${b.rule}`), ` ${b.text.replace(/^FIA [\d.]+:?\s*/, "")}`)))
+    chips.replaceChildren(...current.breaches.filter((b) => b.kind === "fia").map((b) => el("span", { class: "chip fia" }, el("b", {}, b.label || `FIA ${b.rule}`), ` ${b.text.replace(/^(FIA [\w.]+|Audi F1 requirement):?\s*/, "")}`)))
     notes.textContent = current.notes.join(" ")
     node.classList.toggle("in-zone", current.inZone)
     for (const d of dials) {
