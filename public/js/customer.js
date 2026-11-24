@@ -23,6 +23,17 @@ export const CUSTOMER = {
   sourcesDoc: "docs/audi-f1-sources.md",
   accessed: "2026-11-24",
 
+  /**
+   * The one participant. This edition is shown to a single customer, so the server creates this
+   * team itself (on boot, on Restart the experience and when loading an older save) and nobody can
+   * add, rename or remove a team. The colour is F1 red, readable on the dark theme and a projector.
+   */
+  team: {
+    id: "t1",
+    name: "Audi F1 Team",
+    color: "#e10600",
+  },
+
   /* ------------------------------------------------------------ sites */
   sites: {
     hinwil: {

@@ -34,9 +34,18 @@ test("one vocabulary: Solutions Architect (SA) everywhere, no bare Architect, no
     assert.ok(!/Send back|sent back|sendBack|Lock in\b|lockIn|\/submit/.test(text) || file === "README.md", `${file} still has the old lock-in or send-back flow`)
   }
   const ui = read("public/js/ui.js")
-  for (const w of ["Choose your team", "Switch team", "Problem", "Scenario", "Tune", "Seconds found per lap", "FIT", "In the zone", "Over the cap", "Today's setup", "How a provider helps", "What you just learned",
+  for (const w of ["Problem", "Scenario", "Tune", "Seconds found per lap", "FIT", "In the zone", "Over the cap", "Today's setup", "How a provider helps", "What you just learned",
     "Brief", "I've read the brief. Take me to the decisions.", "Each choice locks the moment you tap it. Decide as a team first.", "Tap once to lock", "All three locked", "last time",
-    "Solutions Architect", "SA", "Call the Solutions Architect", "Approve", "Reject", "Waiting for the SA", "Read the brief", "Return to home"]) assert.ok(ui.includes(`"${w}"`), `ui.js lacks "${w}"`)
+    "Solutions Architect", "SA", "Call the Solutions Architect", "Approve", "Reject", "Waiting for the SA", "Read the brief", "Return to home", "2027 plan", "Today's Hinwil setup"]) assert.ok(ui.includes(`"${w}"`), `ui.js lacks "${w}"`)
+  /* One participant: nothing to choose, add, switch or rename. */
+  for (const file of publicFiles()) {
+    const text = read(file)
+    for (const gone of ["Choose your team", "Switch team", "Add your team", "Add team", "Team name", "Remove team", "Rename team", "team places", "No teams yet", "chooseTeam", "switchTeam", "addTeam", "TEAM_COLORS", "TEAM_NAME_MAX", "step-zero", "team-grid"]) {
+      assert.ok(!text.includes(gone), `${file} still has "${gone}": there is one customer and no team setup`)
+    }
+  }
+  assert.match(ui, /INSTRUCTIONS = \{\s*table:/, "the table's instructions are for the customer's table, not a team")
+  assert.ok(!/\btitle: "Teams"/.test(ui), "no Teams instructions")
   assert.match(ui, /lockedCount: \(n, of = 3\) => `Locked \${n} of \${of}`/, "the Locked 1 of 3 counter")
   assert.match(ui, /rejected: \(reason\) => `Rejected: \${reason \|\| "no reason given"}\. Adjust your choices and call the SA again\. This takes time and the SA may be busy\.`/, "the rejection text")
   assert.match(ui, /STATION_TABS = \[\["brief", "1 · Brief"\], \["tune", "2 · Tune"\], \["pitch", "3 · Pitch"\]\]/, "three steps: Brief, Tune, Pitch")
@@ -98,15 +107,18 @@ test("phases come from the shared state", () => {
   assert.equal(playOpen({ ...s, race: {} }), false, "the race locks every table")
 })
 
-test("demo steps: brief → tune (one tap locks; out of the zone, then in it) → call the SA → rejected → approved → race → readout", () => {
+test("demo steps: brief → tune (one tap locks; out of the zone, then in it) → call the SA → rejected → approved → race → readout, for the one customer", () => {
   assert.deepEqual(DEMO_STEPS.map((s) => s.id), ["brief", "tune", "zone", "pitch", "reject", "approve", "race", "readout"])
   const raceAt = DEMO_STEPS.findIndex((s) => s.id === "race")
   for (let i = 0; i < DEMO_STEPS.length; i++) {
     const d = buildDemo(i)
     assert.equal(d.step.id, DEMO_STEPS[i].id)
+    assert.deepEqual(d.state.teams.map((t) => t.id), [C.CUSTOMER_TEAM.id], "the demo plays the one customer")
+    assert.equal(d.focus.team, C.CUSTOMER_TEAM.id)
     const team = d.state.teams.find((t) => t.id === d.focus.team)
+    assert.equal(team.name, C.CUSTOMER_TEAM.name)
     const board = boardFor(d.focus.station, team.choices)
-    for (const key of ["briefRead", "attempts", "previous"]) assert.equal(typeof team[key], "object", `pretend teams carry ${key}`)
+    for (const key of ["briefRead", "attempts", "previous"]) assert.equal(typeof team[key], "object", `the pretend customer carries ${key}`)
     if (d.step.id === "tune") assert.equal(board.inZone, false, "the tune step starts out of the zone")
     if (d.step.id === "zone") assert.equal(board.inZone, true, "and the next step is in it")
     if (d.step.id === "pitch") assert.ok(team.plans[d.focus.station] && team.attempts[d.focus.station] === 1, "all three locked: attempt 1")
@@ -118,24 +130,27 @@ test("demo steps: brief → tune (one tap locks; out of the zone, then in it) �
     }
     if (d.step.id === "approve") assert.equal(d.state.pitches[d.focus.station].attempt, 2, "the second attempt is being pitched")
     if (i >= raceAt) {
-      assert.equal(d.state.race.result.results.length, 3)
+      const ids = d.state.race.result.results.map((r) => r.id).sort()
+      assert.deepEqual(ids, [C.CUSTOMER_TEAM.id, C.FINALE_ENTRANTS.today.id].sort(), "two cars: the 2027 plan and today's Hinwil setup")
       assert.equal(team.attempts[d.focus.station], 2)
     }
   }
   for (const step of DEMO_STEPS) assert.ok(!/\bArchitect\b(?<!Solutions Architect)/.test(step.narration.replace(/Solutions Architect/g, "SA")), `${step.id}: narration says Architect without Solutions`)
   assert.ok(DEMO_STEPS.some((s) => /Rejected|rejected/.test(s.narration)) && DEMO_STEPS.some((s) => /locks the moment|one tap|Locked 1 of 3/i.test(s.narration)), "the demo shows one-shot locking and a rejection")
+  assert.ok(DEMO_STEPS.some((s) => /2027 plan/.test(s.narration) && /today/.test(s.narration)), "the demo race is the plan against today")
 })
 
-test("the landing page puts the four tables first with a short how-to; it and the README describe the zero-setup flow", () => {
+test("the landing page puts the four tables first with a short how-to; it and the README describe the single-customer flow", () => {
   const home = read("public/index.html")
-  for (const w of ["Pick your table", "Nothing to set up", "Add your team", "Brief", "Tune", "locks the moment you tap it", "Call the Solutions Architect", "seconds per lap", "Projector", "Host controls"]) assert.ok(home.includes(w), `index.html lacks "${w}"`)
+  for (const w of ["Pick your table", "Nothing to set up", "The customer's table", "Solutions Architects", "Session host", "Projector", "Brief", "Tune", "locks the moment you tap it", "Call the Solutions Architect", "seconds per lap", "2027 plan", "today's Hinwil setup", "Host controls"]) assert.ok(home.includes(w), `index.html lacks "${w}"`)
   assert.ok(home.indexOf('id="stations"') < home.indexOf('id="howToPlay"') && home.indexOf('id="howToPlay"') < home.indexOf('id="hostLink"'), "tables first, then how to play, then the small links")
   const steps = home.slice(home.indexOf('id="howToPlay"'), home.indexOf("</ol>")).match(/<li>/g) || []
   assert.ok(steps.length >= 3 && steps.length <= 4, `three or four how-to lines (${steps.length})`)
   assert.ok(!/setup wizard|lobby|Start the brief|session plan/i.test(home), "the landing page has no host-run steps")
+  assert.ok(home.includes('href="/case.html"'), "the case page stays one tap away")
   const readme = read("README.md")
   for (const w of ["FIT", "Tight", "Generous", "Today's setup", "How a provider helps", "Seconds found per lap", "wind tunnel", "lap-time ladder", "Solutions Architect", "I've read the brief", "Attempt", "Reject", "Words to know",
-    "Add your team", "No timer", "Start timer", "Reset timer", "the host PIN", "Restart the experience", "/api/teams", "/api/host/timer", "/api/host/team", "/api/host/budget"]) assert.ok(readme.includes(w), `README lacks "${w}"`)
+    "one participant", "2027 plan", "today's Hinwil setup", "No timer", "Start timer", "Reset timer", "the host PIN", "Restart the experience", "/api/teams/t1/", "/api/host/timer", "/api/host/team", "/api/host/budget", "410"]) assert.ok(readme.includes(w), `README lacks "${w}"`)
   assert.ok(!/\/api\/host\/setup|\/api\/host\/phase|setup wizard|Start the brief|briefDone/i.test(readme), "the README no longer describes host setup or host-run phases")
   for (const file of filesUnder("public/")) assert.ok(!/\/api\/host\/(setup|phase)\b/.test(read(file)), `${file} still calls a removed host route`)
 })

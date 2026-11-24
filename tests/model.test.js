@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as C from "../public/js/catalog.js"
+import { CUSTOMER } from "../public/js/customer.js"
 import { boardFor, evaluate, effectiveTeam, choicesOf, allBoards, FIT_ZONE, FIT_BREACH_MAX, secondsTotal, raceSeconds, SECONDS_MAX } from "../public/js/model.js"
 import { designSummary } from "../public/js/summary.js"
 import { buildPlan } from "../public/js/plandata.js"
@@ -33,10 +34,18 @@ test("four tables: a problem card, 2–3 targets, cap lines and three dials of t
   assert.equal(C.TIERS, undefined, "per-team tiers are gone")
 })
 
-test("ten distinct team colours, and an untimed session with a 35-minute timer on offer", () => {
-  assert.equal(new Set(C.TEAM_COLORS).size, 10)
-  assert.equal(C.MAX_TEAMS, 10)
-  assert.equal(C.MIN_TEAMS, undefined, "a game starts with no teams: they add themselves")
+test("one customer, two finale entrants, and an untimed session with a 35-minute timer on offer", () => {
+  assert.equal(C.MAX_TEAMS, 1)
+  assert.deepEqual(C.CUSTOMER_TEAM, { id: "t1", name: CUSTOMER.team.name, color: CUSTOMER.team.color }, "the one participant comes from customer.js")
+  assert.match(C.CUSTOMER_TEAM.color, /^#[0-9a-f]{6}$/i)
+  assert.equal(C.TEAM_COLORS, undefined, "no palette: there is one team")
+  assert.equal(C.TEAM_NAME_MAX, undefined, "no name to type")
+  assert.equal(C.MIN_TEAMS, undefined)
+  assert.equal(C.FINALE_ENTRANTS.plan.id, "t1")
+  assert.equal(C.FINALE_ENTRANTS.plan.name, `${CUSTOMER.team.name} · 2027 plan`)
+  assert.equal(C.FINALE_ENTRANTS.today.id, "today")
+  assert.equal(C.FINALE_ENTRANTS.today.name, `${CUSTOMER.team.name} · today's Hinwil setup`)
+  assert.notEqual(C.FINALE_ENTRANTS.plan.color, C.FINALE_ENTRANTS.today.color, "two cars the projector can tell apart")
   assert.equal(C.SESSION.timerMinutes, 35)
   assert.equal(C.sessionTotal, undefined, "the fixed session plan is gone")
 })

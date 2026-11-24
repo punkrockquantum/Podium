@@ -1,13 +1,15 @@
 /**
  * The Austin, Texas 2027 Grand Prix at the Circuit of the Americas (56 laps of 5.513 km, 20 turns),
- * simulated lap by lap from each team's APPROVED boards (unapproved tables race on the customer's
- * existing setup). Seeded, so the server, the race screen and every iPad replay the same race.
+ * simulated lap by lap. Single-customer edition: two cars race, the customer's 2027 plan (its
+ * APPROVED boards as tuned; unapproved tables race on the customer's existing setup) and today's
+ * Hinwil setup (0.00 s found everywhere). Seeded, so the server, the race screen and every iPad
+ * replay the same race. `runRace` itself takes any number of entrants.
  *
- * Lap pace is literally the seconds per lap the team found on the boards the race sees. Incidents come from dial settings the
- * team could see on its boards, and every ticker line says who, why and what it cost.
+ * Lap pace is literally the seconds per lap found on the boards the race sees. Incidents come from
+ * dial settings visible on those boards, and every ticker line says who, why and what it cost.
  */
-import { PITCH_MAX, STATIONS, FINALE } from "./catalog.js"
-import { secondsTotal } from "./model.js"
+import { PITCH_MAX, STATIONS, FINALE, FINALE_ENTRANTS } from "./catalog.js"
+import { secondsTotal, evaluate, effectiveTeam } from "./model.js"
 import { FIGURES as F } from "./customer.js"
 
 export const LAPS = FINALE.laps
@@ -59,6 +61,21 @@ export function pitchTotal(pitch = {}, stationIds = STATIONS.map((s) => s.id)) {
 export function systemScore(ev, stationIds = STATIONS.map((s) => s.id)) {
   if (!stationIds.length) return 0.5
   return stationIds.reduce((total, id) => total + (ev.fit[id] ?? ev.boards?.[id]?.fit ?? 50), 0) / stationIds.length / 100
+}
+
+/**
+ * The finale's two entrants for the customer's team: the 2027 plan (approved tables as tuned, the
+ * rest on today's setup) and today's Hinwil setup (every dial at today's setting, 0.00 s). Pure:
+ * the server, demo mode and the tests build the race from the same two entries.
+ */
+export function finaleEntries(team, budget, stationIds = STATIONS.map((s) => s.id)) {
+  const raced = effectiveTeam(team, stationIds)
+  const evaluation = evaluate(raced, budget, stationIds)
+  const pitch = Object.fromEntries(raced.approved.map((id) => [id, team.pitch?.[id] || 0]))
+  const plan = { ...FINALE_ENTRANTS.plan, id: team.id, color: team.color || FINALE_ENTRANTS.plan.color, pitch, missed: raced.missed, notApproved: raced.notApproved, system: systemScore(evaluation, stationIds), seconds: evaluation.secondsTotal, evaluation }
+  const todayEv = evaluate({ choices: {} }, budget, stationIds)
+  const today = { ...FINALE_ENTRANTS.today, pitch: {}, missed: [...stationIds], notApproved: [], system: systemScore(todayEv, stationIds), seconds: 0, evaluation: todayEv }
+  return [plan, today]
 }
 
 /** How well the pit wall reads the race: fast, reliable data plus a strong simulation programme. */
@@ -138,7 +155,7 @@ function heatIncident(ev) {
 }
 
 /**
- * entries: [{ id, name, color, tier?, pitch, evaluation, system?, missed?, notApproved? }]
+ * entries: [{ id, name, short?, color, pitch, evaluation, system?, seconds?, missed?, notApproved? }]
  * Returns the classification, per-car cumulative times for the animation, and a ticker of events.
  */
 export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) => s.id)) {
@@ -169,6 +186,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     return {
       id: entry.id,
       name: entry.name,
+      short: entry.short || entry.name,
       color: entry.color,
       ev,
       pace,
@@ -211,7 +229,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     const ahead = [...cars].sort((a, b) => a.total - b.total)
     const deltas = new Map(cars.map((car) => [car, []]))
     if (sc && lap === sc.lap) events.push({ lap, team: null, kind: "sc", text: `Safety Car! Lap ${lap}: the field bunches up. Who has the data to call a cheap stop?` })
-    if (fibreCut === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: a contractor cut a fibre trunk between Hinwil and Zurich. Every team's link is tested.` })
+    if (fibreCut === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: a contractor cut a fibre trunk between Hinwil and Zurich. Every link to Mission Control is tested.` })
     if (heat === lap) events.push({ lap, team: null, kind: "info", text: `Lap ${lap}: track and data-centre temperatures spike. Who stays cool?` })
 
     for (const car of cars) {
@@ -311,6 +329,7 @@ export function runRace(entries, seed = "podium", stationIds = STATIONS.map((s) 
     return {
       id: car.id,
       name: car.name,
+      short: car.short,
       color: car.color,
       position: pos,
       grid: car.grid,

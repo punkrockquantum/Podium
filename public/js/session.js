@@ -9,12 +9,12 @@
  */
 
 export const PHASES = [
-  { id: "open", name: "Open session", idle: "No timer", line: "Add your team at any table, read the brief, lock your three choices (one tap each) and pitch to your Solutions Architect." },
-  { id: "play", name: "Play", idle: "--:--", line: "Read the brief, lock your three choices (one tap each) and pitch to your Solutions Architect." },
+  { id: "open", name: "Open session", idle: "No timer", line: "At each table: read the brief, lock your three choices (one tap each) and pitch to the Solutions Architect." },
+  { id: "play", name: "Play", idle: "--:--", line: "Read the brief, lock your three choices (one tap each) and pitch to the Solutions Architect." },
   { id: "paused", name: "Paused", idle: "--:--", line: "The timer is paused. Tables stay open." },
   { id: "ended", name: "Time is up", idle: "TIME", line: "Time is up: every table is locked. The race is next." },
-  { id: "race", name: "Race", idle: "RACE", line: "The Austin Grand Prix: 56 laps in 30 seconds." },
-  { id: "readout", name: "Readouts", idle: "RACE", line: "Each team's result, what went well and what to do differently." },
+  { id: "race", name: "Race", idle: "RACE", line: "The Austin Grand Prix: the 2027 plan against today's Hinwil setup, 56 laps in 30 seconds." },
+  { id: "readout", name: "Readout", idle: "RACE", line: "The customer's result, what went well and what to do differently." },
 ]
 export const phaseInfo = (id) => PHASES.find((p) => p.id === id) || PHASES[0]
 
@@ -37,5 +37,5 @@ export function phaseRemainingMs(state, offset = 0, now = Date.now()) {
   return NaN
 }
 
-/** True when teams may join and change choices at all (tables add their own brief and lock rules). */
+/** True when choices may still change at all (tables add their own brief and lock rules). */
 export const playOpen = (state) => ["open", "play", "paused"].includes(phaseOf(state))

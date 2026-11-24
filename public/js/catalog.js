@@ -13,16 +13,27 @@ import { FIGURES as F, capSharePerNode, kwYearCHF, costCapCHF, nodesAtAllowance 
 
 export const byId = (list, id) => list.find((item) => item.id === id) || null
 
-/* ------------------------------------------------------------ teams and the session budget */
+/* ------------------------------------------------------------ the customer and the session budget */
 
-/** Teams add themselves on a table iPad: a game starts with none and holds up to ten. */
-export const MAX_TEAMS = 10
-export const TEAM_NAME_MAX = 32
+/**
+ * Single-customer edition: the game has exactly one participant, the customer, created by the
+ * server on boot and on every restart (id, name and colour from customer.js). Nobody adds, renames
+ * or removes a team, so the game holds one.
+ */
+export const CUSTOMER_TEAM = { id: F.team.id, name: F.team.name, color: F.team.color }
+export const MAX_TEAMS = 1
 
-/** Ten distinct colours that stay readable on the dark theme and on a projector. */
-export const TEAM_COLORS = ["#e10600", "#00a3ff", "#ffd60a", "#22c55e", "#ff7a00", "#c084fc", "#00e5d4", "#ff4fa3", "#f5f5f5", "#a3e635"]
+/**
+ * The finale's two entrants: the customer's 2027 plan (approved tables as tuned, the rest on
+ * today's setup) races the customer's existing Hinwil setup (0.00 s found at every table). `short`
+ * is the label on the track map and the timing tower, where the full names do not fit.
+ */
+export const FINALE_ENTRANTS = {
+  plan: { id: CUSTOMER_TEAM.id, name: `${CUSTOMER_TEAM.name} · 2027 plan`, short: "2027 plan", color: CUSTOMER_TEAM.color },
+  today: { id: "today", name: `${CUSTOMER_TEAM.name} · today's Hinwil setup`, short: "Hinwil today", color: "#8b93a3" },
+}
 
-/** One budget for every team, set by the host for the whole session. It moves every cap line. */
+/** One budget for the whole session, set by the host. It moves every cap line. */
 export const BUDGET_LEVELS = [
   { id: "tight", name: "Tight", mult: 0.85, line: "Every cap line is 15% lower: one clean answer per table, if you find it." },
   { id: "standard", name: "Standard", mult: 1, line: "The 2027 planning envelopes: two or three good answers per table." },

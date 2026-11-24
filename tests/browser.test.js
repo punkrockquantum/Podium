@@ -1,8 +1,8 @@
 /**
- * The table iPad in a real (headless) Chrome, from a brand-new empty game with no host action: the
- * team adds itself, the brief gate, nothing selected on load, one tap locks a dial for good, the
- * page never snaps back to the top while polling, and the call to the Solutions Architect.
- * Skipped when Chrome is not installed (set PODIUM_CHROME to point at one).
+ * The table iPad in a real (headless) Chrome, from a brand-new game with no host action: the table
+ * opens straight on the customer's brief (no team to pick), the brief gate, nothing selected on load,
+ * one tap locks a dial for good, the page never snaps back to the top while polling, and the call
+ * to the Solutions Architect. Skipped when Chrome is not installed (set PODIUM_CHROME to point at one).
  */
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
@@ -11,6 +11,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createApp, DEFAULT_PINS } from "../server.mjs"
+import { CUSTOMER_TEAM } from "../public/js/catalog.js"
 import { findChrome, launchChrome } from "./helpers/chrome.js"
 
 const chromeBinary = findChrome()
@@ -49,44 +50,48 @@ const stateNow = () => fetch(`${base}/api/state`).then((r) => r.json())
 const count = (page, selector) => page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)
 const text = (page, selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent || ""`)
 const disabled = (page, selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)})?.disabled`)
+const T1 = CUSTOMER_TEAM.id
+/** Poll the server until the state satisfies `check`, or fail after `ms`. */
+async function waitState(check, label, ms = 8000) {
+  const until = Date.now() + ms
+  while (Date.now() < until) {
+    const s = await stateNow()
+    if (check(s)) return s
+    await sleep(100)
+  }
+  throw new Error(`timed out waiting for ${label}`)
+}
 
-test("the table, from an empty game: add your team → brief gate → nothing selected → one tap locks for good → scroll holds → call the SA", { skip, timeout: 60_000 }, async () => {
+test("the table, from a new game: opens on the brief with no team to pick → brief gate → nothing selected → one tap locks for good → scroll holds → call the SA", { skip, timeout: 60_000 }, async () => {
   const page = await chrome.page()
   try {
-    /* A brand-new game: no host has done anything, no timer, no teams. */
+    /* A brand-new game: no host has done anything, no timer, and the customer is already there. */
     const fresh = await stateNow()
-    assert.equal(fresh.teams.length, 0, "the game starts with no teams")
+    assert.deepEqual(fresh.teams.map((t) => [t.id, t.name]), [[T1, CUSTOMER_TEAM.name]], "the game starts with the customer")
     assert.equal(fresh.clock.status, "open", "and no timer")
 
-    /* 0 · Add your team: type a name, tap once, and the table opens on its brief. */
+    /* The table opens straight on 1 · Brief: nothing to choose, type or tap first. */
     await page.goto(`${base}/station.html?station=compute`)
-    await page.waitFor(`document.getElementById("teamName")`, 8000, "the Add your team box")
-    assert.ok((await text(page, "#noTeams")).includes("No teams yet"), "an empty list says so")
-    assert.ok((await text(page, "#addTeamBox")).includes("Add your team"))
-    assert.equal(await count(page, 'input[type="password"]'), 0, "no PIN is asked for at the table")
-    assert.equal(await text(page, "#timer"), "No timer", "the header shows the untimed session")
-    await page.click("#addTeam")
-    await page.waitFor(`(document.getElementById("addTeamError")?.textContent || "").includes("Type a team name first")`, 8000, "the empty-name message")
-    assert.equal((await stateNow()).teams.length, 0, "an empty name adds nobody")
-    await page.type("#teamName", "  Red  ")
-    await page.click("#addTeam")
     await page.waitFor(`document.querySelector('[data-tab="brief"].active')`, 8000, "the Brief tab")
-    const joined = await stateNow()
-    assert.deepEqual(joined.teams.map((t) => [t.id, t.name]), [["t1", "Red"]], "the team is on the server, trimmed")
-    assert.equal(joined.tables.compute?.team, "t1", "and sitting at this table")
+    assert.equal(await count(page, "#teamName, #addTeam, #teamGrid, [data-team], .team-grid, .step-zero"), 0, "no team picker, no Add your team box")
+    assert.ok(!(await text(page, "body")).includes("Choose your team"), "the page never asks for a team")
+    assert.ok(!(await text(page, "body")).includes("Switch team"))
+    assert.equal(await count(page, 'input[type="password"]'), 0, "no PIN is asked for at the table")
+    assert.equal(await count(page, "#teamStrip input, #teamStrip button"), 0, "nothing to type or switch in the header chip")
+    await page.waitFor(`(document.querySelector("#teamStrip .team-chip")?.textContent || "").includes(${JSON.stringify(CUSTOMER_TEAM.name)})`, 8000, "the customer's name in the header chip")
+    assert.equal(await text(page, "#timer"), "No timer", "the header shows the untimed session")
+    await page.waitFor(`document.getElementById("readBrief")`, 8000, "the brief gate")
+    await waitState((s) => s.tables.compute?.team === T1, "the customer seated at this table")
 
-    /* A second iPad sees Red in its list, and a second team adds itself there: no host involved. */
+    /* A second iPad at another table also opens on its brief: the one customer plays every table. */
     const other = await chrome.page()
     try {
       await other.goto(`${base}/station.html?station=dc`)
-      await other.waitFor(`document.querySelector('[data-team="t1"]')`, 8000, "Red on the other iPad")
-      await other.type("#teamName", "red")
-      await other.click("#addTeam")
-      await other.waitFor(`(document.getElementById("addTeamError")?.textContent || "").includes("already a team called")`, 8000, "the duplicate-name message")
-      await other.type("#teamName", "Blue")
-      await other.click("#addTeam")
-      await other.waitFor(`document.querySelector('[data-tab="brief"].active')`, 8000, "Blue's brief")
-      assert.deepEqual((await stateNow()).teams.map((t) => t.name), ["Red", "Blue"])
+      await other.waitFor(`document.querySelector('[data-tab="brief"].active') && document.getElementById("readBrief")`, 8000, "the brief on the other iPad")
+      assert.equal(await count(other, "#teamName, #addTeam, [data-team]"), 0, "no team picker there either")
+      const both = await waitState((s) => s.tables.dc?.team === T1, "the customer seated at the second table")
+      assert.equal(both.tables.compute?.team, T1, "the first table keeps its seat")
+      assert.deepEqual(both.teams.map((t) => t.id), [T1], "still one participant")
       assert.deepEqual(other.errors, [], "no JavaScript errors on the second iPad")
     } finally {
       await other.close()
@@ -130,7 +135,7 @@ test("the table, from an empty game: add your team → brief gate → nothing se
     await sleep(1300)
     assert.equal(await count(page, '[data-dial="size"] .seg-btn.on'), 1)
     assert.ok(await page.evaluate(`document.querySelector('[data-dial="size"] .seg-btn[data-option="medium"]').classList.contains("on")`), "the first tap stands")
-    const refused = await post("/api/teams/t1/choices", { station: "compute", choices: { size: "large" } })
+    const refused = await post(`/api/teams/${T1}/choices`, { station: "compute", choices: { size: "large" } })
     assert.equal(refused.status, 409, "the server refuses a second choice on a locked dial")
     assert.match(refused.json.error, /That choice is locked/)
     assert.equal((await stateNow()).teams[0].choices.size, "medium")
@@ -162,11 +167,12 @@ test("the table, from an empty game: add your team → brief gate → nothing se
     await page.click("#callSa button")
     await page.waitFor(`(document.getElementById("pitchStatus")?.textContent || "").includes("Waiting for the SA") || (document.body.textContent || "").includes("Waiting for the SA")`, 8000, "the waiting banner")
     const state = await stateNow()
-    assert.deepEqual(state.queues.compute.map((q) => q.team), ["t1"])
+    assert.deepEqual(state.queues.compute.map((q) => q.team), [T1])
     assert.equal(state.teams[0].attempts.compute, 1)
 
-    /* Reloading shows the locks and nothing else selected. */
+    /* Reloading opens on the brief again, with the locks kept and nothing else selected. */
     await page.goto(`${base}/station.html?station=compute`)
+    await page.waitFor(`document.querySelector('[data-tab="brief"].active')`, 8000, "the Brief tab after reload")
     await page.waitFor(`document.querySelector('[data-tab="tune"]') && !document.querySelector('[data-tab="tune"]').disabled`, 8000, "the Tune tab enabled after reload")
     await page.click('[data-tab="tune"]')
     await page.waitFor(`document.querySelectorAll("#tuneBoard .seg-btn.on").length === 3`, 8000, "three locks after reload")
@@ -181,19 +187,17 @@ test("the table, from an empty game: add your team → brief gate → nothing se
 
 test("a rejection reopens the dials with last time's picks as ghosts, and the attempt counts up", { skip, timeout: 60_000 }, async () => {
   const state = await stateNow()
-  assert.deepEqual((state.queues.compute || []).map((q) => q.team), ["t1"], "the first test left Red in the queue")
+  assert.deepEqual((state.queues.compute || []).map((q) => q.team), [T1], "the first test left the customer in the queue")
   const signIn = await post("/api/login", { pin: DEFAULT_PINS.leader, station: "compute" })
   assert.equal(signIn.json?.role, "architect", "the SA signs in with the PIN and a table: nothing else to switch on")
-  const pitch = await post("/api/architect/pitch", { station: "compute", team: "t1", action: "start" }, DEFAULT_PINS.leader, "compute")
+  const pitch = await post("/api/architect/pitch", { station: "compute", team: T1, action: "start" }, DEFAULT_PINS.leader, "compute")
   assert.equal(pitch.status, 200, JSON.stringify(pitch.json))
-  const verdict = await post("/api/architect/decide", { station: "compute", team: "t1", decision: "reject", reason: "Storage is thin for 12 nodes" }, DEFAULT_PINS.leader, "compute")
+  const verdict = await post("/api/architect/decide", { station: "compute", team: T1, decision: "reject", reason: "Storage is thin for 12 nodes" }, DEFAULT_PINS.leader, "compute")
   assert.equal(verdict.status, 200, JSON.stringify(verdict.json))
 
   const page = await chrome.page()
   try {
     await page.goto(`${base}/station.html?station=compute`)
-    await page.waitFor(`document.querySelector('[data-team="t1"]')`, 8000, "the team list")
-    await page.click('[data-team="t1"]')
     await page.waitFor(`document.getElementById("rejectedBanner")`, 8000, "the rejection banner")
     assert.ok((await text(page, "#rejectedBanner")).includes("Rejected: Storage is thin for 12 nodes"))
     await page.click('[data-tab="tune"]')
@@ -214,7 +218,7 @@ test("a rejection reopens the dials with last time's picks as ghosts, and the at
   }
 })
 
-test("host controls: one masked PIN field → start and reset the timer without moving the table → run the race; the PIN is on no screen", { skip, timeout: 60_000 }, async () => {
+test("host controls: one masked PIN field → the four tables grid → start and reset the timer without moving the table → run the race; the PIN is on no screen", { skip, timeout: 60_000 }, async () => {
   const pin = DEFAULT_PINS.host
   const host = await chrome.page()
   const table = await chrome.page()
@@ -226,9 +230,7 @@ test("host controls: one masked PIN field → start and reset the timer without 
   try {
     /* The table sits on the Tune step, scrolled down, while the host works the timer. */
     await table.goto(`${base}/station.html?station=compute`)
-    await table.waitFor(`document.querySelector('[data-team="t1"]')`, 8000, "the team list")
-    await table.click('[data-team="t1"]')
-    await table.waitFor(`document.querySelector('[data-tab="tune"]') && !document.querySelector('[data-tab="tune"]').disabled`, 8000, "Red's table")
+    await table.waitFor(`document.querySelector('[data-tab="tune"]') && !document.querySelector('[data-tab="tune"]').disabled`, 8000, "the customer's table")
     await table.click('[data-tab="tune"]')
     await table.waitFor(`document.querySelectorAll("#tuneBoard .dial").length === 3`, 8000, "three dials")
     await table.evaluate(`window.scrollTo(0, document.documentElement.scrollHeight); true`)
@@ -252,7 +254,12 @@ test("host controls: one masked PIN field → start and reset the timer without 
     await host.waitFor(`document.getElementById("hostControls") && document.getElementById("startTimer")`, 8000, "the host controls")
     assert.equal(await text(host, "#bigTimer"), "No timer")
     assert.equal(await host.evaluate(`document.getElementById("timerMinutes").value`), "35", "the timer offers 35 minutes")
-    assert.ok(await count(host, "#teamAdmin [data-team-name]") >= 2, "the teams that added themselves are listed")
+    await host.waitFor(`document.querySelectorAll("#tablesGrid [data-table]").length === 4`, 8000, "the four tables in the grid")
+    assert.equal(await count(host, "#teamAdmin, [data-team-name], #addTeam, #teamName"), 0, "no team setup on the host console")
+    assert.ok((await text(host, '#tablesGrid [data-table="compute"]')).includes("Attempt 2"), "the grid shows the compute table on attempt 2")
+    assert.ok((await text(host, '#tablesGrid [data-table="compute"]')).includes("Locked"), "locked and waiting for the SA")
+    assert.ok((await text(host, "#tablesTotal")).includes("Total"), "a total row under the four tables")
+    assert.ok((await text(host, "#hostControls")).includes(CUSTOMER_TEAM.name), "the console names the customer")
 
     /* Start timer: the tables count down, in the same header, at the same scroll position. */
     await host.click("#startTimer")
@@ -270,12 +277,12 @@ test("host controls: one masked PIN field → start and reset the timer without 
     assert.equal((await stateNow()).clock.status, "open")
     assert.ok(Math.abs((await table.evaluate("window.scrollY")) - scrolled) <= 2, "resetting the timer did not move the table")
 
-    /* The race runs at any time, with no timer. */
+    /* The race runs at any time, with no timer: the 2027 plan against today's Hinwil setup. */
     await host.click("#hostRunRace")
     await confirmYes(host)
     await host.waitFor(`document.getElementById("showReadouts") && document.getElementById("clearRace")`, 8000, "the race to have run")
     const raced = await stateNow()
-    assert.equal(raced.race.result.results.length, raced.teams.length, "every team raced")
+    assert.deepEqual(raced.race.result.results.map((r) => r.id).sort(), [T1, "today"].sort(), "two cars raced")
 
     assert.equal(await shows(host), false, "the PIN is nowhere on the host page or in its address")
     assert.equal(await shows(table), false, "nor on the table")

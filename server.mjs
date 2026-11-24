@@ -6,8 +6,11 @@
  * Every PIN defaults to the one event PIN in DEFAULT_PINS below. PIN values are never logged, never
  * sent to a client and never written to the saved game.
  *
- * The game needs no setup: it is open for play the moment the server runs. Teams add themselves on
- * a table iPad; the timer is optional and, like the race and every other host control, needs the PIN.
+ * Single-customer edition: the game has exactly one participant, the customer (CUSTOMER_TEAM in
+ * catalog.js, from customer.js), created here on boot, on Restart the experience and when an older
+ * save is loaded. There is no team registration, renaming or removal. The game needs no setup: it
+ * is open for play the moment the server runs; the timer is optional and, like the race and every
+ * other host control, needs the PIN.
  */
 import { createServer } from "node:http"
 import { spawn } from "node:child_process"
@@ -17,9 +20,9 @@ import { join, normalize, extname, dirname, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { networkInterfaces } from "node:os"
 import { randomUUID, randomInt, timingSafeEqual, createHash } from "node:crypto"
-import { STATIONS, TEAM_COLORS, SESSION, BUDGET_LEVELS, DEFAULT_BUDGET, MAX_TEAMS, TEAM_NAME_MAX, budgetFor, validChoice, decision, decisionsFor, tablePoints } from "./public/js/catalog.js"
-import { evaluate, effectiveTeam, boardFor, choicesOf } from "./public/js/model.js"
-import { runRace, systemScore } from "./public/js/race.js"
+import { STATIONS, CUSTOMER_TEAM, FINALE_ENTRANTS, SESSION, BUDGET_LEVELS, DEFAULT_BUDGET, budgetFor, validChoice, decision, decisionsFor, tablePoints } from "./public/js/catalog.js"
+import { boardFor, choicesOf } from "./public/js/model.js"
+import { runRace, finaleEntries } from "./public/js/race.js"
 import { buildPlan } from "./public/js/plandata.js"
 import { PITCH_MS, REJECT_REASON_MAX, lockedDials } from "./public/js/approval.js"
 import { phaseOf, playOpen } from "./public/js/session.js"
@@ -40,9 +43,8 @@ export const resolvePins = (env = process.env) => Object.fromEntries(Object.entr
 export const pinSummary = (env = process.env) => Object.entries(PIN_NAMES).map(([key, name]) => `${name} (${env[name] ? "from the environment" : "default"})`).join(", ")
 const PIN_FAILURE_LIMIT = 10
 const PIN_FAILURE_WINDOW_MS = 5 * 60_000
-/** Teams join without a PIN, so one address may only add so many (the ten-team limit is the main guard). */
-const TEAM_CREATE_LIMIT = 30
-const TEAM_CREATE_WINDOW_MS = 10 * 60_000
+/** What the retired team routes answer: there is one participant, and it is the customer. */
+const SINGLE_CUSTOMER = `This edition has one participant, the ${CUSTOMER_TEAM.name}: teams cannot be added, renamed or removed.`
 
 /** Constant-time comparison of two short secrets (hashed first so lengths never leak). */
 function sameSecret(given, expected) {
@@ -53,11 +55,6 @@ function sameSecret(given, expected) {
 
 /** A short single line of free text from a request: no control characters, trimmed, capped. */
 const oneLine = (value, max) => String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max)
-
-/** A team name as typed: control and invisible characters out, runs of spaces collapsed, trimmed. Not a string: empty. */
-const cleanTeamName = (value) => (typeof value === "string" ? value.normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]+/g, " ").replace(/\s+/g, " ").trim() : "")
-/** Two names are the same team name when they match ignoring case. */
-const nameKey = (name) => name.normalize("NFKC").toLowerCase()
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -77,7 +74,16 @@ const budgetOf = (value) => (BUDGET_LEVELS.some((b) => b.id === value) ? value :
 /** The timer when nothing is running: play is open and nothing expires. */
 const openClock = () => ({ status: "open", totalMs: 0, endsAt: null, remainingMs: null, endedAt: null, endedBy: null, pausedAt: null })
 
-/** A new game: no teams, the Standard budget, every table in play, no timer. Open for play at once. */
+const PLAN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const planId = () => Array.from({ length: 5 }, () => PLAN_ALPHABET[randomInt(PLAN_ALPHABET.length)]).join("")
+const STEPS = ["brief", "tune", "pitch"]
+const TEAM_KEYS = ["choices", "touched", "submitted", "scores", "pitch", "visits", "sims", "plans", "reviews", "briefRead", "attempts", "previous"]
+const dialIds = (station) => decisionsFor(station).map((d) => d.id)
+
+/** The customer's team with nothing played yet: the one participant of every game. */
+const customerTeam = () => ({ id: CUSTOMER_TEAM.id, name: CUSTOMER_TEAM.name, color: CUSTOMER_TEAM.color, ...Object.fromEntries(TEAM_KEYS.map((key) => [key, {}])) })
+
+/** A new game: the customer, the Standard budget, every table in play, no timer. Open for play at once. */
 export function blankState() {
   return {
     id: randomUUID(),
@@ -89,22 +95,12 @@ export function blankState() {
     queues: {},
     architects: {},
     pitches: {},
-    teams: [],
-    /* The last team number handed out: ids are never reused, so an iPad can never mistake a new team for a removed one. */
-    teamSeq: 0,
+    teams: [customerTeam()],
+    /* Kept in the state shape for older clients and saves; the only team is t1. */
+    teamSeq: 1,
     race: null,
   }
 }
-
-const PLAN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-const planId = () => Array.from({ length: 5 }, () => PLAN_ALPHABET[randomInt(PLAN_ALPHABET.length)]).join("")
-const STEPS = ["brief", "tune", "pitch"]
-const TEAM_KEYS = ["choices", "touched", "submitted", "scores", "pitch", "visits", "sims", "plans", "reviews", "briefRead", "attempts", "previous"]
-const dialIds = (station) => decisionsFor(station).map((d) => d.id)
-
-const blankTeam = (id, name, color) => ({ id, name, color, ...Object.fromEntries(TEAM_KEYS.map((key) => [key, {}])) })
-/** The first of the ten colours no team is using (in order, so the first ten teams get them in order). */
-const freeColor = (teams) => TEAM_COLORS.find((c) => !teams.some((t) => t.color === c)) || TEAM_COLORS[teams.length % TEAM_COLORS.length]
 
 /**
  * Bring a saved team up to the one-shot model: every choice is a lock, three locks make a plan
@@ -150,17 +146,42 @@ function migrateClock(saved, raced) {
   return openClock()
 }
 
-/** Saved teams keep their id, name and colour; anything missing or repeated is filled in. Returns the last team number in use. */
-function migrateTeamIdentity(teams, seq) {
-  const seen = new Set()
-  let last = Math.max(Number.isInteger(seq) && seq > 0 ? seq : 0, ...teams.map((t) => Number(/^t(\d{1,7})$/.exec(String(t.id))?.[1]) || 0))
-  teams.forEach((team, i) => {
-    if (typeof team.id !== "string" || !/^[a-z0-9]{1,8}$/.test(team.id) || seen.has(team.id)) team.id = `t${++last}`
-    seen.add(team.id)
-    team.name = cleanTeamName(team.name).slice(0, TEAM_NAME_MAX) || `Team ${i + 1}`
-    if (typeof team.color !== "string" || !/^#[0-9a-f]{3,8}$/i.test(team.color)) team.color = TEAM_COLORS[i % TEAM_COLORS.length]
-  })
-  return last
+/**
+ * Bring a saved game down to the one customer. A save from the multi-team game keeps its FIRST
+ * team's play (choices, locks, plans, reviews, attempts, read briefs) as the customer: the team
+ * becomes t1 with the customer's name and colour, and every other team is dropped, along with its
+ * queue entries, seats and live pitch (the SA of that table is Available again). A save with no
+ * team gets the customer with nothing played. A finished race is kept only if it was already the
+ * two-car finale (the plan against today's setup); a race between several teams names cars that no
+ * longer exist, so it is discarded and play reopens, untimed.
+ */
+function migrateToOneCustomer(loaded) {
+  const first = loaded.teams[0]
+  const oldId = first ? String(first.id) : null
+  const team = Object.assign(first || {}, { id: CUSTOMER_TEAM.id, name: CUSTOMER_TEAM.name, color: CUSTOMER_TEAM.color })
+  loaded.teams = [first ? team : customerTeam()]
+  loaded.teamSeq = 1
+  const mine = (id) => id === oldId
+  for (const [station, list] of Object.entries(loaded.queues)) loaded.queues[station] = Array.isArray(list) ? list.filter((entry) => mine(entry?.team)).map((entry) => ({ ...entry, team: team.id })) : []
+  for (const [station, seat] of Object.entries(loaded.tables)) {
+    if (seat && mine(seat.team)) seat.team = team.id
+    else delete loaded.tables[station]
+  }
+  for (const [station, pitch] of Object.entries(loaded.pitches)) {
+    if (pitch && mine(pitch.team)) pitch.team = team.id
+    else {
+      delete loaded.pitches[station]
+      if (loaded.architects[station]) loaded.architects[station] = { available: true, since: Date.now() }
+    }
+  }
+  const finaleIds = new Set([CUSTOMER_TEAM.id, FINALE_ENTRANTS.today.id])
+  const results = loaded.race?.result?.results
+  const finale = Array.isArray(results) && results.length === 2 && results.every((r) => finaleIds.has(r?.id))
+  if (loaded.race && !finale) {
+    loaded.race = null
+    loaded.readout = null
+    loaded.clock = openClock()
+  }
 }
 
 /** Load the saved game; a damaged file is kept aside rather than silently replaced. */
@@ -187,7 +208,7 @@ function loadState(file) {
       teamSeq: 0,
       race,
     }
-    loaded.teamSeq = migrateTeamIdentity(loaded.teams, saved.teamSeq)
+    migrateToOneCustomer(loaded)
     for (const team of loaded.teams) migrateTeam(team, loaded.settings.budget)
     return loaded
   } catch (err) {
@@ -273,34 +294,14 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
   const architectTitle = (station) => STATIONS.find((s) => s.id === station)?.architect || "Solutions Architect"
   const team = (id) => state.teams.find((t) => t.id === id)
 
-  /** New teams per address, in memory: a courtesy limit on a route that needs no PIN. */
-  const teamCreates = new Map()
-  const teamCreateLimited = (req) => {
-    const entry = teamCreates.get(clientIp(req))
-    return Boolean(entry) && entry.resetAt > Date.now() && entry.count >= TEAM_CREATE_LIMIT
-  }
-  const countTeamCreate = (req) => {
-    const now = Date.now()
-    const ip = clientIp(req)
-    const entry = teamCreates.get(ip)
-    if (!entry || entry.resetAt <= now) teamCreates.set(ip, { count: 1, resetAt: now + TEAM_CREATE_WINDOW_MS })
-    else entry.count += 1
-  }
-
-  /** A usable team name from a request (`{ name }`), or why not (`{ status, error }`). `exceptId` is the team being renamed. */
-  const checkTeamName = (value, exceptId) => {
-    const name = cleanTeamName(value)
-    if (!name) return { status: 400, error: "Type a team name first" }
-    if (name.length > TEAM_NAME_MAX) return { status: 400, error: `Team names are ${TEAM_NAME_MAX} characters or fewer` }
-    const taken = state.teams.find((t) => t.id !== exceptId && nameKey(t.name) === nameKey(name))
-    if (taken) return { status: 409, error: `There is already a team called \u201c${taken.name}\u201d. Pick it from the list, or choose another name.` }
-    return { name }
-  }
-
-  /** True once any team has locked a dial: from then on the budget level is fixed, so every board is scored on the same caps. */
+  /** True once the customer has locked a dial: from then on the budget level is fixed, so every board is scored on the same caps. */
   const anyLock = () => state.teams.some((t) => Object.keys(t.choices).length || Object.keys(t.plans).length || Object.keys(t.reviews).length)
 
-  /** Heartbeats live in memory only: they change every few seconds and must not rewrite the save file. */
+  /**
+   * Heartbeats live in memory only: they change every few seconds and must not rewrite the save
+   * file. The customer plays the four tables at once, one iPad each, so presence is kept per table
+   * (which step that iPad is on and when it was last seen).
+   */
   const presence = {}
 
   const publicState = () => ({ ...state, now: Date.now() })
@@ -336,57 +337,16 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       failedPin(req)
       return send(res, 403, { error: "Wrong PIN" })
     },
-    /**
-     * A team adds itself from a table iPad: a name, one tap, no PIN. It gets the next free colour
-     * and shows up in the team list on every other iPad.
-     */
-    "POST /api/teams": (req, res, { body }) => {
-      const closed = lockReason()
-      if (closed) return send(res, 409, { error: closed })
-      const checked = checkTeamName(body?.name)
-      if (checked.error) return send(res, checked.status, { error: checked.error })
-      if (state.teams.length >= MAX_TEAMS) return send(res, 409, { error: `All ${MAX_TEAMS} team places are taken. Pick your team from the list, or ask the host to remove one.` })
-      if (teamCreateLimited(req)) return send(res, 429, { error: "Too many new teams from this device. Pick your team from the list, or try again in a few minutes." })
-      countTeamCreate(req)
-      state.teamSeq += 1
-      const t = blankTeam(`t${state.teamSeq}`, checked.name, freeColor(state.teams))
-      state.teams.push(t)
-      bump()
-      return send(res, 201, { ok: true, team: t, version: state.version })
-    },
-    /** Rename or remove a team (typos, a team added twice). Not once the race has run: its result names the teams. */
-    "POST /api/host/team": (req, res, { body }) => {
-      if (requireHost(req, res)) return
-      const t = team(body?.team)
-      if (!t) return send(res, 404, { error: "No such team" })
-      if (state.race) return send(res, 409, { error: "Clear the race before changing the teams" })
-      if (body?.action === "rename") {
-        const checked = checkTeamName(body?.name, t.id)
-        if (checked.error) return send(res, checked.status, { error: checked.error })
-        t.name = checked.name
-      } else if (body?.action === "remove") {
-        state.teams = state.teams.filter((x) => x.id !== t.id)
-        dropFromQueues(t.id)
-        for (const [id, seat] of Object.entries(state.tables)) if (seat.team === t.id) delete state.tables[id]
-        for (const [id, pitch] of Object.entries(state.pitches)) {
-          if (pitch.team !== t.id) continue
-          delete state.pitches[id]
-          state.architects[id] = { available: true, since: Date.now() }
-        }
-        delete presence[t.id]
-      } else {
-        return send(res, 400, { error: "Rename or remove a team" })
-      }
-      bump()
-      return send(res, 200, publicState())
-    },
-    /** One budget level for everyone. It can change until the first dial is locked, so every board is scored on the same caps. */
+    /* The multi-team game's self-registration and the host's rename/remove: gone for good (410), with the reason. */
+    "POST /api/teams": (req, res) => send(res, 410, { error: SINGLE_CUSTOMER }),
+    "POST /api/host/team": (req, res) => send(res, 410, { error: SINGLE_CUSTOMER }),
+    /** One budget level for the session. It can change until the first dial is locked, so every board is scored on the same caps. */
     "POST /api/host/budget": (req, res, { body }) => {
       if (requireHost(req, res)) return
       const level = body?.budget
       if (!BUDGET_LEVELS.some((b) => b.id === level)) return send(res, 400, { error: `The budget level is ${BUDGET_LEVELS.map((b) => b.name).join(", ")}` })
       if (level !== state.settings.budget) {
-        if (state.race || anyLock()) return send(res, 409, { error: `Teams have already locked choices on the ${budgetFor(state.settings.budget).name} budget. Restart the experience to change it.` })
+        if (state.race || anyLock()) return send(res, 409, { error: `Choices are already locked on the ${budgetFor(state.settings.budget).name} budget. Restart the experience to change it.` })
         state.settings.budget = level
         bump()
       }
@@ -563,11 +523,11 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       const now = Date.now()
       return send(res, 200, { now, presence: Object.fromEntries(Object.entries(presence).filter(([, p]) => now - p.at < 10 * 60_000)) })
     },
+    /** Restart the experience: a new game with the customer and nothing played, open and untimed. */
     "POST /api/host/reset": (req, res) => {
       if (requireHost(req, res)) return
       state = blankState()
       for (const key of Object.keys(presence)) delete presence[key]
-      teamCreates.clear()
       bump()
       return send(res, 200, publicState())
     },
@@ -578,22 +538,20 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
     state.tables = {}
   }
 
-  /** The race uses approved tables only: everything else races on the customer's existing setup and scores 0. */
+  /**
+   * The finale: the customer's 2027 plan (approved tables only; everything else races on the
+   * customer's existing setup and scores 0) against today's Hinwil setup, two cars over 56 laps.
+   */
   function startRace(res, body, by) {
     if (state.race) return send(res, 409, { error: "The race has run. The host can clear it to run it again." })
-    if (!state.teams.length) return send(res, 400, { error: "No teams yet: the race needs at least one team" })
+    const customer = team(CUSTOMER_TEAM.id) || state.teams[0]
+    if (!customer) return send(res, 500, { error: "The customer's team is missing: restart the experience" })
     /* The race can run at any time, with or without a timer: running it ends play for every table. */
     if (playOpen(state)) endPlay(by)
     const seed = oneLine(body?.seed, 64) || `${state.id}-${Date.now()}`
     const stations = state.settings.stations
     state.pitches = {}
-    const entries = state.teams.map((t) => {
-      const raced = effectiveTeam(t, stations)
-      const evaluation = evaluate(raced, state.settings.budget, stations)
-      const pitch = Object.fromEntries(raced.approved.map((id) => [id, t.pitch[id] || 0]))
-      return { id: t.id, name: t.name, color: t.color, pitch, missed: raced.missed, notApproved: raced.notApproved, system: systemScore(evaluation, stations), seconds: evaluation.secondsTotal, evaluation }
-    })
-    state.race = { seed, ranAt: Date.now(), ranBy: by, budget: state.settings.budget, result: runRace(entries, seed, stations) }
+    state.race = { seed, ranAt: Date.now(), ranBy: by, budget: state.settings.budget, result: runRace(finaleEntries(customer, state.settings.budget, stations), seed, stations) }
     state.readout = null
     bump()
     return send(res, 200, publicState())
@@ -627,7 +585,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
   const timer = setInterval(tick, 1000)
   timer.unref?.()
 
-  /** Why a team cannot join or change this table right now, or null. Play is open unless time is up or the race has run. */
+  /** Why this table cannot change right now, or null. Play is open unless time is up or the race has run. */
   function lockReason(t, station) {
     if (state.race) return "The race has run: decisions are locked"
     if (phaseOf(state) === "ended") return "Time is up: this table is locked"
@@ -636,6 +594,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
   }
 
   const teamRoutes = {
+    /** An iPad opening a table seats the customer there. The customer plays every table at once, so a seat here never clears a seat elsewhere. */
     checkin: (req, res, t, body) => {
       const station = body?.station
       if (!STATION_IDS.includes(station)) return send(res, 400, { error: "Unknown table" })
@@ -644,7 +603,6 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       const now = Date.now()
       const here = state.tables[station]
       if (!here || here.team !== t.id) {
-        for (const [id, seat] of Object.entries(state.tables)) if (seat.team === t.id) delete state.tables[id]
         state.tables[station] = { team: t.id, since: now }
         const visit = t.visits[station] || { first: now, count: 0 }
         t.visits[station] = { ...visit, last: now, count: visit.count + 1 }
@@ -721,10 +679,12 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       bump()
       return send(res, 200, { ok: true, position: list.findIndex((entry) => entry.team === t.id) + 1, architect: state.architects[station] || { available: false } })
     },
+    /** A heartbeat from one table's iPad: which step it is on. Kept per table, in memory. */
     presence: (req, res, t, body) => {
       const station = STATION_IDS.includes(body?.station) ? body.station : null
+      if (!station) return send(res, 400, { error: "Unknown table" })
       const step = STEPS.includes(body?.step) ? body.step : null
-      presence[t.id] = { station, step, at: Date.now() }
+      presence[station] = { team: t.id, station, step, at: Date.now() }
       return send(res, 200, { ok: true })
     },
     checkout: (req, res, t, body) => {
@@ -734,7 +694,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
         delete state.tables[station]
         bump()
       }
-      delete presence[t.id]
+      delete presence[station]
       return send(res, 200, { ok: true })
     },
   }
@@ -759,7 +719,7 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
           if (!t) return send(res, 404, { error: "No such team" })
           return teamRoutes[match[2]](req, res, t, body)
         }
-        if (key === "GET /api/health") return send(res, 200, { ok: true, app: "podium", version: state.version, teams: state.teams.length, phase: phaseOf(state), pid: process.pid })
+        if (key === "GET /api/health") return send(res, 200, { ok: true, app: "podium", version: state.version, teams: state.teams.length, customer: CUSTOMER_TEAM.name, phase: phaseOf(state), pid: process.pid })
         return send(res, 404, { error: "Not found" })
       }
       return serveStatic(url.pathname, res)

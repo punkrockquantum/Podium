@@ -16,7 +16,7 @@ const app = document.getElementById("app")
 const strip = document.getElementById("teamStrip")
 const timerBox = document.getElementById("timer")
 const roundTag = document.getElementById("roundTag")
-document.getElementById("tools").replaceChildren(instructionsButton("team"), button(WORDS.returnHome, () => returnHome(), { small: true }))
+document.getElementById("tools").replaceChildren(instructionsButton("table"), button(WORDS.returnHome, () => returnHome(), { small: true }))
 
 if (!station) {
   const old = C.RETIRED_STATIONS[requested]
@@ -38,15 +38,14 @@ function returnHome() {
 }
 
 function startTable() {
-  const KEY_TEAM = `podium-team-${station.id}`
   document.title = `Podium · ${station.name}`
   document.getElementById("stationName").textContent = station.name
   document.getElementById("pitchTo").textContent = `Pitch to: ${station.architect}`
 
   let state = null
   let offset = 0
+  /** The table opens on 1 · Brief; moving between steps is the only time the page scrolls on its own. */
   let tab = "brief"
-  let teamId = sessionStorage.getItem(KEY_TEAM) || ""
   /** Dials tapped but not yet confirmed by the server (dial id → option id). */
   let pending = {}
   let gameId = null
@@ -54,7 +53,7 @@ function startTable() {
   let shape = ""
   /** The live Tune board, kept across polls so needles animate instead of jumping. */
   let tune = null
-  /** The brief gate: when this team opened the brief here, and whether they reached its end. */
+  /** The brief gate: when the brief was opened here, and whether the reader reached its end. */
   let gate = { key: "", openedAt: 0, reachedEnd: false, observer: null }
 
   const toast = (text) => {
@@ -73,23 +72,31 @@ function startTable() {
       tune = null
       return
     }
-    if (gameId && state.id !== gameId) forgetTeam()
+    /* A restarted game: back to the brief with nothing pending. */
+    if (gameId && state.id !== gameId) {
+      pending = {}
+      tune = null
+      tab = "brief"
+      window.scrollTo({ top: 0 })
+    }
     gameId = state.id
     seatHere()
     render()
   })
 
-  function forgetTeam() {
-    teamId = ""
-    pending = {}
-    tune = null
-    sessionStorage.removeItem(KEY_TEAM)
+  /**
+   * The one participant: the customer's team, which the server creates itself. Null only while the
+   * state is missing or comes from an older server.
+   */
+  function currentTeam() {
+    const teams = state?.teams || []
+    return teams.find((t) => t.id === C.CUSTOMER_TEAM.id) || teams[0] || null
   }
 
-  /** Check the chosen team in at this table while play is open (the host's live feed shows it). */
+  /** Seat the customer at this table while play is open (the host's live feed shows it). */
   let checkingIn = false
   function seatHere() {
-    const team = state?.teams?.find((t) => t.id === teamId)
+    const team = currentTeam()
     if (!team || checkingIn || !playOpen(state)) return
     if (state.tables?.[station.id]?.team === team.id) return
     checkingIn = true
@@ -97,38 +104,10 @@ function startTable() {
   }
 
   setInterval(() => {
-    const team = state?.teams?.find((t) => t.id === teamId)
+    const team = state && currentTeam()
     if (!team || document.hidden || document.body.classList.contains("offline")) return
     post(`/api/teams/${team.id}/presence`, { station: station.id, step: tab }).catch(() => {})
   }, 5000)
-
-  async function switchTeam() {
-    const team = currentTeam()
-    if (team) await post(`/api/teams/${team.id}/checkout`, { station: station.id }).catch(() => {})
-    forgetTeam()
-    tab = "brief"
-    render(true)
-    window.scrollTo({ top: 0 })
-  }
-
-  function currentTeam() {
-    if (!teamId || !state?.teams?.length) return null
-    const team = state.teams.find((t) => t.id === teamId)
-    if (!team) forgetTeam()
-    return team || null
-  }
-
-  function chooseTeam(id) {
-    teamId = id
-    pending = {}
-    tune = null
-    sessionStorage.setItem(KEY_TEAM, id)
-    const team = currentTeam()
-    tab = team && briefRead(team) ? "tune" : "brief"
-    seatHere()
-    render(true)
-    window.scrollTo({ top: 0 })
-  }
 
   /** Moving between steps is the one time the page scrolls on its own: a new step starts at the top. */
   function goTab(name) {
@@ -150,7 +129,7 @@ function startTable() {
 
   /* ------------------------------------------------------------ learning moments */
 
-  const learnedKey = () => `podium-learned-${state.id}-${teamId}`
+  const learnedKey = () => `podium-learned-${state.id}`
   const learned = () => { try { return new Set(JSON.parse(sessionStorage.getItem(learnedKey()) || "[]")) } catch { return new Set() } }
   const markLearned = () => sessionStorage.setItem(learnedKey(), JSON.stringify([...learned(), station.id]))
 
@@ -162,11 +141,10 @@ function startTable() {
     return null
   }
 
-  /** The one state banner for this team at this table: phase, not in play, approved, rejected, locked. */
+  /** The one state banner for this table: phase, not in play, approved, rejected, locked. */
   function banner(team) {
     if (notInPlay()) return stateBanner("This table is not in play in this game. Use Return to home to choose another table.", "bad")
     const reason = phaseReason()
-    if (!team) return reason ? stateBanner(...reason) : null
     const d = designStatus(state, team, station.id)
     const nth = d.attempts > 1 ? ` on the ${attemptWord(d.attempts)}` : ""
     if (d.status === "approved") return stateBanner(`${WORDS.approved} by ${d.review.by}${nth}: this board races as locked.`, "good")
@@ -213,6 +191,7 @@ function startTable() {
     }
   }, 250)
 
+  /** The header chip: the customer's name (from customer.js), this table and the session's budget level. */
   function renderStrip(team) {
     strip.classList.toggle("hidden", !team)
     if (!team) {
@@ -222,72 +201,7 @@ function startTable() {
     const key = JSON.stringify([team.id, team.name, team.color, budget()])
     if (strip.dataset.key === key) return
     strip.dataset.key = key
-    strip.replaceChildren(teamChip(team), el("span", { class: "muted small" }, `${station.name} · ${C.budgetFor(budget()).name} budget`), button(WORDS.switchTeam, () => switchTeam(), { small: true }))
-  }
-
-  /* ------------------------------------------------------------ step 0: choose your team */
-
-  /**
-   * The team list and, under it, Add your team. Each part is its own slot, so a team appearing from
-   * another iPad updates the list without touching a name someone is typing here.
-   */
-  function renderStepZero() {
-    if (shape !== "zero" || !document.getElementById("teamGridSlot")) {
-      shape = "zero"
-      replaceKeepingScroll(app, el("div", { class: "workspace-single" }, el("div", { class: "panel step-zero" },
-        el("h2", {}, WORDS.chooseTeam), el("p", { class: "muted" }, `${station.name} · pitch to the ${station.architect}.`),
-        el("div", { id: "zeroBanner" }), el("div", { id: "teamGridSlot" }), el("div", { id: "addTeamSlot" }))))
-    }
-    const b = banner(null)
-    patchSlot(document.getElementById("zeroBanner"), b ? `${b.className}|${b.textContent}` : "", () => b)
-    patchSlot(document.getElementById("teamGridSlot"), JSON.stringify([state.teams.map((t) => [t.id, t.name, t.color]), state.tables]), () => {
-      if (!state.teams.length) return el("p", { class: "muted", id: "noTeams" }, "No teams yet. Add yours below: it takes one tap.")
-      return el("div", { class: "team-grid", id: "teamGrid" }, state.teams.map((t) => {
-        const at = Object.entries(state.tables || {}).find(([, seat]) => seat.team === t.id)?.[0]
-        const where = at === station.id ? "Checked in here" : at ? `At ${C.byId(C.STATIONS, at)?.name || at}` : "Free to start here"
-        return el("button", { class: "team-button", "data-team": t.id, onclick: () => chooseTeam(t.id) }, el("i", { style: `background:${t.color}` }), el("b", {}, t.name), el("span", {}, where))
-      }))
-    })
-    const full = state.teams.length >= C.MAX_TEAMS
-    patchSlot(document.getElementById("addTeamSlot"), JSON.stringify([full, Boolean(phaseReason()), notInPlay()]), () => addTeamBox(full))
-  }
-
-  /** Add your team: a name, one tap, and the team is in. No PIN; the server trims and checks the name. */
-  function addTeamBox(full) {
-    if (phaseReason() || notInPlay()) return null
-    if (full) return el("div", { class: "state-banner info", role: "status", id: "teamsFull" }, `All ${C.MAX_TEAMS} team places are taken. Tap your team above, or ask the host to remove one.`)
-    const input = el("input", { type: "text", id: "teamName", maxlength: C.TEAM_NAME_MAX, placeholder: "Team name", autocomplete: "off", autocapitalize: "words", enterkeyhint: "go", "aria-label": "Team name" })
-    const error = el("p", { class: "form-error hidden", id: "addTeamError", role: "alert" })
-    const go = () => addTeam(input, error)
-    input.addEventListener("keydown", (e) => e.key === "Enter" && go())
-    input.addEventListener("input", () => error.classList.add("hidden"))
-    return el("div", { class: "add-team", id: "addTeamBox" },
-      el("h3", {}, WORDS.addTeam),
-      el("div", { class: "row" }, input, el("button", { class: "btn primary", id: "addTeam", onclick: go }, WORDS.addTeam)),
-      el("p", { class: "small muted" }, "Type your team name and tap once. At every other table, tap your team in the list."),
-      error)
-  }
-
-  let adding = false
-  async function addTeam(input, error) {
-    const fail = (text) => {
-      error.textContent = text
-      error.classList.remove("hidden")
-      input.focus({ preventScroll: true })
-    }
-    if (!input.value.trim()) return fail("Type a team name first")
-    if (adding) return
-    adding = true
-    try {
-      const res = await post("/api/teams", { name: input.value }, false)
-      if (!state.teams.some((t) => t.id === res.team.id)) state.teams.push(res.team)
-      watcher.refresh()
-      chooseTeam(res.team.id)
-    } catch (err) {
-      fail(err.message)
-    } finally {
-      adding = false
-    }
+    strip.replaceChildren(teamChip(team), el("span", { class: "muted small" }, `${station.name} · ${C.budgetFor(budget()).name} budget`))
   }
 
   /* ------------------------------------------------------------ 1 · Brief */
@@ -323,7 +237,7 @@ function startTable() {
     gate.observer.observe(end)
   }
 
-  /** Works on the team as it is now: the brief stays on screen while other teams join and the state moves on. */
+  /** Works on the team as it is now: the brief stays on screen while the state moves on. */
   function readBrief() {
     const team = currentTeam()
     if (!team || !gateOpen(team)) return
@@ -466,7 +380,7 @@ function startTable() {
       if (d.status === "approved") nodes.push(learningCard(station.id, { id: "approvedLesson" }))
       if (d.status === "locked") nodes.push(el("div", { class: "actions call-sa", id: "callSa" },
         button(WORDS.callArchitect, () => act(`/api/teams/${team.id}/call`, { station: station.id }, "You are in the queue").catch(() => {}), { kind: "primary", disabled: Boolean(state.race) }),
-        el("p", { class: "small muted" }, `${WORDS.attempt(d.attempts)}. The SA may be busy with another team; you pitch for ${PITCH_SECONDS} seconds.`)))
+        el("p", { class: "small muted" }, `${WORDS.attempt(d.attempts)}. The SA may be busy at another table; you pitch for ${PITCH_SECONDS} seconds.`)))
       nodes.push(planSheet(team, d.plan, { review: d.review }))
       return nodes
     })
@@ -487,9 +401,10 @@ function startTable() {
     if (team) for (const [k, v] of Object.entries(pending)) if (team.choices[k] === v) delete pending[k]
     renderStrip(team)
     if (!team) {
+      /* Only a server from before this edition has no customer in its state. */
       tune = null
-      if (force) shape = ""
-      return renderStepZero()
+      shape = ""
+      return replaceKeepingScroll(app, el("div", { class: "workspace-single" }, stateBanner("Waiting for the game server to create the customer's team. This page retries every second.", "info")))
     }
     const next = shapeOf(team)
     if (force || next !== shape || !document.getElementById("view")) {

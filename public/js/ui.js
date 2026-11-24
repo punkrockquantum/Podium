@@ -166,43 +166,43 @@ export function installErrorLogging(screen) {
 }
 
 export const INSTRUCTIONS = {
-  team: {
-    title: "Teams",
+  table: {
+    title: "The customer's table",
     steps: [
-      "Open any table on its iPad. First time: type your team name and tap Add your team. At every other table, tap your team in the list. Move between the four tables freely.",
+      "One customer, the Audi F1 Team, plays the four tables, one iPad each. Open a table and it is yours: nothing to choose, nothing to set up. Move between the four tables freely.",
       "1 · Brief: read the whole brief together. It holds the targets, the rules, both cost caps and what every setting does. Then tap “I've read the brief. Take me to the decisions.” (it unlocks once you reach the end, or after 30 seconds).",
       "2 · Tune: each choice locks the moment you tap it. There is no undo and no confirmation, so decide as a team first. The scene, the gauges, the cap bars and the seconds found per lap update at once, so you see the consequence.",
       "The counter shows Locked 1 of 3. When all three are locked the table locks itself and the only step left is Call the Solutions Architect.",
-      "3 · Pitch: wait for the SA (they may be busy with another team), then pitch for 30 seconds: why each choice helps the customer and how a provider helps.",
-      "Approved: this table counts in the race. Rejected: the SA's reason is shown, all three dials reopen with your last picks shown as “last time” ghosts, and you choose again and call the SA again. That takes time.",
+      "3 · Pitch: wait for the SA, then pitch for 30 seconds: why each choice helps the customer and how a provider helps.",
+      "Approved: this table counts in the 2027 plan. Rejected: the SA's reason is shown, all three dials reopen with your last picks shown as “last time” ghosts, and you choose again and call the SA again. That takes time.",
       "Over a cap, or breaking an FIA rule or an Audi F1 requirement, is not allowed: 0.00 s counts. FIT 80+ means in the zone.",
-      "There is no timer unless the host starts one. When the race runs (or a timer reaches zero), any table not approved, including one still adjusting after a rejection, races on today's setup. After the race, open your readout: seconds found, attempts, lessons and what to do differently.",
+      "There is no timer unless the host starts one. When the race runs (or a timer reaches zero), any table not approved, including one still adjusting after a rejection, races on today's setup. The race is the 2027 plan against today's Hinwil setup; then the readout: seconds found, attempts, lessons and what to do differently.",
     ],
   },
   architect: {
     title: "Solutions Architects (SA)",
     steps: [
       "On the host screen enter the host PIN, pick your table under Solutions Architects and tap Open my table. You are Available at once.",
-      "Tap a team in the queue: you see its board exactly as the team locked it, which attempt this is, and the table's brief.",
+      "When the customer's table calls you, you see its board exactly as it was locked, which attempt this is, and the table's brief.",
       "Start pitch: 30 seconds. Ask why each choice helps the customer and how a provider helps.",
-      "Approve, or Reject with a short reason the team will see. Rejecting reopens that team's three dials at your table only; they choose again and call you again.",
+      "Approve, or Reject with a short reason the table will see. Rejecting reopens the three dials at your table only; the customer chooses again and calls you again.",
     ],
   },
   host: {
     title: "Session host",
     steps: [
-      "Nothing to set up: the game is open the moment a page is open. Teams add themselves on the table iPads, and the budget level is Standard unless you change it before the first lock.",
+      "Nothing to set up: the game is open the moment a page is open, with the Audi F1 Team as its one participant. The budget level is Standard unless you change it before the first lock.",
       "The timer is optional. Start timer (35 minutes unless you change it), Pause, add or remove minutes, or Reset timer to go back to no timer. When a timer reaches zero every table locks; Start timer or Reset timer reopens play.",
-      "Watch the approvals grid: locks, attempts, pitches, seconds found and FIT. Rename or remove a team to fix a typo, and use Act as SA to run any table's queue.",
-      "Run race at any time, then Show readouts. Clear the race reopens play. Restart the experience empties the game for the next group.",
+      "Watch the approvals grid: the customer's four tables, each with its status, attempt, seconds found and FIT, and the total the race will use. Use Act as SA to run any table's queue.",
+      "Run race at any time: the 2027 plan against today's Hinwil setup. Then Show readout. Clear the race reopens play. Restart the experience starts the customer again from nothing.",
     ],
   },
   projector: {
     title: "Projector",
     steps: [
-      "Shows the lap-time ladder as teams add themselves: each team's car moves right as its approved seconds land. A countdown shows only while a timer is running.",
-      "Run race needs the race password, which is the host PIN. The race plays in 30 seconds, then the podium.",
-      "Readouts cycle through every team; tap a team to hold it on screen.",
+      "Shows the lap-time ladder: the customer's seconds found per table, the 2027 plan's total and today's Hinwil setup at 0.00 s. Cars move right as approvals land. A countdown shows only while a timer is running.",
+      "Run race needs the race password, which is the host PIN. Two cars, 56 laps in 30 seconds: the 2027 plan against today's setup, then the gap in seconds and the customer's readout.",
+      "Show readout (from the host controls) holds the customer's readout on the projector.",
     ],
   },
 }
@@ -214,7 +214,7 @@ export function instructionsButton(role) {
 
 export function openInstructions(role) {
   document.getElementById("drawer")?.remove()
-  const roles = role === "team" ? ["team", "architect"] : [role]
+  const roles = role === "table" ? ["table", "architect"] : [role]
   const close = () => document.getElementById("drawer")?.remove()
   const drawer = el("div", { id: "drawer", class: "drawer-back", onclick: (e) => e.target.id === "drawer" && close() },
     el("div", { class: "drawer", role: "dialog", "aria-modal": "true" },
@@ -241,11 +241,8 @@ export function confirmDialog(text, yes = "Yes", no = "Cancel") {
 
 /** One vocabulary for the same action on every table, the host and the projector. */
 export const WORDS = {
-  chooseTeam: "Choose your team",
-  addTeam: "Add your team",
   noTimer: "No timer",
   hostPin: "Host PIN",
-  switchTeam: "Switch team",
   startTuning: "Start tuning",
   problem: "Problem",
   scenario: "Scenario",
@@ -291,6 +288,8 @@ export const WORDS = {
   racePassword: "Race password",
   readTheBrief: "Read the brief",
   screenshot: "Take a screenshot now",
+  plan2027: "2027 plan",
+  todayHinwil: "Today's Hinwil setup",
 }
 
 /** Primary (one per screen), secondary (default), go (positive) or danger buttons, all the same size. */
