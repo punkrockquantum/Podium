@@ -385,6 +385,41 @@ export function evaluatePlan(rawPlan) {
 }
 
 /** The envelope health line for one season: tone by share of the 500 kW offer (green ≤ 90 %, amber ≤ 100 %, red over). */
+/**
+ * An `evaluate()`-shaped function for one season of an evaluated plan, for the attribution: the season's go-live
+ * blend (shares of the season on today's setup, on the carried 2027 estate and on the season's own estate, and the
+ * allowance lost at the switch) is held at the plan's values while the inputs vary, so the bars add up to the
+ * plan-level headline exactly. For 2028 the months on the carried 2027 estate are a fixed baseline step.
+ */
+export function seasonAttributionFn(result, year) {
+  const s = result.seasons[year]
+  const today = s.today
+  const b = s.blend
+  const shareNew = b.shareNew
+  const loss = shareNew > 0 ? clamp(b.lossShare / shareNew, 0, 1) : 0
+  const wToday = today.comp.effectiveMauh
+  const stepUp = year === 2028 && result.deltas.stepUp
+  const carryW = year === 2028 && b.shareCarry > 0 ? simulate({ ...result.inputs[2027], season: 2028 }).comp.effectiveMauh : 0
+  return (inputs) => {
+    const x = { ...inputs, season: year }
+    let scenario
+    let w
+    if (year === 2027) {
+      // as in evaluatePlan: no estate change, no cutover (the whole season on the modified setup, nothing lost at a switch)
+      const changes = ESTATE_IDS.some((id) => x[id] !== today.inputs[id])
+      scenario = simulate({ ...x, scheduleLoss: changes ? loss : 0 })
+      w = (changes ? b.shareOld : 0) * wToday + (changes ? shareNew : 1) * scenario.comp.effectiveMauh
+    } else if (stepUp) {
+      scenario = simulate({ ...x, scheduleLoss: loss })
+      w = b.shareToday * wToday + b.shareCarry * carryW + shareNew * scenario.comp.effectiveMauh
+    } else {
+      scenario = simulate(x)
+      w = b.shareToday * wToday + (b.shareCarry + shareNew) * scenario.comp.effectiveMauh * (1 - loss)
+    }
+    return { scenario, today, perf: perfBlock(scenario, today, { wScenario: w, wToday }) }
+  }
+}
+
 export function envelopeLine(env, season) {
   if (!env) return null
   const kw = Math.round(env.drIT)

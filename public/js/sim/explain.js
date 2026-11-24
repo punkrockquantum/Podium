@@ -1391,10 +1391,10 @@ const STRATEGY_ENTRIES = {
     term: "consolidate",
     one: "Move what we have to a place that can run all of it.",
     more: [
-      "Nearly all of the gain is the move: Today's room is 94 kW short in 2027 and 479 kW short in 2028, so a quarter to two thirds of the cluster never runs. At the campus everything runs: +0.084 s (61 %) in 2027, +0.329 s (89 %) in 2028.",
-      "Parallel storage and InfiniBand stop cores waiting for data: +0.035 s / +0.047 s. A four-year instead of five-year fleet does 8 % more work per charged hour: +0.030 s / +0.024 s.",
-      "It leaves the cluster size and declared clock alone, so there is no clock gain and no 2028 solver step for graphics processors; the four unrestricted graphics processors cost a little (−0.019 s) through power and cap money.",
-      "It adds the least to the cost inside the cap of the three strategies (+CHF 0.95 M a year in 2027, +0.29 M in 2028 vs Today); the trackside package costs −0.016 s and takes the pit-wall decision from 8.6 s to 5.1 s at Singapore.",
+      "Nearly all of the gain is the move: today's room cannot power the whole cluster in either season, so part of it never runs. At the campus everything runs, and that is most of the 2028 gain.",
+      "Parallel storage and InfiniBand stop cores waiting for data, and a four-year instead of five-year fleet does more work per charged hour.",
+      "It leaves the cluster size and the declared clock alone, so there is no clock gain and no 2028 solver step for graphics processors; the four unrestricted graphics processors cost a little through power and cap money.",
+      "It adds the least to the cost inside the cap of the three strategies; the trackside package costs a little lap time and brings the pit-wall decision to about five seconds.",
     ],
     analogy: "Moving the whole workshop into a bigger building before buying new tools.",
     inPlan: STRATEGY_INPLAN,
@@ -1406,10 +1406,10 @@ const STRATEGY_ENTRIES = {
     term: "density",
     one: "Spend the allowance as cleverly as the rules allow, then add graphics processors the day they are legal.",
     more: [
-      "In 2027, 18 wide servers declared at the 2.4 GHz base clock buy 54 % more core-hours per charged unit: +0.042 s (19 %). A three-year fleet adds +0.062 s (28 %).",
-      "In 2028 four solver graphics processors are the single biggest technology bar of any plan: +0.189 s (41 %). Cutting the CPU cluster to three servers to make power and allowance room costs −0.134 s, so the swap nets +0.055 s and frees power for a machine-learning partition.",
-      "Direct liquid cooling at 70 kW per cabinet earns +0.058 s in 2028, mostly through a PUE of 1.15 on the electricity bill. Slingshot and flash storage: +0.045 s / +0.054 s. The move: +0.091 s / +0.303 s.",
-      "It spends the most inside the cap (+CHF 1.34 M a year in 2027, +0.57 M in 2028 vs Today), and the whole 2028 case rests on the FIA's unpublished charge for graphics processors: at 100 % charge the bar shrinks.",
+      "In 2027, eighteen wide servers declared at the 2.4 GHz base clock buy far more core-hours per charged unit than today's 3.7 GHz machines; a three-year fleet adds a newer-generation bonus on top.",
+      "In 2028 four solver graphics processors are the single biggest technology bar of any plan. Cutting the CPU cluster to three servers to make power and allowance room costs lap time, so the swap nets less than the GPU bar alone and frees power for a machine-learning partition.",
+      "Direct liquid cooling earns lap time in 2028 mostly through a PUE of 1.15 on the electricity bill; Slingshot and flash storage keep the cores fed; the move itself is still the largest bar.",
+      "It spends the most inside the cap, and the whole 2028 case rests on the FIA's unpublished charge for graphics processors: at a 100 % charge the GPU bar shrinks. The bullets on the card carry the live plan-level figures.",
     ],
     analogy: "Buying the oven for next year's menu and learning to cook on it now.",
     inPlan: STRATEGY_INPLAN,
@@ -1421,16 +1421,26 @@ const STRATEGY_ENTRIES = {
     term: "efficient",
     one: "Take B's clock trick, hedge the graphics-processor bet, keep the cap bill down.",
     more: [
-      "The same 2027 clock/width effect as B (+0.042 s, 22 %) on cheaper rear-door rows and InfiniBand; a four-year fleet (+0.032 s).",
-      "In 2028 a two-GPU step (+0.080 s, 17 %) with eleven CPU servers kept, so the clock bar stays nearly neutral (−0.024 s) and the plan does not depend on the GPU charge rule.",
-      "The move: +0.088 s (46 %) / +0.330 s (71 %). Storage and network: +0.049 s / +0.051 s. Rear-door cooling: +0.003 s / +0.030 s.",
-      "Cap spend sits between A and B (+CHF 1.19 M / +0.36 M a year vs Today); its trackside and cloud on-ramp package costs the most lap time of the three (−0.025 s / −0.028 s) for the same 5.1 s pit-wall decision.",
+      "The same 2027 clock-and-width effect as B on cheaper rear-door rows and InfiniBand, with a four-year fleet.",
+      "In 2028 a two-GPU step with eleven CPU servers kept, so the clock bar stays nearly neutral and the plan does not depend on the GPU charge rule.",
+      "The move is the largest bar in both seasons; storage and network and rear-door cooling add the rest.",
+      "Cap spend sits between A and B; its trackside and cloud on-ramp package costs the most lap time of the three for the same five-second pit-wall decision. The bullets on the card carry the live plan-level figures.",
     ],
     analogy: "Renting the extra kitchen only on the days you need it.",
     inPlan: STRATEGY_INPLAN,
     source: "1.5 · 2.4 · model",
     terms: ["term.shapley", "term.onramp", "term.greenlake"],
   },
+}
+
+const MILESTONE_ENTRIES = {
+  contract: { title: "Contract signature", one: "The day the colocation contract is signed; every lead time in the plan counts from here.", more: ["Fit-out, dark fibre and the hardware order all start at signature, so a later signature moves the cutover.", "The tool plans from today's date unless you set a later contract date."], analogy: "The day you pick up the keys.", inPlan: "{d.plan.goLiveLabel}{d.plan.slipNote}.", source: "G11 · D-e · model", terms: ["term.crossconnect", "term.darkfibre"] },
+  cutover: { title: "Cutover", one: "The day the airflow-computing cluster runs from the new estate; the plan targets an eight-week period boundary.", more: ["Moving at a period boundary avoids losing allowance mid-period; a mid-period move loses a share of that period.", "The go-live follows the longest lead time: fit-out, fibre or hardware."], analogy: "Moving house on the first of the month.", inPlan: "{d.plan.goLiveLabel}, {d.plan.criticalLabel} on the critical path{d.plan.slipNote}.", source: "F4.1.4 · C13 · model", terms: ["term.atp"] },
+  declaration: { title: "New declaration", one: "The FIA must be told about the new cluster, its location, cores and declared clock before it runs restricted airflow computing.", more: ["The regulations ask for the declaration ahead of use; the tool places it at the cutover boundary."], analogy: "Registering a new car before driving it.", inPlan: "Declared for the {d.plan.atpLabel27} boundary; {d.plan.goLiveLabel}.", source: "F4.4.3 · C7", terms: ["term.declaredClock"] },
+  "stepup-order": { title: "Order the 2028 step-up", one: "The last day to order the 2028 hardware so it is delivered and burned in before 1 January 2028.", more: ["Lead time counts back from the step-up date; a late order pushes the GPU partition into the 2028 season."], analogy: "Ordering the turkey in time for Christmas.", inPlan: "Order by {d.plan.orderByLabel}; {d.plan.stepUpLabel}{d.plan.stepUpNote}.", source: "C13 · model", terms: ["term.gpu"] },
+  stepup: { title: "2028 step-up", one: "The day the 2028 estate goes live, usually 1 January 2028 when graphics processors may join the solver.", more: ["A step-up that lands after 1 January leaves part of 2028 on the 2027 estate; one that lands early costs money before it is legal to use."], analogy: "The new term starting.", inPlan: "{d.plan.stepUpLabel}{d.plan.stepUpNote}.", source: "F4.4.4 · C10 · model", terms: ["term.gpu", "term.atp"] },
+  declaration28: { title: "Re-declaration for 2028", one: "The FIA must be told about the 2028 cluster, graphics processors included, before it runs restricted airflow computing.", more: ["Same rule as the 2027 declaration; placed at the 1 January boundary."], analogy: "Re-registering the car after a rebuild.", inPlan: "{d.plan.stepUpLabel}.", source: "F4.4.3 · C7", terms: ["term.declaredClock"] },
+  refresh: { title: "Next refresh", one: "When the fleet is next replaced under the refresh cadence; outside the 2027–2028 window in most plans.", more: ["A shorter cadence gives newer, more efficient processors sooner but costs more each year."], analogy: "Changing the family car every few years.", inPlan: "Refresh every {x.refreshYears} years.", source: "L4 · model", terms: ["term.ipc"] },
 }
 
 const TERM_ENTRIES = {
@@ -1480,6 +1490,7 @@ export const EXPLAIN = Object.freeze({
   ...withPrefix("flag", FLAG_ENTRIES),
   ...withPrefix("driver", DRIVER_ENTRIES),
   ...withPrefix("strategy", STRATEGY_ENTRIES),
+  ...withPrefix("milestone", MILESTONE_ENTRIES),
   ...withPrefix("term", TERM_ENTRIES, (id, e) => ({ more: [e.one], inPlan: null, terms: [] })),
 })
 
@@ -1489,6 +1500,7 @@ export const FLAG_IDS = Object.keys(FLAG_ENTRIES)
 export const DRIVER_IDS = Object.keys(DRIVER_ENTRIES)
 export const STRATEGY_IDS = Object.keys(STRATEGY_ENTRIES)
 export const TERM_IDS = Object.keys(TERM_ENTRIES)
+export const MILESTONE_IDS = Object.keys(MILESTONE_ENTRIES)
 /** Entries for controls or flags the model does not have yet (none since the integration pass; kept for the tests). */
 export const PENDING_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.pending).map(([id]) => id)
 /** Entries for the two-season planning tool's tiles and timeline flags; their templates read explainContext({ plan }). */
