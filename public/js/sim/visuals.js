@@ -108,7 +108,8 @@ export function gantt(timeline, { compact = false, width = 960 } = {}) {
     const x1 = xOf(atp.start)
     const x2 = xOf(atp.end)
     node.append(svg("rect", { class: `atp-band ${atp.index % 2 ? "odd" : "even"}`, x: x1.toFixed(1), y: bandTop, width: Math.max(0, x2 - x1).toFixed(1), height: bandH }))
-    if (x2 - x1 > 34) node.append(svg("text", { class: "atp-text", x: ((x1 + x2) / 2).toFixed(1), y: bandTop + 15, "text-anchor": "middle" }, compact ? `P${atp.index}` : `ATP ${atp.index}`))
+    // "ATP n" in both charts: "P1 … P6" read like championship positions
+    if (x2 - x1 > 40) node.append(svg("text", { class: "atp-text", x: ((x1 + x2) / 2).toFixed(1), y: bandTop + 15, "text-anchor": "middle" }, `ATP ${atp.index}`))
   }
   const yearX = {}
   for (const y of [2027, 2028]) {

@@ -37,7 +37,7 @@ export const A = {
     depreciationYearsPlant: a(F.fia.depreciationYearsPlant, "C11", "Straight line, zero residual (D6.1.1.k); fit-out and plant over 10 years"),
     propertyShareOfFee: a(0.5, "C3-open", "Share of the colocation fee that a finance team might present as Property Costs (space) rather than service"),
     telemetry: v("Car → team telemetry only; team → car is prohibited (C8.5.3)", "C12"),
-    atp2027: v([["P1", "2027-01-01", "2027-03-07"], ["P2", "2027-03-08", "2027-05-02"], ["P3", "2027-05-03", "2027-06-27"], ["P4", "2027-06-28", "2027-09-05"], ["P5", "2027-09-06", "2027-10-31"], ["P6", "2027-11-01", "2027-12-31"]], "C13", "2027 ATP boundaries derived from F4.1.4; cutovers are planned at 8 Mar 2027 (P1/P2) and 1 Jan 2028"),
+    atp2027: v([["ATP 1", "2027-01-01", "2027-03-07"], ["ATP 2", "2027-03-08", "2027-05-02"], ["ATP 3", "2027-05-03", "2027-06-27"], ["ATP 4", "2027-06-28", "2027-09-05"], ["ATP 5", "2027-09-06", "2027-10-31"], ["ATP 6", "2027-11-01", "2027-12-31"]], "C13", "2027 ATP boundaries derived from F4.1.4; cutovers are planned at 8 Mar 2027 (the ATP 1/2 boundary) and 1 Jan 2028"),
   },
   compute: {
     refClockGHz: a(3.7, "J-d", "Reference CCF: one reference core-hour = 1 AUh at 3.7 GHz on current silicon"),
@@ -168,7 +168,7 @@ export const A = {
   },
   timeline: {
     planningDate: v("2026-11-24", "C13", "The date the plan is drawn up; lead times count from here or from the contract date"),
-    atpRule: v("P1: 1 Jan → end of week 9; P2, P3, P5: 8 weeks; P4: 10 weeks incl. the summer shutdown; P6: → 31 Dec", "C13", "F4.1.4; weeks start on a Monday and week 1 is the first week with four or more days (ISO 8601)"),
+    atpRule: v("ATP 1: 1 Jan → end of week 9; ATPs 2, 3 and 5: 8 weeks each; ATP 4: 10 weeks incl. the summer shutdown; ATP 6: → 31 Dec", "C13", "F4.1.4; weeks start on a Monday and week 1 is the first week with four or more days (ISO 8601)"),
     summerShutdown: a({ 2027: "2027-08-02", 2028: "2028-07-31", days: 14 }, "C14", "Fourteen consecutive days in July/August (F3.1.1.a), notified by the team; assumed to start on the first Monday of August"),
     winterShutdown: v({ monthDay: "12-24", days: 9 }, "C14", "Nine consecutive days from 24 December (F3.1.1.b); no CFD compute except system or software upgrade and maintenance (F3.1.2.b, F3.1.4.d)"),
     preSeason: {

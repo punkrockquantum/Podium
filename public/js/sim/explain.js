@@ -72,7 +72,7 @@ const CONTROL_ENTRIES = {
       "The team's own result moves this slider.",
     ],
     analogy: "A golf handicap: the further behind you are, the more shots you are given.",
-    inPlan: "P{x.position}: {s.fia.pct} % of the base amount, {s.fia.allowance.mauh} million unit-hours per period.",
+    inPlan: "Position P{x.position}: {s.fia.pct} % of the base amount, {s.fia.allowance.mauh} million unit-hours per period.",
     source: "F4.6.1 · C5",
     terms: ["term.atr", "term.auh"],
   },

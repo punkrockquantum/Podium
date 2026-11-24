@@ -492,3 +492,25 @@ test("sa: roles, checklist, risk register and the solution brief are complete an
   const mid = evaluatePlan(setTimeline(presetPlan("dr2027"), { cutoverDate: "2027-06-01", parallelWeeks: 0 }))
   assert.equal(riskRegister(mid).find((k) => k.id === "midatp").status, "triggered", "the register is live")
 })
+
+test("periods are labelled 'ATP n', never 'P n' (which reads like a championship position); the position echo says what it is", async () => {
+  const { readFileSync } = await import("node:fs")
+  const { STRATEGIES } = await import("../public/js/sim/strategies.js")
+  const PERIOD = /\bP[1-6]\b/
+  for (const year of [2027, 2028]) for (const p of atpCalendar(year)) assert.equal(p.label, `ATP ${p.index}`)
+  for (const [label] of K.fia.atp2027) assert.match(label, /^ATP [1-6]$/)
+  assert.doesNotMatch(K.timeline.atpRule, PERIOD, K.timeline.atpRule)
+  for (const o of cutoverOptions()) assert.doesNotMatch(o.label, PERIOD, o.label)
+  for (const st of Object.values(STRATEGIES)) {
+    for (const t of st.timeline) assert.doesNotMatch(`${t.when} ${t.what}`, PERIOD, `${st.key}: ${t.when} ${t.what}`)
+    for (const text of Object.values(st.cutover || {})) assert.doesNotMatch(text, PERIOD, `${st.key}: ${text}`)
+  }
+  // the timeline strips and the Gantt render "ATP n" from the period index; nothing builds a "P" + number tick
+  for (const file of ["public/js/sim/visuals.js", "public/js/sim/views/strategies.js", "public/js/sim/views/overview.js", "public/js/sim/views/deployment.js", "public/js/sim/views/component.js"]) {
+    const src = readFileSync(new URL(`../${file}`, import.meta.url), "utf8")
+    assert.doesNotMatch(src, /`P\$\{[^}]*index\}|[`"']P\$\{(?:atp|p)\./, `${file} builds a "P" + period tick`)
+    for (const m of src.matchAll(/P\$\{([^}]+)\}/g)) assert.match(m[1], /position/, `${file}: P\${${m[1]}} is not a position echo`)
+  }
+  assert.equal(CONTROLS.position.label, "Constructors' position used for the sliding scale")
+  assert.equal(CONTROLS.position.format(8), "P8 · 105 %")
+})

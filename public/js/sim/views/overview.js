@@ -36,7 +36,7 @@ const CARDS = [
   },
   {
     id: "fia", route: "fia", title: "What does the FIA allow?",
-    summary: (x, s) => `P${x.position} · ${fmt.num(s.sim.fia.allowance.mauh, 2)} MAUh per period (${s.sim.fia.pct} %) · ${Math.round(s.sim.comp.usage * 100)} % used · GPU solver ${s.sim.fia.gpuSolverAllowed ? "allowed" : "not before 2028"}`,
+    summary: (x, s) => `Position P${x.position} · ${fmt.num(s.sim.fia.allowance.mauh, 2)} MAUh per period (${s.sim.fia.pct} %) · ${Math.round(s.sim.comp.usage * 100)} % used · GPU solver ${s.sim.fia.gpuSolverAllowed ? "allowed" : "not before 2028"}`,
     quick: { id: "position" },
   },
   {

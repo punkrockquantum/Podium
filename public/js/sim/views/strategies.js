@@ -107,7 +107,7 @@ function outcomeTiles(result, today, key) {
     stat("Race weekends at risk", bothValues((s) => fmt.num(s.trackside.weekendsAtRisk, 2), result), "link availability"))
 }
 
-/** Horizontal strip Dec 2026 → Jan 2028: ATP boundaries as ticks, plan milestones as markers (labels on four rows). */
+/** Horizontal strip Dec 2026 → Jan 2028: ATP boundaries as ticks ("ATP 1" … "ATP 6", then 2028's "ATP 1" beside the 1 Jan 2028 marker), plan milestones as markers (labels on four rows). */
 function timelineStrip(st, result, key) {
   const from = Date.UTC(2026, 11, 1)
   const to = Date.UTC(2028, 1, 1)
@@ -143,7 +143,7 @@ function timelineStrip(st, result, key) {
   const ticks = [...atpCalendar(2027), ...atpCalendar(2028).slice(0, 1)]
   const node = svg("svg", { class: "timeline-strip", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Timeline of strategy ${key}: ${markers.map((m) => m.label).join(", ")}` },
     svg("line", { x1: 10, x2: W - 10, y1: axisY, y2: axisY, class: "strip-axis" }),
-    ...ticks.map((p) => svg("g", {}, svg("line", { x1: x(p.start), x2: x(p.start), y1: axisY - 5, y2: axisY + 5, class: "strip-tick" }), svg("text", { x: x(p.start) + 2, y: axisY + 15, class: "strip-tick-text" }, p.index === 1 ? `${p.year} P1` : `P${p.index}`))),
+    ...ticks.map((p) => svg("g", {}, svg("line", { x1: x(p.start), x2: x(p.start), y1: axisY - 5, y2: axisY + 5, class: "strip-tick" }), svg("text", { x: x(p.start) + 2, y: axisY + 15, class: "strip-tick-text" }, `ATP ${p.index}`))),
     ...placed.map((m) => svg("g", { class: `strip-marker kind-${m.kind} ${m.strong ? "strong" : ""}` },
       svg("line", { x1: m.px, x2: m.px, y1: axisY, y2: m.ty < axisY ? m.ty + 3 : m.ty - 9, class: "strip-lead" }),
       svg("circle", { cx: m.px, cy: axisY, r: m.strong ? 4.5 : 3 }),

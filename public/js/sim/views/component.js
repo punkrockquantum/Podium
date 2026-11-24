@@ -113,7 +113,7 @@ function fiaOutputs(result) {
     const mauhTone = sim.comp.usedMauh === 0 ? "bad" : sim.comp.usage > 1 ? "warn" : sim.comp.usage < 0.9 ? "warn" : "ok"
     return [
       el("div", { class: "stats" },
-        stat("Allowance per period", `${fmt.num(sim.fia.allowance.mauh, 2)} MAUh`, `P${sim.inputs.position} · ${sim.fia.pct} % of the 6 MAUh baseline`),
+        stat("Allowance per period", `${fmt.num(sim.fia.allowance.mauh, 2)} MAUh`, `position P${sim.inputs.position} on the sliding scale · ${sim.fia.pct} % of the 6 MAUh baseline`),
         stat("Wind tunnel", `${sim.fia.allowance.runs} runs`, `${sim.fia.allowance.windOn} wind-on hours · ${sim.fia.allowance.occupancy} h occupancy`),
         stat("GPU solver", sim.fia.gpuSolverAllowed ? "Allowed" : "Not allowed", sim.fia.gpuSolverAllowed ? `${sim.comp.gpuSolverN} solver GPUs declared` : "CPU-only until 1 January 2028 (F4.4.1)"),
         stat("Cost cap", fmt.chf(costCapCHF.fia, 1), `${fmt.pct(sim.money.capShare, 1)} of it is this estate`)),

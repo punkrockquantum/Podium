@@ -52,11 +52,11 @@ export const COMMON = Object.freeze({
   propertySharePct: 50, venue: "singapore", gpuChargePct: 100, location: "dr", committedKW: 500, cpuArch: "today",
 })
 
-const CUTOVER_2027 = "Declaration and cutover at the P1/P2 boundary (8 Mar 2027), after the Bahrain test; the Hinwil cluster carries P1."
+const CUTOVER_2027 = "Declaration and cutover at the ATP 1/2 boundary (8 Mar 2027), after the Bahrain test; the Hinwil cluster carries ATP 1."
 const SITE_TIMELINE = [
   { when: "Dec 2026 – Feb 2027", what: "Contract, cage fit-out, pre-cabling to the Meet-Me-Room (15 business days), cross-connects (3 business days); dark fibre ordered in week 1 (3–6-month build)" },
   { when: "24–27 Feb 2027", what: "Bahrain test on the Hinwil cluster" },
-  { when: "8 Mar 2027 (P1/P2 boundary)", what: "New declaration (cluster, location, cores, CCF) and cutover; estate migrated wave by wave in P2–P3" },
+  { when: "8 Mar 2027 (ATP 1/2 boundary)", what: "New declaration (cluster, location, cores, CCF) and cutover; estate migrated wave by wave in ATPs 2–3" },
 ]
 
 export const STRATEGIES = Object.freeze({
@@ -107,11 +107,11 @@ export const STRATEGIES = Object.freeze({
     }),
     2027: Object.freeze({ nodes: 18, coresPerNode: 128, clockGHz: 2.4, memoryGB: 768, interconnect: "slingshot", storage: "flash", gpus: 0, solverGpus: 0, gpuModel: "b200", refreshYears: 3, leadWeeks: 0, mlPartitionKW: 0, mlPlacement: "dr" }),
     2028: Object.freeze({ nodes: 3, coresPerNode: 128, clockGHz: 2.4, memoryGB: 768, interconnect: "slingshot", storage: "flash", gpus: 16, solverGpus: 4, gpuModel: "b200", refreshYears: 3, leadWeeks: -6, mlPartitionKW: 50, mlPlacement: "dr" }),
-    cutover: { 2027: "CPU fleet declared at the P1/P2 boundary (8 Mar 2027).", 2028: "GPU rows delivered 6 weeks before 1 Jan 2028, burned in during P6 2027 as unrestricted hardware (legal: pre/post-processing), re-declared for 1 Jan 2028 (P6/P1 boundary); the GreenLake buffer absorbs the swap and the released CPU nodes return under the GreenLake term." },
+    cutover: { 2027: "CPU fleet declared at the ATP 1/2 boundary (8 Mar 2027).", 2028: "GPU rows delivered 6 weeks before 1 Jan 2028, burned in during ATP 6 of 2027 as unrestricted hardware (legal: pre/post-processing), re-declared for 1 Jan 2028 (the ATP 6/1 boundary); the GreenLake buffer absorbs the swap and the released CPU nodes return under the GreenLake term." },
     timeline: [
       ...SITE_TIMELINE,
-      { when: "Mid Nov 2027", what: "GPU hosts delivered (lead −6 weeks); burn-in during P6 as unrestricted pre/post-processing hardware" },
-      { when: "1 Jan 2028 (P6/P1 boundary)", what: "Re-declaration: 3 CPU nodes + 4 B200 solver GPUs; 15 CPU nodes returned under the GreenLake term; 50 kW ML partition live" },
+      { when: "Mid Nov 2027", what: "GPU hosts delivered (lead −6 weeks); burn-in during ATP 6 as unrestricted pre/post-processing hardware" },
+      { when: "1 Jan 2028 (ATP 6/1 boundary)", what: "Re-declaration: 3 CPU nodes + 4 B200 solver GPUs; 15 CPU nodes returned under the GreenLake term; 50 kW ML partition live" },
     ],
     provides: {
       dr: ["DLC-ready rows (CDUs and manifolds in the customer fit-out †)", "2N A+B feeds", "100 % renewable power and heat reuse", "ServiceFabric on-ramps (AWS Direct Connect, Azure ExpressRoute) for the ML burst", "Cross-connects"],
@@ -142,11 +142,11 @@ export const STRATEGIES = Object.freeze({
     }),
     2027: Object.freeze({ nodes: 18, coresPerNode: 128, clockGHz: 2.4, memoryGB: 768, interconnect: "ibndr", storage: "pfs", gpus: 0, solverGpus: 0, gpuModel: "b200", refreshYears: 4, leadWeeks: 0, mlPartitionKW: 0, mlPlacement: "cloud" }),
     2028: Object.freeze({ nodes: 11, coresPerNode: 128, clockGHz: 2.4, memoryGB: 768, interconnect: "ibndr", storage: "pfs", gpus: 4, solverGpus: 2, gpuModel: "b200", refreshYears: 4, leadWeeks: -4, mlPartitionKW: 0, mlPlacement: "cloud" }),
-    cutover: { 2027: "Declaration at 8 Mar 2027 (P1/P2 boundary).", 2028: "2028 hardware 4 weeks early, re-declared for 1 Jan 2028; the GreenLake 20 % buffer carries the 18 → 11 node re-shape." },
+    cutover: { 2027: "Declaration at 8 Mar 2027 (ATP 1/2 boundary).", 2028: "2028 hardware 4 weeks early, re-declared for 1 Jan 2028; the GreenLake 20 % buffer carries the 18 → 11 node re-shape." },
     timeline: [
       ...SITE_TIMELINE,
       { when: "Early Dec 2027", what: "2 solver + 2 unrestricted B200s delivered (lead −4 weeks); CPU fleet re-shaped 18 → 11 nodes under the GreenLake buffer" },
-      { when: "1 Jan 2028 (P6/P1 boundary)", what: "Re-declaration: 11 CPU nodes at 2.4 GHz + 2 B200 solver GPUs" },
+      { when: "1 Jan 2028 (ATP 6/1 boundary)", what: "Re-declaration: 11 CPU nodes at 2.4 GHz + 2 B200 solver GPUs" },
     ],
     provides: {
       dr: ["Private cage with 2N A+B feeds", "Rear-door rows", "100 % renewable power and heat reuse", "ServiceFabric on-ramps: the cloud is the ML partition (mlPlacement = cloud)", "Cross-connects"],
@@ -246,7 +246,7 @@ export function envelopeOf(result) {
   return e && e.guardrails ? e : envelopeCheck(result.scenario)
 }
 
-/** Strategy timeline: contract at the planning date, declaration and cutover targeted at the P1/P2 boundary (8 Mar 2027; plan.js shows the slip the lead times impose), GPU re-declaration for 1 Jan 2028. */
+/** Strategy timeline: contract at the planning date, declaration and cutover targeted at the ATP 1/2 boundary (8 Mar 2027; plan.js shows the slip the lead times impose), GPU re-declaration for 1 Jan 2028. */
 export const STRATEGY_TIMELINE = Object.freeze({ contractDate: "2026-11-24", cutoverDate: "2027-03-08", parallelWeeks: 2, stepUpDate: "2028-01-01" })
 
 /**

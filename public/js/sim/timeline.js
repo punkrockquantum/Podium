@@ -51,7 +51,7 @@ export function week1Monday(year) {
   return jan4 - dow * DAY
 }
 
-/** The six ATPs of a year per F4.1.4: P1 1 Jan → end of week 9; P2, P3, P5 8 weeks; P4 10 weeks; P6 → 31 Dec. */
+/** The six ATPs of a year per F4.1.4: ATP 1 1 Jan → end of week 9; ATPs 2, 3, 5 8 weeks; ATP 4 10 weeks; ATP 6 → 31 Dec. */
 export function atpCalendar(year) {
   const jan1 = Date.UTC(year, 0, 1)
   const next = Date.UTC(year + 1, 0, 1)
