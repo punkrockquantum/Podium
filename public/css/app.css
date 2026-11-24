@@ -692,7 +692,7 @@ dl.brief-words { font-size: 15px; }
 .brief-gate { display: grid; gap: 10px; }
 .brief-gate .btn.primary:disabled { opacity: 0.45; }
 .one-shot-warning { margin: 0; font-size: 17px; color: var(--amber); }
-.one-shot-banner, .rejected-banner { font-size: 17px; }
+.one-shot-banner, .rejected-banner, .locked-banner { font-size: 17px; }
 .rejected-banner b { color: #fca5a5; }
 .lock-count { font-size: 15px; font-weight: 800; padding: 8px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); color: #cbd5e1; }
 .lock-count.all { background: #12391f; color: #86efac; border-color: #166534; }

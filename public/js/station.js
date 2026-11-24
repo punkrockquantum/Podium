@@ -182,7 +182,8 @@ function startTable() {
     if (d.plan && tab !== "pitch") {
       if (d.status === "waiting") return stateBanner(`${WORDS.waitingForArchitect}. ${queueStatus(state, team.id, station.id)?.text || ""}`, "info")
       if (d.status === "pitching") return stateBanner(`${WORDS.pitching} to ${d.pitch.by}.`, "good")
-      return stateBanner(`${WORDS.allLocked} (${WORDS.attempt(d.attempts).toLowerCase()}): go to Pitch and call the Solutions Architect.`, "info")
+      /* Sized like the one-shot banner it replaces on Tune, so the board below does not move when the plan lands. */
+      return stateBanner(`${WORDS.allLocked} (${WORDS.attempt(d.attempts).toLowerCase()}): ${WORDS.nextStep}.`, "info", { id: "lockedBanner", class: "locked-banner" })
     }
     return null
   }
@@ -369,6 +370,7 @@ function startTable() {
     const before = tune?.view.board()
     pending[decisionId] = value
     const after = refreshTune(team)
+    /* The third tap turns the step button primary at once; the banners swap when the server confirms the plan. */
     if (chosenDials(team).length === dialCount) patchTune(team)
     if (after?.inZone && !before?.inZone && !learned().has(station.id)) {
       markLearned()
@@ -377,7 +379,7 @@ function startTable() {
     post(`/api/teams/${team.id}/choices`, { station: station.id, choices: { [decisionId]: value } })
       .then((res) => {
         if (res?.team) Object.assign(team, res.team)
-        if (res?.plan) toast(`${WORDS.allLocked}: go to Pitch and ${WORDS.callArchitect.toLowerCase()}`)
+        if (res?.plan) toast(`${WORDS.allLocked}: ${WORDS.nextStep}`)
         render()
         return post(`/api/teams/${team.id}/sim`, { station: station.id }).catch(() => {})
       })
@@ -409,20 +411,18 @@ function startTable() {
   }
 
   /**
-   * The parts of Tune that change with the team's progress: the one-shot banner and the step button.
-   * The banner stays for the whole step (its words change, its height does not), so a lock never
-   * shifts the dials under the team's finger.
+   * The parts of Tune that change with the team's progress: the one-shot warning and the step button.
+   * The warning holds its place while the team locks dials one by one, so a lock never shifts the
+   * dials under the team's finger. Once the server confirms the third lock it goes, and the status
+   * banner above the step ("All three locked …") takes over in the same render at the same height:
+   * one message, and the board below stays put.
    */
   function patchTune(team) {
     const locked = lockedDials(team, station.id).length
-    /* The third tap counts as locked the moment it is made (optimistically, like the lock counter), so the banner never lags the dials. */
+    /* The third tap counts as locked the moment it is made (optimistically, like the lock counter), so the step button never lags the dials. */
     const plan = hasPlan(team) || chosenDials(team).length === dialCount
-    const mode = plan ? "done" : briefRead(team) ? "warn" : "none"
-    patchSlot(document.getElementById("oneShotSlot"), [mode], () => {
-      if (mode === "none") return null
-      if (mode === "done") return el("div", { class: "state-banner good one-shot-banner", role: "status", id: "oneShotBanner" }, el("b", {}, `🔒 ${WORDS.allLocked}. Go to Pitch and ${WORDS.callArchitect.toLowerCase()}.`))
-      return el("div", { class: "state-banner warn one-shot-banner", role: "status", id: "oneShotBanner" }, el("b", {}, WORDS.oneShot))
-    })
+    const warn = briefRead(team) && !hasPlan(team)
+    patchSlot(document.getElementById("oneShotSlot"), [warn], () => warn ? el("div", { class: "state-banner warn one-shot-banner", role: "status", id: "oneShotBanner" }, el("b", {}, WORDS.oneShot)) : null)
     patchSlot(document.getElementById("tuneActions"), [plan, locked], () => button(WORDS.goToPitch, () => goTab("pitch"), { kind: plan ? "primary" : "secondary", title: plan ? WORDS.allLocked : WORDS.lockedCount(locked, dialCount) }))
     refreshTune(team)
   }

@@ -268,6 +268,7 @@ export const WORDS = {
   locked: "Locked",
   lockedCount: (n, of = 3) => `Locked ${n} of ${of}`,
   allLocked: "All three locked",
+  nextStep: "go to Pitch and call the Solutions Architect",
   lastTime: "last time",
   goToPitch: "Go to Pitch",
   goToTune: "Go to Tune",
@@ -298,9 +299,9 @@ export function button(label, onclick, { kind = "secondary", disabled = false, s
   return el("button", { class: cls, onclick, disabled, title }, label)
 }
 
-/** The one banner for locked, time-up, not-in-play and reconnecting states. */
-export function stateBanner(text, tone = "warn") {
-  return text ? el("div", { class: `state-banner ${tone}`, role: "status" }, text) : null
+/** The one banner for locked, time-up, not-in-play and reconnecting states. `attrs` may add an id or extra classes. */
+export function stateBanner(text, tone = "warn", attrs = {}) {
+  return text ? el("div", { role: "status", ...attrs, class: `state-banner ${tone}${attrs.class ? ` ${attrs.class}` : ""}` }, text) : null
 }
 
 export function panel(title, ...children) {
