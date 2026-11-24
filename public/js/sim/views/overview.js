@@ -2,8 +2,8 @@
 import { CONTROLS } from "../model.js"
 import { FIGURES as F } from "../../customer.js"
 import { controlValue, controlDisplay, isDetached, envelopeLine } from "../plan.js"
-import { el, clear, fmt } from "../dom.js"
-import { inputWidget, envelopeGauge, hinwilGauge, badge, readout } from "../widgets.js"
+import { el, fmt, fill } from "../dom.js"
+import { inputWidget, envelopeGauge, hinwilGauge, badge, readout, waterfall, explainButton } from "../widgets.js"
 import { swissMap, gantt } from "../visuals.js"
 import { healthList, ribbonRow, statusDot, statusLabel } from "./common.js"
 import { fmtDate, parseDate, cutoverOptions, isoDate } from "../timeline.js"
@@ -78,19 +78,45 @@ export function overviewView(ctx) {
   }
   const timelineCard = el("section", { class: "card timeline-card", id: "timeline-compact" })
   const envelopeCard = el("section", { class: "card envelope-card", id: "envelope" })
+  const waterfallCard = el("section", { class: "card waterfall-card", id: "waterfall-card" })
+  let waterfallMode = "sec"
   const node = el("div", { class: "view view-overview" },
     el("div", { class: "overview-hero" }, ribbon, el("div", { class: "hero-side" }, envelopeCard, mapCard)),
+    waterfallCard,
     health,
     el("div", { class: "view-head compact" }, el("h2", {}, "Six decisions"), el("p", { class: "card-sub" }, "Each card shows the 2027 choice and what 2028 inherits or changes. Tune the details in the component views.")),
     grid,
     timelineCard)
 
+  /** "Where the seconds come from": one waterfall per season, a mode switch and the secondary readouts; waits for the attribution. */
+  function updateAttribution(state) {
+    const { plan, result, attribution } = state
+    const modes = [["sec", "seconds"], ["savedCHF", "CHF saved inside the cap"], ["effMauhDelta", "allowance turned into work"]]
+    const charts = [2027, 2028].map((y) => {
+      const a = attribution ? attribution[y] : null
+      const s = result.seasons[y]
+      const dd = s.perf.decisionDeltaSec
+      const line = a ? el("p", { class: "muted small wf-readouts" }, `From more useful computing ${fmt.sec(s.perf.aeroSec * (plan.shared.confidence / 100))} · from money kept inside the cap ${fmt.sec(s.perf.reinvestSec * (plan.shared.confidence / 100))} · race-day decisions ${Math.abs(dd) < 0.05 ? "as quick as today" : `${fmt.num(Math.abs(dd), 1)} s ${dd > 0 ? "quicker" : "slower"}`}`) : null
+      return el("div", { class: `waterfall-season ${attribution ? "" : "updating"}`, dataset: { season: String(y) } },
+        el("div", { class: "season-head" }, el("h4", {}, String(y)), el("span", { class: "muted small" }, `headline ${fmt.sec(s.perf.sec)}`)),
+        waterfall({ attribution: a, season: y, plainEnglish: state.plainEnglish, cpuArch: result.inputs[y].cpuArch, mode: waterfallMode, id: `waterfall-${y}`, status: s.status }),
+        line)
+    })
+    fill(waterfallCard,
+      el("div", { class: "card-head row" }, el("h3", {}, "Where the seconds come from", explainButton("tile.waterfall", "Where the seconds come from")),
+        el("div", { class: "segmented wf-modes", role: "group", "aria-label": "Show" }, el("span", { class: "muted small wf-show" }, "Show"), ...modes.map(([m, label]) => el("button", { type: "button", class: "seg seg-small", dataset: { mode: m }, "aria-pressed": String(m === waterfallMode), onclick: () => { waterfallMode = m; updateAttribution(ctx.getState()) } }, label)))),
+      result.health.status === "bad" ? el("p", { class: "flag level-bad wf-alert" }, result.health.headline) : null,
+      el("div", { class: "waterfall-grid" }, ...charts),
+      el("p", { class: "scene-caption" }, "Fair shares: each bar is averaged over every order the changes could be made in, so the bars add up to the headline exactly. Plan-level: 2027 is blended by the go-live date."))
+  }
+
   function update(state) {
     const { plan, result } = state
     renderRibbon(ribbon, result, plan, ctx)
     renderEnvelope(envelopeCard, result, ctx)
-    clear(mapCard).append(el("h3", {}, "Switzerland · where the estate runs"), swissMap(result), el("p", { class: "scene-caption" }, `Hinwil ↔ Digital Realty Zurich ≈ ${F.sites.campus.fibreKm} km of fibre; Neuburg carries the power unit, the UK Technology Centre composites and aero support.`))
-    clear(health).append(
+    updateAttribution(state)
+    fill(mapCard, el("h3", {}, "Switzerland · where the estate runs"), swissMap(result), el("p", { class: "scene-caption" }, `Hinwil ↔ Digital Realty Zurich ≈ ${F.sites.campus.fibreKm} km of fibre; Neuburg carries the power unit, the UK Technology Centre composites and aero support.`))
+    fill(health, 
       el("div", { class: "health-head" }, el("h3", {}, "Plan health"), badge(result.health.status, statusLabel(result.health.status)), el("span", { class: "muted" }, result.health.headline)),
       envelopeHealth(result, ctx),
       healthList(result.health, ctx.navigate))
@@ -116,12 +142,12 @@ export function overviewView(ctx) {
         card.quick.sync(controlValue(plan, 2027, c.quick.id))
       }
     }
-    clear(timelineCard).append(
+    fill(timelineCard, 
       el("div", { class: "card-head row" }, el("h3", {}, "Deployment timeline"), el("button", { type: "button", class: "btn btn-small", onclick: () => ctx.navigate("deployment") }, "Open the Gantt →")),
       gantt(result.timeline, { compact: true }),
       el("p", { class: "scene-caption" }, result.timeline.flags.filter((f) => f.level !== "info").slice(0, 2).map((f) => f.title).join(" · ") || "Six Aerodynamic Testing Periods a year; the move lands at a period boundary."))
   }
-  return { node, update }
+  return { node, update, updateAttribution }
 }
 
 const GROUP_OF = { facility: ["location", "hinwilRetrofit", "committedKW", "mlPartitionKW", "mlPlacement", "rackKW", "cooling", "redundancy", "pueMode", "pueValue", "tariffRp", "renewable", "heatReuse"], compute: ["nodes", "coresPerNode", "clockGHz", "cpuArch", "memoryGB", "interconnect", "storage", "gpus", "solverGpus", "gpuModel", "gpuChargePct", "consumption", "committedPct", "termYears", "support", "refreshYears"], connectivity: ["fibrePairs", "fibreGbps", "trackside", "edge", "cloudOnRamp"] }
@@ -165,7 +191,7 @@ function renderEnvelope(card, result, ctx) {
     if (x.location === "hinwil") items[0] = el("div", { class: "gauge gauge-empty", id: `envelope-gauge-${y}` }, el("div", { class: "gauge-display-text" }, "Hinwil room"), el("div", { class: "gauge-label" }, `kW at Digital Realty of ${env.offerKW} · ${y}`), el("div", { class: "muted small" }, `${Math.round(env.hinwilIT)} of ${env.hinwilCapacity} kW at Hinwil`))
     return el("div", { class: `envelope-season ${env.fits ? "" : "over"}`, dataset: { season: String(y) } }, ...items)
   })
-  clear(card).append(
+  fill(card, 
     el("div", { class: "card-head row" }, el("h3", {}, "The 500 kW envelope"), el("span", { class: "muted small" }, "critical IT at Digital Realty, both seasons")),
     el("div", { class: "envelope-gauges" }, ...gauges),
     el("p", { class: "scene-caption" }, result.envelope.fits ? "Within the offer in both seasons. More kW is a separate commercial conversation (ZUR4, 2028)." : "Over the offer: use \"Fit to the envelope\" in plan health or trim the ML partition, GPUs, nodes or rack density."))
@@ -188,20 +214,20 @@ function renderRibbon(ribbon, result, plan, ctx) {
   const tone = (s) => (s.perf.sec > 0.005 ? "good" : s.perf.sec < -0.005 ? "bad" : "flat")
   const tr = (s) => `${fmt.num(s.trackside.decisionSec, 1)} s to decide`
   const trSub = (s) => `link ${fmt.availability(s.trackside.linkAvailability)} · ${fmt.num(s.trackside.weekendsAtRisk, 2)} weekends at risk`
-  clear(ribbon).append(
+  fill(ribbon, 
     el("div", { class: "ribbon-head" },
       el("div", { class: "headline-kicker" }, `${plan.meta.name} · vs today's setup at ${plan.shared.confidence} % confidence`),
       el("div", { class: "ribbon-cols" }, el("span", {}), el("span", { class: "ribbon-year" }, "2027"), el("span", { class: "ribbon-year" }, "2028"))),
     el("div", { class: "ribbon-big" },
-      el("div", { class: "ribbon-label" }, "Seconds per lap"),
+      el("div", { class: "ribbon-label" }, "Seconds per lap", explainButton("tile.headline-sec", "Seconds per lap vs Today")),
       el("div", { class: `headline-number tone-${tone(s27)}`, id: "sec-2027" }, fmt.sec(s27.perf.sec)),
       el("div", { class: `headline-number tone-${tone(s28)}`, id: "sec-2028" }, fmt.sec(s28.perf.sec))),
     ribbonRow("kW at Digital Realty of 500", result.envelope[2027].drIT > 0 ? `${Math.round(result.envelope[2027].drIT)} kW` : "Hinwil", result.envelope[2028].drIT > 0 ? `${Math.round(result.envelope[2028].drIT)} kW` : "Hinwil", { sub27: result.envelope[2027].fits ? `${Math.round(result.envelope[2027].headroomKW)} kW to spare` : "Not possible", sub28: result.envelope[2028].fits ? `${Math.round(result.envelope[2028].headroomKW)} kW to spare` : "Not possible", id: "ribbon-envelope" }),
-    ribbonRow("Trackside value", tr(s27), tr(s28), { sub27: trSub(s27), sub28: trSub(s28), id: "ribbon-trackside" }),
-    ribbonRow("ATR allowance used", fmt.pct(s27.usage), fmt.pct(s28.usage), { sub27: `${fmt.num(s27.effectiveMauh, 2)} eff. MAUh`, sub28: `${fmt.num(s28.effectiveMauh, 2)} eff. MAUh`, id: "ribbon-atr" }),
+    ribbonRow("Trackside value", tr(s27), tr(s28), { sub27: trSub(s27), sub28: trSub(s28), id: "ribbon-trackside", explain: "stat-decision" }),
+    ribbonRow("ATR allowance used", fmt.pct(s27.usage), fmt.pct(s28.usage), { sub27: `${fmt.num(s27.effectiveMauh, 2)} eff. MAUh`, sub28: `${fmt.num(s28.effectiveMauh, 2)} eff. MAUh`, id: "ribbon-atr", explain: "gauge-mauh" }),
     ribbonRow("Cost-cap charge", fmt.chf(s27.money.capCharge), fmt.chf(s28.money.capCharge), { sub27: `${fmt.chfDelta(s27.money.capChargeDelta)} vs today`, sub28: `${fmt.chfDelta(s28.money.capChargeDelta)} vs today`, id: "ribbon-cap" }),
     ribbonRow("Availability", fmt.availability(s27.availabilityPct / 100), fmt.availability(s28.availabilityPct / 100), { id: "ribbon-availability" }),
-    ribbonRow("CHF per year", fmt.chf(s27.money.yearly), fmt.chf(s28.money.yearly), { sub27: `${fmt.chf(s27.money.cash)} cash in 2027`, sub28: `${fmt.chf(s28.money.cash)} cash in 2028`, id: "ribbon-yearly" }),
+    ribbonRow("CHF per year", fmt.chf(s27.money.yearly), fmt.chf(s28.money.yearly), { sub27: `${fmt.chf(s27.money.cash)} cash in 2027`, sub28: `${fmt.chf(s28.money.cash)} cash in 2028`, id: "ribbon-yearly", explain: "stat-yearly" }),
     ribbonRow("CO₂ (market-based)", `${fmt.num(s27.money.co2MarketT, 0)} t`, `${fmt.num(s28.money.co2MarketT, 0)} t`, { sub27: `${fmt.signed(s27.money.co2Delta, 0, " t")} vs today`, sub28: `${fmt.signed(s28.money.co2Delta, 0, " t")} vs today`, id: "ribbon-co2" }),
     raceNowButtons(result, plan),
     el("div", { class: "ribbon-foot muted small", id: "ribbon-foot" }, footLine(result)))

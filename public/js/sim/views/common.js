@@ -2,7 +2,7 @@
 import { GROUPS, CONTROLS } from "../model.js"
 import { SHARED_IDS, TIMELINE_IDS, isDetached, controlValue, seasonCeilings, optionFit } from "../plan.js"
 import { el, fmt } from "../dom.js"
-import { planControl, badge } from "../widgets.js"
+import { planControl, badge, explainButton, tileIdFor } from "../widgets.js"
 import { fmtDate } from "../timeline.js"
 
 /** The controls whose sliders carry a live ceiling (model.ceilings) and the reason shown when they clamp. */
@@ -117,12 +117,13 @@ export function healthList(health, navigate, { limit = 8, season = null } = {}) 
     badge(i.level, i.level === "bad" ? "Fix" : i.level === "warn" ? "Tune" : "Note"),
     el("span", { class: "health-season" }, i.season ? String(i.season) : "Plan"),
     el("button", { type: "button", class: "linkish health-title", onclick: () => navigate(i.route) }, i.title),
-    i.rule ? el("span", { class: "fia-badge" }, i.rule) : null)))
+    i.rule ? el("span", { class: "fia-badge" }, i.rule) : null,
+    explainButton(`flag.${String(i.id).replace(/^(\d{4}|tl)-/, "")}`, i.title))))
 }
 
 /** A row of stats for the ribbon: label + 2027 + 2028 values. */
-export const ribbonRow = (label, v27, v28, { sub27 = "", sub28 = "", id } = {}) => el("div", { class: "ribbon-row", id },
-  el("div", { class: "ribbon-label" }, label),
+export const ribbonRow = (label, v27, v28, { sub27 = "", sub28 = "", id, explain } = {}) => el("div", { class: "ribbon-row", id },
+  el("div", { class: "ribbon-label" }, label, explainButton(`tile.${explain || tileIdFor(label)}`, label)),
   el("div", { class: "ribbon-cell s2027" }, el("b", {}, v27), sub27 ? el("span", { class: "muted small" }, sub27) : null),
   el("div", { class: "ribbon-cell s2028" }, el("b", {}, v28), sub28 ? el("span", { class: "muted small" }, sub28) : null))
 

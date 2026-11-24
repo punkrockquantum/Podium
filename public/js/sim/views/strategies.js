@@ -11,10 +11,14 @@ import { evaluatePlan, normalizePlan, presetPlan, seasonInputs, controlDisplay, 
 import { STRATEGIES, STRATEGY_ORDER, strategyPlan, matchingStrategy, planFromSets } from "../strategies.js"
 import { OBJECTIVES, OBJECTIVE_ORDER, SEARCH_SPACE, LOCKED_BY_DEFAULT, DEFAULTS, startFromPlan } from "../optimiser.js"
 import { createOptimiserRunner } from "../optimiserRunner.js"
-import { el, svg, clear, fmt } from "../dom.js"
-import { envelopeGauge, badge, stat } from "../widgets.js"
+import { el, svg, clear, fmt, fill } from "../dom.js"
+import { envelopeGauge, badge, stat, waterfall, explainButton } from "../widgets.js"
 import { raceNowButtons } from "./overview.js"
 import { fmtDate, parseDate, atpCalendar } from "../timeline.js"
+import { PROVIDER } from "../assumptions.js"
+import { seasonAttributionFn } from "../plan.js"
+import { attribute } from "../attribution.js"
+import { EXPLAIN, explainContext, explainText } from "../explain.js"
 
 const COOLING = { air: "air", reardoor: "rear-door", dlc: "direct liquid" }
 const RED = { n: "N", n1: "N+1", "2n": "2N" }
@@ -38,6 +42,13 @@ function strategyResult(key, shared) {
   }
   return hit
 }
+/** Plan-level attribution of a strategy, per season; memoised with the result. Costs ≈ 100 ms per strategy, so cards fill it in after they render. */
+function strategyAttribution(key, shared) {
+  const hit = strategyResult(key, shared)
+  if (!hit.attribution) hit.attribution = Object.fromEntries(SEASONS.map((y) => [y, attribute(seasonInputs(hit.plan, y), { evaluateFn: seasonAttributionFn(hit.result, y), cache: false })]))
+  return hit.attribution
+}
+
 function todayResult(shared) {
   const k = `today|${shared.position}|${shared.confidence}`
   let hit = memo.get(k)
@@ -139,6 +150,29 @@ function timelineStrip(st, result, key) {
       svg("text", { x: m.px, y: m.ty, "text-anchor": m.anchor, class: "strip-text" }, m.label))))
   return el("div", { class: "strategy-timeline", id: `strategy-timeline-${key}` }, node,
     el("ol", { class: "strategy-steps" }, ...st.timeline.map((t) => el("li", {}, el("b", {}, t.when), " — ", t.what))))
+}
+
+/** "How this strategy finds its advantage": the strategy's framing line, then the top drivers of each season from the attribution, each with its `?`. */
+function advantage(key, hit, attribution, plainEnglish) {
+  const st = EXPLAIN[`strategy.${key}`]
+  const items = []
+  for (const y of SEASONS) {
+    const a = attribution[y]
+    const sr = hit.result.seasons[y]
+    const ctx = explainContext({ result: { scenario: sr.sim, today: sr.today, perf: sr.perf }, attribution: a, both: { 2027: { perf: hit.result.seasons[2027].perf }, 2028: { perf: hit.result.seasons[2028].perf } }, plan: hit.result, fmt, plainEnglish })
+    const top = a.drivers.filter((d) => !d.pruned && Math.abs(d.sec) >= 0.005).sort((p, q) => Math.abs(q.sec) - Math.abs(p.sec)).slice(0, 2)
+    for (const d of top) {
+      const e = EXPLAIN[`driver.${d.id}`]
+      if (!e) continue
+      items.push(el("li", { dataset: { season: String(y), driver: d.id } },
+        el("span", { class: "season-tag" }, String(y)), " ", el("b", {}, `${fmt.sec(d.sec)} ${e.title}`), explainButton(`driver.${d.id}`, e.title), " — ", explainText(`driver.${d.id}`, ctx) || e.one))
+    }
+  }
+  return el("div", { class: "strategy-advantage", id: `strategy-advantage-${key}` },
+    el("h4", {}, "How this strategy finds its advantage", explainButton("tile.waterfall", "Where the seconds come from")),
+    st ? el("p", { class: "strategy-framing" }, st.one) : null,
+    el("ul", { class: "advantage-list" }, ...items),
+    el("div", { class: "strategy-waterfalls" }, ...SEASONS.map((y) => el("div", { class: "strategy-waterfall" }, el("span", { class: "muted small" }, `${y} · ${fmt.sec(hit.result.seasons[y].perf.sec)}`), waterfall({ attribution: attribution[y], season: y, plainEnglish, cpuArch: hit.result.inputs[y].cpuArch, compact: true, id: `strategy-waterfall-${key}-${y}`, status: hit.result.seasons[y].status })))))
 }
 
 const riskLevel = (text) => (/unpublished|headroom|shed|must fund|highest|retrofit|single|no gpu|cpu-only|flat/i.test(text) ? "warn" : "info")
@@ -402,7 +436,8 @@ export function strategiesView(ctx) {
       el("div", { class: "card-head" }, el("h3", {}, "Side by side"), el("p", { class: "card-sub" }, "Today's setup and the three strategies, both seasons; the best value in each row per season is marked.")),
       el("div", { class: "table-wrap", id: "strategies-table-wrap" }),
       el("div", { class: "chart-wrap", id: "strategies-chart-wrap" }),
-      el("p", { class: "footnote" }, "Plan-level figures: 2027 is blended by the go-live date (the strategies' 8 March 2027 target slips to the first boundary the lead times allow), 2028 is the full season on the stepped-up estate. Steady-state season figures are in the model notes.")),
+      el("p", { class: "footnote" }, "Plan-level figures: 2027 is blended by the go-live date (the strategies' 8 March 2027 target slips to the first boundary the lead times allow), 2028 is the full season on the stepped-up estate. Steady-state season figures are in the model notes."),
+      el("p", { class: "footnote oem-footnote" }, PROVIDER.oemNote)),
     el("div", { id: "optimiser-host" }))
   const grid = node.querySelector("#strategy-grid")
   const tableWrap = node.querySelector("#strategies-table-wrap")
@@ -416,16 +451,21 @@ export function strategiesView(ctx) {
     const today = todayResult(state.plan.shared).result
     const status = loaded ? badge("ok", "loaded in the planner") : edited ? badge("warn", "edited in the planner") : null
     const editLines = edited ? SEASONS.filter((y) => !state.result.envelope[y].fits).map((y) => { const l = envelopeLine(state.result.envelope[y], y); return el("p", { class: `envelope-line tone-${l.tone} small` }, `your edit: ${l.text}`) }) : []
+    const advantageHost = el("div", { class: "strategy-advantage-host" }, el("p", { class: "muted small" }, "Working out where the seconds come from…"))
+    const hit = strategyResult(key, state.plan.shared)
+    const fillAdvantage = () => { if (advantageHost.isConnected) fill(advantageHost, advantage(key, hit, strategyAttribution(key, state.plan.shared), state.plainEnglish)) }
+    if (hit.attribution) fillAdvantage(); else setTimeout(fillAdvantage, 30 + 90 * STRATEGY_ORDER.indexOf(key))
     return el("article", { class: `card strategy-card strategy-${key} ${loaded ? "is-loaded" : ""} ${edited ? "is-edited" : ""}`, id: `strategy-${key}`, "aria-labelledby": `strategy-title-${key}` },
       el("header", { class: "strategy-head" },
         el("span", { class: "strategy-letter", "aria-hidden": "true" }, letterOf(key)),
-        el("div", { class: "strategy-title" }, el("h3", { id: `strategy-title-${key}` }, nameOf(st)), el("p", { class: "strategy-tagline" }, st.tagline)),
+        el("div", { class: "strategy-title" }, el("h3", { id: `strategy-title-${key}` }, nameOf(st), explainButton(`strategy.${key}`, st.name)), el("p", { class: "strategy-tagline" }, st.tagline)),
         status),
       el("p", { class: "strategy-story" }, st.story),
       decisionTable(plan, result, key),
       el("div", { class: "strategy-gauges" }, ...SEASONS.map((y) => envelopeGauge(result.envelope[y], y, { id: `strategy-gauge-${key}-${y}`, size: 96 }))),
       ...editLines,
       outcomeTiles(result, today, key),
+      advantageHost,
       timelineStrip(st, result, key),
       riskBadges(st, key),
       el("footer", { class: "strategy-footer" },
@@ -442,14 +482,14 @@ export function strategiesView(ctx) {
   function update(state) {
     const match = matchingStrategy(state.plan)
     const lineage = state.plan.meta.strategy || null
-    const key = JSON.stringify([state.plan.shared.position, state.plan.shared.confidence, state.plan.shared.venue, match, lineage, state.result.envelope.fits, panel.proposal ? panel.proposal.seasons[2028].perf.sec : null])
+    const key = JSON.stringify([state.plan.shared.position, state.plan.shared.confidence, state.plan.shared.venue, match, lineage, state.result.envelope.fits, state.plainEnglish, panel.proposal ? panel.proposal.seasons[2028].perf.sec : null])
     panel.update(state)
     if (key === lastKey) return
     lastKey = key
-    clear(grid).append(...STRATEGY_ORDER.map((k) => card(k, state, match === k, match !== k && lineage === k)))
+    fill(grid, ...STRATEGY_ORDER.map((k) => card(k, state, match === k, match !== k && lineage === k)))
     const columns = [{ key: "today", label: "Today", result: todayResult(state.plan.shared).result }, ...STRATEGY_ORDER.map((k) => ({ key: k, label: k, result: strategyResult(k, state.plan.shared).result }))]
-    clear(tableWrap).append(compareTable(columns))
-    clear(chartWrap).append(chart(columns, panel.proposal))
+    fill(tableWrap, compareTable(columns))
+    fill(chartWrap, chart(columns, panel.proposal))
   }
   return { node, update }
 }

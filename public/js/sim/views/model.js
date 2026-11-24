@@ -1,9 +1,10 @@
 /** "How the model works" and "Assumptions & sources": every constant with its VERIFIED / ASSUMPTION status and fact-pack row. */
 import { DEFAULTS } from "../model.js"
 import { K, assumptionRows, PROVIDER } from "../assumptions.js"
+import { EXPLAIN, TERM_IDS } from "../explain.js"
 import { CUSTOMER, annotatedFigures } from "../../customer.js"
 import { el } from "../dom.js"
-import { badge } from "../widgets.js"
+import { badge, explainButton } from "../widgets.js"
 
 export function modelView() {
   const steps = [
@@ -40,6 +41,9 @@ export function modelView() {
             el("td", { class: "mono" }, show(r.value)),
             el("td", {}, badge(r.status === "VERIFIED" ? "ok" : "info", r.status)),
             el("td", { class: "mono" }, r.source),
-            el("td", { class: "small" }, r.note)))))))))
+            el("td", { class: "small" }, r.note)))))))),
+    el("section", { class: "section glossary", id: "glossary" },
+      el("div", { class: "section-head" }, el("h2", {}, "Glossary"), el("p", { class: "card-sub" }, "Every term the explainers use, in one line each. The same entries open from the glossary chips in an explainer.")),
+      el("dl", { class: "glossary-grid" }, ...TERM_IDS.flatMap((id) => { const t = EXPLAIN[`term.${id}`]; return [el("dt", { id: `term-${id}` }, t.title, explainButton(`term.${id}`, t.title)), el("dd", {}, t.one, t.analogy ? el("span", { class: "muted" }, ` Think of it as ${t.analogy.charAt(0).toLowerCase()}${t.analogy.slice(1)}`) : null)] }))))
   return { node, update() {} }
 }

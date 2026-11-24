@@ -1,6 +1,6 @@
 /** Commercials: run-rate and cash per season, what sits inside and outside the cost cap, the 3-year view and the link to the business case. */
 import { costCapCHF, FIGURES as F } from "../../customer.js"
-import { el, clear, fmt } from "../dom.js"
+import { el, fmt, fill } from "../dom.js"
 import { gauge, stat, badge } from "../widgets.js"
 import { controlsSection, seasonCols, roleStrip } from "./common.js"
 
@@ -53,7 +53,7 @@ export function commercialsView(ctx) {
         el("p", { class: "muted small" }, `${x.propertySharePct} % of the colocation fee treated as Property Costs (D5.1.1.j) · ${x.consumption === "greenlake" ? "GreenLake charge" : `depreciation over ${x.refreshYears} years (D6.1.1.k)`}.`),
       ]
     }, { id: "commercials-seasons" })
-    clear(outputs).append(summary, cols, el("p", { class: "footnote" }, badge("info", "Working assumption"), " ", "HPE hardware and support are supplied through HPE GreenLake; the GreenLake uplift, buffer and metering are planning assumptions (fact pack H1–H3, H-f)."))
+    fill(outputs, summary, cols, el("p", { class: "footnote" }, badge("info", "Working assumption"), " ", "HPE hardware and support are supplied through HPE GreenLake; the GreenLake uplift, buffer and metering are planning assumptions (fact pack H1–H3, H-f)."))
   }
   return { node, update }
 }

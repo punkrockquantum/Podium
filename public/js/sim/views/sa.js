@@ -1,5 +1,5 @@
 /** Solutions Architect view: requirements per season, service mapping, owner roles, discovery checklist (notes persisted), live risk register and the solution brief export. */
-import { el, clear, fmt } from "../dom.js"
+import { el, fmt, fill } from "../dom.js"
 import { badge, stat } from "../widgets.js"
 import { requirements, requirementDelta, serviceMap, riskRegister, solutionBrief, CHECKLIST, ROLES, roleLabel, HPE_FOOTNOTE } from "../sa.js"
 import { fmtDate } from "../timeline.js"
@@ -22,7 +22,7 @@ export function saView(ctx) {
   const noted = el("span", { class: "badge level-info", id: "notes-count" })
   const countNotes = () => { const n = CHECKLIST.filter((c) => (notes[c.id] || "").trim()).length; noted.textContent = `${n} of ${CHECKLIST.length} noted` }
   countNotes()
-  clear(checklistCard).append(
+  fill(checklistCard, 
     el("div", { class: "card-head row" }, el("h3", {}, "Discovery checklist"), noted),
     el("p", { class: "card-sub" }, "What to confirm with the team before the design is frozen. Notes stay in this browser."),
     el("ol", { class: "checklist" }, ...CHECKLIST.map((c) => {
@@ -42,7 +42,7 @@ export function saView(ctx) {
     const r28 = requirementDelta(result)
     const services = serviceMap(result)
     const risks = riskRegister(result)
-    clear(head).append(
+    fill(head, 
       el("div", { class: "sa-title" }, el("h2", {}, "Solutions Architect view"), badge("info", "Digital Realty internal")),
       el("p", { class: "card-sub" }, `What “${plan.meta.name}” asks of the Zurich campus in each season, which public Digital Realty services answer it, who owns each piece and what could go wrong. ${HPE_FOOTNOTE}`),
       el("div", { class: "stats four" },
@@ -56,7 +56,7 @@ export function saView(ctx) {
     const rows28 = new Map(r28.map((q) => [q.id, q]))
     const changedCount = r28.filter((q) => q.changed).length
     const onlyIn28 = r28.filter((q) => !r27.some((p) => p.id === q.id))
-    clear(reqCard).append(
+    fill(reqCard, 
       el("div", { class: "card-head row" }, el("h3", {}, "Requirements derived from the plan"), badge(changedCount ? "warn" : "ok", changedCount ? `${changedCount} change${changedCount === 1 ? "" : "s"} in 2028` : "2028 same as 2027")),
       el("p", { class: "card-sub" }, "Every line comes from the plan; the 2028 column shows only what differs from 2027 (highlighted)."),
       el("div", { class: "table-wrap" }, el("table", { class: "table req-table", id: "req-2027" },
@@ -73,16 +73,16 @@ export function saView(ctx) {
         el("thead", {}, el("tr", {}, el("th", {}, "Area"), el("th", {}, "Requirement"), el("th", {}, "2028"), el("th", {}, "Service"), el("th", {}, "Owner"), el("th", {}, "Status"))),
         el("tbody", {}, ...onlyIn28.map((q) => el("tr", { class: "changed", dataset: { req: q.id } }, el("td", {}, q.area), detailCell(q), el("td", { class: "y28 diff" }, q.value), el("td", { class: "small" }, q.service || "—"), el("td", { class: "small" }, roleLabel(q.owner)), el("td", {}, statusBadge(q)))))))
         : el("p", { class: "muted small", id: "req-2028" }, `2028 adds no requirement of its own${changedCount ? `; ${changedCount} of the ${r27.length} above change value` : ""}.`))
-    clear(servicesCard).append(
+    fill(servicesCard, 
       el("h3", {}, "Service mapping"),
       el("p", { class: "card-sub" }, "Public Digital Realty service names, each keyed to a fact-pack row; carrier fibre and HPE are partner services."),
       el("ul", { class: "service-list" }, ...services.map((s) => el("li", { class: `service ${s.external ? "external" : ""}` },
         el("div", { class: "service-need" }, s.need), el("div", { class: "service-name" }, s.service, el("span", { class: "fia-badge src" }, s.source)), el("div", { class: "muted small" }, s.detail)))))
-    clear(rolesCard).append(
+    fill(rolesCard, 
       el("h3", {}, "Who owns what"),
       el("p", { class: "card-sub" }, "Digital Realty roles are generic (ASSUMPTION); the team, HPE, the carrier and the FIA are as published."),
       el("ul", { class: "role-list" }, ...ROLES.map((r) => el("li", { class: `role-item side-${r.side}` }, el("span", { class: "role-side" }, SIDE[r.side] || r.side), el("b", {}, r.label), el("span", { class: "muted small" }, r.scope), badge(r.status === "VERIFIED" ? "ok" : "info", r.status)))))
-    clear(risksCard).append(
+    fill(risksCard, 
       el("h3", {}, "Risk register (live)"),
       el("p", { class: "card-sub" }, "Likelihood and status follow the plan: change the schedule or the estate and the register moves."),
       el("div", { class: "table-wrap" }, el("table", { class: "table risk-table", id: "risk-table" },
@@ -94,7 +94,7 @@ export function saView(ctx) {
           el("td", { class: "small" }, roleLabel(k.owner)),
           el("td", { class: "small" }, k.mitigation),
           el("td", {}, badge(k.status === "triggered" ? "bad" : k.status === "mitigated" ? "ok" : "info", k.status))))))))
-    clear(briefCard).append(
+    fill(briefCard, 
       el("h3", {}, "Solution brief"),
       el("p", { class: "card-sub" }, "Print this view as the hand-over brief, or export the JSON for the design team."),
       el("div", { class: "actions-row" },

@@ -1,7 +1,7 @@
 /** Deployment: the Nov 2026 – Dec 2028 timeline with tunable contract date, cutover target, parallel running and 2028 step-up date. */
 import { K } from "../assumptions.js"
-import { el, clear, fmt } from "../dom.js"
-import { badge, flagRow, stat } from "../widgets.js"
+import { el, fmt, fill } from "../dom.js"
+import { badge, flagRow, stat, explainButton } from "../widgets.js"
 import { gantt, ganttLegend } from "../visuals.js"
 import { roleStrip } from "./common.js"
 import { cutoverOptions, fmtDate, parseDate, isoDate, TIMELINE_RANGE } from "../timeline.js"
@@ -66,11 +66,11 @@ export function deploymentView(ctx) {
     stepUp.sync(plan.timeline.stepUpDate)
     const t27 = tl.seasons[2027]
     const t28 = tl.seasons[2028]
-    clear(chart).append(
+    fill(chart, 
       el("div", { class: "card-head row" }, el("h3", {}, "Gantt"), badge(tl.status === "ok" ? "ok" : tl.status, tl.status === "ok" ? "On plan" : tl.status === "warn" ? "Check" : "Late")),
       gantt(tl, { compact: false }),
       ganttLegend())
-    clear(consequences).append(
+    fill(consequences, 
       el("h3", {}, "What the schedule does to the seasons"),
       el("div", { class: "stats" },
         stat("2027 go-live", t27.goLive ? fmtDate(t27.goLive) : "No move", t27.goLive ? `${t27.atBoundary ? "start of" : "inside"} ${t27.atp.label} · ${Math.round(t27.shareOld * 100)} % of 2027 on today's setup${t27.slipDays ? ` · slipped ${t27.slipDays} days` : t27.slackDays ? ` · ${t27.slackDays} days of slack` : ""}` : "both seasons on today's estate", { id: "stat-golive" }),
@@ -79,16 +79,16 @@ export function deploymentView(ctx) {
         stat("2028 step-up", t28.changes ? fmtDate(t28.goLive) : "None", t28.changes ? `${t28.earlyDays > 0 ? `${Math.round(t28.earlyDays / 7)} wk before GPUs are allowed` : t28.shareOld > 0 ? `${Math.round(t28.shareOld * 100)} % of 2028 on the 2027 estate` : "on 1 January, no allowance lost"}${t28.earlyCostCHF ? ` · ${fmt.chf(t28.earlyCostCHF)} carrying cost` : ""}` : "2028 runs the 2027 estate", { id: "stat-stepup" })),
       el("ul", { class: "flags", id: "timeline-flags" }, ...tl.flags.map(flagRow)),
       tl.oneOffs.length ? el("p", { class: "muted small" }, "One-offs from the schedule: ", tl.oneOffs.map((o) => `${o.label} ${fmt.chf(o.chf)} (${o.year})`).join(" · ")) : null)
-    clear(milestones).append(
+    fill(milestones, 
       el("h3", {}, "Milestones and lead times"),
       el("div", { class: "table-wrap" }, el("table", { class: "table milestones-table" },
         el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "What"), el("th", {}, "Owner"), el("th", {}, "Status"))),
         el("tbody", {},
-          ...tl.milestones.filter((m) => !m.offChart).sort((a, b) => a.date - b.date).map((m) => el("tr", {}, el("td", { class: "mono" }, isoDate(m.date)), el("td", {}, m.label, m.rule ? el("span", { class: "fia-badge" }, m.rule) : null), el("td", {}, OWNER[m.owner] || m.owner), el("td", {}, badge(m.status === "ok" ? "ok" : "warn", m.status === "ok" ? "OK" : "Check")))),
+          ...tl.milestones.filter((m) => !m.offChart).sort((a, b) => a.date - b.date).map((m) => el("tr", {}, el("td", { class: "mono" }, isoDate(m.date)), el("td", {}, m.label, m.rule ? el("span", { class: "fia-badge" }, m.rule) : null, explainButton(`milestone.${m.id}`, m.label)), el("td", {}, OWNER[m.owner] || m.owner), el("td", {}, badge(m.status === "ok" ? "ok" : "warn", m.status === "ok" ? "OK" : "Check")))),
           ...tl.tasks.map((t) => el("tr", { class: "muted" }, el("td", { class: "mono" }, `${isoDate(t.start)} → ${isoDate(t.end)}`), el("td", {}, t.label), el("td", {}, OWNER[t.owner] || t.owner), el("td", {}, `${t.weeks} wk`))),
           ...tl.milestones.filter((m) => m.offChart).map((m) => el("tr", { class: "muted" }, el("td", { class: "mono" }, isoDate(m.date)), el("td", {}, m.label), el("td", {}, OWNER[m.owner] || m.owner), el("td", {}, "beyond 2028")))))),
       el("p", { class: "muted small" }, `Lead times are planning assumptions (fact pack G-e, D-e, H-f): GreenLake ${K.timeline.leadWeeks.greenlake} wk, purchase ${K.timeline.leadWeeks.buy} wk, fit-out ${K.timeline.leadWeeks.fitOut}–${K.timeline.leadWeeks.fitOutLiquid} wk, dark fibre ${K.timeline.leadWeeks.fibre} wk (+${K.timeline.leadWeeks.fibreSecondRoute} for a second route), burn-in ${K.timeline.leadWeeks.burnIn} wk.`))
-    clear(signBy).append(
+    fill(signBy, 
       el("h3", {}, "Sign by … to make …"),
       el("p", { class: "card-sub" }, t27.changes ? `With ${t27.totalWeeks} weeks from contract to cutover (incl. ${plan.timeline.parallelWeeks} wk parallel), each boundary needs a signature by:` : "No move in this plan."),
       t27.changes ? el("div", { class: "signby-grid" }, ...cutoverOptions().map((o) => {

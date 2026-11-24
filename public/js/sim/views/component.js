@@ -1,8 +1,8 @@
 /** The component drill-downs: FIA envelope, Compute, Facility, Connectivity. Per-season controls on the left, outputs for both seasons on the right. */
 import { CONTROLS } from "../model.js"
-import { K } from "../assumptions.js"
+import { K, PROVIDER } from "../assumptions.js"
 import { costCapCHF } from "../../customer.js"
-import { el, clear, fmt } from "../dom.js"
+import { el, fmt, fill } from "../dom.js"
 import { gauge, bar, badge, flagRow, stat } from "../widgets.js"
 import { computeScene, facilityScene, tracksideScene, sceneCard } from "../scenes.js"
 import { controlsSection, seasonCols, roleStrip, SEASONS } from "./common.js"
@@ -76,7 +76,7 @@ export function componentView(id, ctx) {
     update(state) {
       controls.sync(state)
       diagram?.update(state)
-      clear(outputs).append(...[cfg.outputs(state.result, ctx)].flat())
+      fill(outputs, ...[cfg.outputs(state.result, ctx)].flat(), id === "compute" ? el("p", { class: "footnote oem-footnote", id: "oem-footnote-compute" }, PROVIDER.oemNote) : null)
     },
   }
 }
@@ -96,7 +96,7 @@ function diagramCard({ id, title, subtitle, render }) {
     last = state
     for (const b of toggle.children) b.setAttribute("aria-pressed", Number(b.dataset.season) === season ? "true" : "false")
     const sim = state.result.seasons[season].sim
-    clear(host).append(render(sim, season))
+    fill(host, render(sim, season))
     const changed = state.result.deltas.changed.length
     note.textContent = changed ? `${changed} control${changed === 1 ? "" : "s"} differ in 2028` : "2028 inherits 2027"
   }
