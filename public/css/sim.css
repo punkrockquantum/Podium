@@ -411,6 +411,8 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .task-weeks { fill: var(--muted); font-size: 9.5px; }
 /* Gantt task rows with a `?`: the whole row is the button (click, Enter, Space); the glyph mirrors .explain-btn */
 .task-row[role="button"] { cursor: pointer; outline: none; }
+.why-not-boundary { margin: 10px 0 4px; padding: 10px 12px; border-left: 3px solid var(--dr); background: var(--panel2); border-radius: 0 10px 10px 0; font-size: 13.5px; line-height: 1.5; }
+.snap-boundary { margin-top: 8px; }
 .task-help circle { fill: var(--panel2); stroke: var(--line); stroke-width: 1; }
 .task-help text { fill: var(--muted); font-size: 10px; font-weight: 800; }
 .task-row[role="button"]:hover .task-help circle, .task-row[role="button"]:focus-visible .task-help circle, .task-row[aria-expanded="true"] .task-help circle { fill: var(--panel3); stroke: var(--info); }

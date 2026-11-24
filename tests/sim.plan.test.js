@@ -571,3 +571,47 @@ test("plan names longer than NAME_MAX are cut at a word boundary with an ellipsi
   assert.equal(renamePlan(presetPlan("dr2027"), long).meta.name, "Optimiser proposal · Balanced: lap time, cap headroom…")
   for (const id of ["today", "dr2027", "gl2028"]) assert.equal(presetPlan(id).meta.name.length <= NAME_MAX, true)
 })
+
+test("why not a boundary: one sentence with live figures for a cutover inside a period, the boundary variant when nothing is lost, and a snap target the select can show", async () => {
+  const { cutoverWhatIf, whyNotBoundaryLine } = await import("../public/js/sim/plan.js")
+  const { STRATEGY_ORDER, strategyPlan } = await import("../public/js/sim/strategies.js")
+  const { cutoverOptions } = await import("../public/js/sim/timeline.js")
+  const values = new Set(cutoverOptions().map((o) => o.value))
+  const expected = {
+    A: /^Signed on 24 Nov 2026, the lead times put the first possible day at 30 Mar 2027, 3 weeks into ATP 2\. Going live then costs about 1\.8 % of that period's allowance \(0\.11 MAUh\); waiting for the 3 May boundary costs nothing but runs 5 more weeks on today's room \(about 0\.0\d s\/lap over the season\); signing 3 weeks earlier would reach the 8 Mar boundary\.$/,
+    B: /^Signed on 24 Nov 2026, the lead times put the first possible day at 20 Apr 2027, 6 weeks into ATP 2\. Going live then costs about 1\.8 % of that period's allowance \(0\.11 MAUh\); waiting for the 3 May boundary costs nothing but runs 2 more weeks on today's room \(about 0\.0\d s\/lap over the season\); signing 6 weeks earlier would reach the 8 Mar boundary\.$/,
+    C: /^Signed on 24 Nov 2026, the lead times put the first possible day at 30 Mar 2027, 3 weeks into ATP 2\./,
+  }
+  for (const k of STRATEGY_ORDER) {
+    const r = evaluatePlan(strategyPlan(k))
+    const w = cutoverWhatIf(r)
+    assert.match(whyNotBoundaryLine(r), expected[k], `strategy ${k}`)
+    assert.equal(w.noLoss, false)
+    assert.equal(w.snapTo, "2027-05-03", `strategy ${k} snaps to the ATP 3 boundary`)
+    assert.ok(values.has(w.snapTo), "the snap target is one of the select's options")
+    assert.ok(w.lapCostSec > 0 && w.lapCostSec < 0.1, `waiting costs a little lap time (${w.lapCostSec})`)
+    assert.equal(w.mauhLost, Math.round(r.timeline.seasons[2027].periodLoss * r.seasons[2027].sim.fia.allowance.mauh * 100) / 100)
+    // snapping removes the loss and lands on the boundary; the model itself is untouched
+    const snapped = evaluatePlan({ ...r.plan, timeline: { ...r.plan.timeline, cutoverDate: w.snapTo } })
+    assert.equal(snapped.timeline.seasons[2027].atBoundary, true)
+    assert.equal(snapped.timeline.seasons[2027].periodLoss, 0)
+    assert.ok(snapped.seasons[2027].perf.sec < r.seasons[2027].perf.sec, "the 2027 season gives up the weeks it waited")
+    assert.match(whyNotBoundaryLine(snapped), /^Signed on 24 Nov 2026, the lead times allow \d+ \w+ 2027; the cutover lands at the ATP 3 boundary on 3 May 2027 with (\d+ weeks|a week|\d+ days) of slack, so no allowance is lost\.$/)
+    assert.equal(cutoverWhatIf(snapped).snapTo, null)
+  }
+  assert.equal(whyNotBoundaryLine(evaluatePlan(presetPlan("today"))), "", "no move, no sentence")
+  assert.equal(cutoverWhatIf(evaluatePlan(presetPlan("today"))), null)
+  assert.equal(whyNotBoundaryLine(evaluatePlan(presetPlan("dr2027"))), "Signed on 15 Dec 2026, the lead times allow 20 Apr 2027; the cutover lands at the ATP 3 boundary on 3 May 2027 with 2 weeks of slack, so no allowance is lost.")
+  const shutdown = evaluatePlan({ ...presetPlan("dr2027"), timeline: { contractDate: "2026-11-24", cutoverDate: "2027-08-02", parallelWeeks: 0 } })
+  assert.match(whyNotBoundaryLine(shutdown), /the cutover lands inside the summer shutdown on 2 Aug 2027 with \d+ weeks of slack, so no allowance is lost\.$/)
+  const odd = evaluatePlan({ ...presetPlan("dr2027"), timeline: { contractDate: "2026-11-24", cutoverDate: "2027-07-26", parallelWeeks: 0 } })
+  assert.match(whyNotBoundaryLine(odd), /^Signed on 24 Nov 2026, the cutover target of 26 Jul 2027 sits 4 weeks into ATP 4\. Going live then costs about 10 % of that period's allowance \(0\.63 MAUh\); waiting for the 6 Sep boundary costs nothing but runs 6 more weeks on today's room \((about [\d.]+|under 0\.01) s\/lap over the season\)\.$/, "a hand-set mid-period target has no 'signing earlier' clause")
+  // the cutover explainer carries the line, and degrades without a plan
+  const { EXPLAIN, explainContext, fillTemplate } = await import("../public/js/sim/explain.js")
+  const { fmt } = await import("../public/js/sim/dom.js")
+  const { presetInputs } = await import("../public/js/sim/model.js")
+  const b = evaluatePlan(strategyPlan("B"))
+  const ctx = explainContext({ result: { scenario: b.seasons[2027].sim, today: b.seasons[2027].today, perf: b.seasons[2027].perf }, plan: b, fmt })
+  assert.ok(fillTemplate(EXPLAIN["milestone.cutover"].inPlan, ctx).endsWith(whyNotBoundaryLine(b)))
+  assert.ok(fillTemplate(EXPLAIN["milestone.cutover"].inPlan, explainContext({ result: evaluate(presetInputs("dr2027")), fmt })).endsWith("No 2027 move in this plan, so there is no boundary to wait for."))
+})

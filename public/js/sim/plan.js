@@ -6,7 +6,7 @@
  * the Overview and the component views render. Pure functions, no DOM.
  */
 import { CONTROLS, DEFAULTS, GROUPS, PRESETS, normalize, simulate, todayInputs, perfBlock, ceilings, fitToEnvelope, envelope, ccfFloor } from "./model.js"
-import { buildTimeline, normalizeTimeline, TIMELINE_DEFAULTS, fmtDate, parseDate } from "./timeline.js"
+import { buildTimeline, normalizeTimeline, TIMELINE_DEFAULTS, fmtDate, parseDate, isoDate, nextBoundary, weeksBetween, PLANNING_DATE } from "./timeline.js"
 import { K } from "./assumptions.js"
 
 export const PLAN_VERSION = 1
@@ -391,6 +391,60 @@ export function evaluatePlan(rawPlan) {
   const envelopeFits = sim27.envelope.fits && sim28.envelope.fits
   const health = planHealth({ plan, seasons, timeline, changes27, estateStepUp, x27, x28 })
   return { plan, inputs: { 2027: x27, 2028: x28 }, today: { 2027: today27, 2028: today28 }, seasons, deltas, timeline, health, totals, changes27, stepUp: estateStepUp, envelope: { fits: envelopeFits, 2027: sim27.envelope, 2028: sim28.envelope } }
+}
+
+/**
+ * "Why not a boundary?" — the figures behind where the 2027 cutover lands, read from the plan's timeline plus one
+ * re-evaluation of the same plan with its cutover target on the next ATP boundary (presentation only; the model is
+ * unchanged). Null when the plan has no 2027 move.
+ */
+export function cutoverWhatIf(result) {
+  const t27 = result && result.timeline && result.timeline.seasons && result.timeline.seasons[2027]
+  if (!t27 || !t27.changes || !t27.goLive || !t27.atp) return null
+  const tl = result.timeline.inputs
+  const contract = Math.max(parseDate(tl.contractDate), PLANNING_DATE)
+  const goLive = t27.goLive
+  const boundary = nextBoundary(goLive)
+  const noLoss = t27.atBoundary || Boolean(t27.shutdown)
+  const season = result.seasons[2027]
+  const allowance = season.sim.fia.allowance.mauh
+  let lapCostSec = 0
+  if (!noLoss && boundary > goLive) {
+    const alt = evaluatePlan({ ...result.plan, timeline: { ...result.plan.timeline, cutoverDate: isoDate(boundary) } })
+    lapCostSec = round(season.perf.sec - alt.seasons[2027].perf.sec, 3)
+  }
+  const signBy = t27.signBy ? t27.signBy[tl.cutoverDate] : null
+  return {
+    contract, goLive, feasible: t27.feasible, atp: t27.atp, atBoundary: t27.atBoundary, shutdown: t27.shutdown, noLoss,
+    weeksIn: weeksBetween(t27.atp.start, goLive),
+    periodLossPct: round(t27.periodLoss * 100, 1), mauhLost: round(t27.periodLoss * allowance, 2),
+    boundary, waitWeeks: weeksBetween(goLive, boundary), lapCostSec,
+    target: parseDate(tl.cutoverDate), targetLabel: targetLabel(tl.cutoverDate), slipped: t27.slipDays > 0, slackDays: t27.slackDays || 0,
+    earlierWeeks: signBy ? weeksBetween(signBy, contract) : 0,
+    snapTo: !noLoss && cutoverOptionValues().has(isoDate(boundary)) ? isoDate(boundary) : null,
+  }
+}
+
+const cutoverOptionValues = () => new Set(buildTimeline({}, { x27: {}, x28: {}, changes27: false, stepUp: false, cpuChange28: false }).cutoverOptions.map((o) => o.value))
+const targetLabel = (iso) => { const o = buildTimeline({}, { x27: {}, x28: {}, changes27: false, stepUp: false, cpuChange28: false }).cutoverOptions.find((c) => c.value === iso); return o ? o.label.replace(/ · .*$/, "") : fmtDate(parseDate(iso)) }
+const weeksWord = (w) => (w >= 1.5 ? `${Math.round(w)} weeks` : w >= 0.75 ? "a week" : `${Math.max(1, Math.round(w * 7))} day${Math.round(w * 7) === 1 ? "" : "s"}`)
+const moreWord = (w) => (w >= 1.5 ? `${Math.round(w)} more weeks` : w >= 0.75 ? "a week more" : `${Math.max(1, Math.round(w * 7))} more day${Math.round(w * 7) === 1 ? "" : "s"}`)
+const lapWord = (s) => (Math.abs(s) < 0.005 ? "under 0.01 s/lap" : `about ${Math.abs(s).toFixed(2)} s/lap`)
+
+/** One plain sentence with live figures: why the cutover lands where it does and what a boundary would cost or save. */
+export function whyNotBoundaryLine(result) {
+  const w = cutoverWhatIf(result)
+  if (!w) return ""
+  const signed = `Signed on ${fmtDate(w.contract)}`
+  if (w.noLoss) {
+    const where = w.shutdown ? `inside the ${w.shutdown.label.toLowerCase()}` : `at the ${w.atp.label} boundary`
+    const slack = w.slackDays > 0 ? ` with ${weeksWord(w.slackDays / 7)} of slack` : ""
+    return `${signed}, the lead times allow ${fmtDate(w.feasible)}; the cutover lands ${where} on ${fmtDate(w.goLive)}${slack}, so no allowance is lost.`
+  }
+  const into = `${weeksWord(w.weeksIn)} into ${w.atp.label}`
+  const earlier = w.slipped && w.earlierWeeks >= 0.75 ? `; signing ${weeksWord(w.earlierWeeks)} earlier would reach the ${fmtDate(w.target, { year: false })} boundary` : ""
+  const lands = w.slipped ? `the lead times put the first possible day at ${fmtDate(w.goLive)}, ${into}` : `the cutover target of ${fmtDate(w.goLive)} sits ${into}`
+  return `${signed}, ${lands}. Going live then costs about ${w.periodLossPct} % of that period's allowance (${w.mauhLost} MAUh); waiting for the ${fmtDate(w.boundary, { year: false })} boundary costs nothing but runs ${moreWord(w.waitWeeks)} on today's room (${lapWord(w.lapCostSec)} over the season)${earlier}.`
 }
 
 /** The envelope health line for one season: tone by share of the 500 kW offer (green ≤ 90 %, amber ≤ 100 %, red over). */

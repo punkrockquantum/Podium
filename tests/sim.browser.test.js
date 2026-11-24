@@ -230,6 +230,9 @@ test("the Deployment schedule: contract date, cutover boundary and parallel runn
   assert.ok((await count(page, "#milestones .milestones-table tbody tr")) >= 5)
   assert.ok((await count(page, "#sign-by .signby")) >= 3)
   assert.equal(await count(page, "#gantt-card svg.gantt rect.task"), await count(page, "#gantt-card svg.gantt text.task-label"), "one bar per task")
+  // at a boundary: the "why not a boundary?" line says so and there is nothing to snap to
+  assert.match(await text(page, "#why-not-boundary"), /^At a boundary\. Signed on 15 Dec 2026, the lead times allow 20 Apr 2027; the cutover lands at the ATP 3 boundary on 3 May 2027 with 2 weeks of slack, so no allowance is lost\./)
+  assert.equal(await page.evaluate("document.querySelector('#tl-snap').hidden"), true)
 
   // A late contract slips the cutover past the target and flags it
   await page.type("#tl-contract", "2027-03-01")
@@ -238,6 +241,27 @@ test("the Deployment schedule: contract date, cutover boundary and parallel runn
   assert.match(await text(page, "#timeline-flags"), /slips|inside ATP/i)
   const lossMid = await text(page, "#stat-loss")
   assert.doesNotMatch(lossMid, /^0\.0 %/, "a mid-period cutover wastes allowance")
+  // inside a period: the line prices the mid-period move against waiting, and one click snaps the target to the next boundary
+  const whyNot = await text(page, "#why-not-boundary")
+  assert.match(whyNot, /^Why not a boundary\? Signed on 1 Mar 2027, the lead times put the first possible day at \d+ \w+ 2027, (\d+ weeks|a week|\d+ days) into ATP \d\. Going live then costs about [\d.]+ % of that period's allowance \([\d.]+ MAUh\); waiting for the \d+ \w+ boundary costs nothing but runs (\d+ more weeks|a week more|\d+ more days) on today's room \((about [\d.]+|under 0\.01) s\/lap over the season\); signing (\d+ weeks|a week) earlier would reach the \d+ \w+ boundary\./, whyNot)
+  assert.equal(await page.evaluate("document.querySelector('#tl-snap').hidden"), false)
+  assert.match(await text(page, "#tl-snap"), /^Snap to the next ATP boundary · \d+ \w+$/)
+  await page.click("#why-not-boundary .explain-btn")
+  await settle()
+  assert.match(await text(page, "#explain-panel .explain-inplan, #explain-panel"), /Going live then costs about [\d.]+ % of that period's allowance/, "the cutover explainer carries the same line")
+  await page.key("keyDown", "Escape")
+  await page.key("keyUp", "Escape")
+  await settle()
+  await page.click("#tl-snap")
+  await settle()
+  assert.match(await text(page, "#stat-loss"), /0\.0 % of ATP \d/, "snapped to the boundary: nothing lost")
+  assert.match(await text(page, "#why-not-boundary"), /^At a boundary\. Signed on 1 Mar 2027, the lead times allow \d+ \w+ 2027; the cutover lands at the ATP \d boundary on \d+ \w+ 2027 with (\d+ weeks|a week|\d+ days) of slack, so no allowance is lost\./)
+  assert.equal(await page.evaluate("document.querySelector('#tl-snap').hidden"), true)
+  assert.equal(await page.evaluate("document.querySelector('#tl-cutover').value"), "2027-09-06", "the select shows the snapped boundary")
+  assert.equal(await page.evaluate("document.querySelector('#tl-cutover').selectedOptions[0].textContent"), "ATP 5 · 6 Sep")
+  await page.type("#tl-contract", "2027-03-01")
+  await page.evaluate("(() => { const s = document.querySelector('#tl-cutover'); s.value = '2027-03-08'; s.dispatchEvent(new Event('change', { bubbles: true })) })()")
+  await settle()
 
   // Parallel running shrinks the loss at the switch
   await setRange(page, "#tl-parallel", 0)

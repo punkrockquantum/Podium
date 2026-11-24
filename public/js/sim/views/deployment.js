@@ -5,6 +5,7 @@ import { badge, flagRow, stat, explainButton, openExplainer } from "../widgets.j
 import { gantt, ganttLegend, taskExplainId } from "../visuals.js"
 import { roleStrip } from "./common.js"
 import { cutoverOptions, fmtDate, parseDate, isoDate, TIMELINE_RANGE } from "../timeline.js"
+import { cutoverWhatIf, whyNotBoundaryLine } from "../plan.js"
 
 const OWNER = { team: "Team", dr: "Digital Realty", hpe: "HPE GreenLake", carrier: "Carrier", fia: "FIA" }
 const PATH = { fitout: "fit-out", fibre: "dark fibre", hardware: "HPE delivery", works: "Hinwil works", burnin: "burn-in", parallel: "parallel running" }
@@ -25,11 +26,21 @@ export function deploymentView(ctx) {
   const cutoverSel = el("select", { id: "tl-cutover", class: "select", "aria-label": "Cutover target" }, ...cutoverOptions().map((o) => el("option", { value: o.value }, o.label)))
   cutoverSel.addEventListener("change", () => ctx.actions.setTimeline({ cutoverDate: cutoverSel.value }))
   const cutoverOut = el("output", { class: "control-readout" })
+  // when the lead times push the cutover inside a period, one click moves the target to the next ATP boundary
+  let snapTo = null
+  const snapBtn = el("button", { type: "button", class: "btn btn-small snap-boundary", id: "tl-snap", hidden: true, title: "Set the cutover target to the first ATP boundary the lead times allow", onclick: () => { if (snapTo) ctx.actions.setTimeline({ cutoverDate: snapTo }) } }, "Snap to the next ATP boundary")
   const cutover = el("div", { class: "control", dataset: { control: "cutoverDate" } },
     el("div", { class: "control-head" }, el("label", { for: "tl-cutover", class: "control-label" }, "Cutover target"), el("span", { class: "fia-badge" }, "F4.4.3"), cutoverOut),
     cutoverSel,
+    snapBtn,
     el("p", { class: "why" }, "Move at an ATP boundary or inside a shutdown and no allowance is lost. If the lead times do not allow the target, the cutover slips to the first feasible day."))
-  cutover.sync = (v) => { cutoverSel.value = v; cutoverOut.textContent = fmtDate(parseDate(v)) }
+  cutover.sync = (v, whatIf) => {
+    cutoverSel.value = v
+    cutoverOut.textContent = fmtDate(parseDate(v))
+    snapTo = whatIf && whatIf.snapTo ? whatIf.snapTo : null
+    snapBtn.hidden = !snapTo
+    if (snapTo) snapBtn.textContent = `Snap to the next ATP boundary · ${fmtDate(parseDate(snapTo), { year: false })}`
+  }
   const parallelInput = el("input", { type: "range", id: "tl-parallel", class: "slider", min: 0, max: 8, step: 1, "aria-label": "Parallel running" })
   parallelInput.addEventListener("input", () => ctx.actions.setTimeline({ parallelWeeks: Number(parallelInput.value) }))
   const parallelOut = el("output", { class: "control-readout", for: "tl-parallel" })
@@ -60,8 +71,9 @@ export function deploymentView(ctx) {
   function update(state) {
     const { plan, result } = state
     const tl = result.timeline
+    const whatIf = cutoverWhatIf(result)
     contract.sync(plan.timeline.contractDate)
-    cutover.sync(plan.timeline.cutoverDate)
+    cutover.sync(plan.timeline.cutoverDate, whatIf)
     parallel.sync(plan.timeline.parallelWeeks)
     stepUp.sync(plan.timeline.stepUpDate)
     const t27 = tl.seasons[2027]
@@ -77,6 +89,7 @@ export function deploymentView(ctx) {
         stat("Allowance lost at the switch", t27.goLive ? `${(t27.periodLoss * 100).toFixed(1)} % of ${t27.atp.label}` : "—", t27.goLive ? `${t27.downtimeDays} solver day${t27.downtimeDays === 1 ? "" : "s"} · ${(t27.seasonLoss * 100).toFixed(2)} % of the season` : "", { id: "stat-loss" }),
         stat("Critical path", t27.critical ? PATH[t27.critical] || t27.critical : "—", t27.totalWeeks ? `${t27.totalWeeks} weeks from contract to the earliest cutover` : "", { id: "stat-critical" }),
         stat("2028 step-up", t28.changes ? fmtDate(t28.goLive) : "None", t28.changes ? `${t28.earlyDays > 0 ? `${Math.round(t28.earlyDays / 7)} wk before GPUs are allowed` : t28.shareOld > 0 ? `${Math.round(t28.shareOld * 100)} % of 2028 on the 2027 estate` : "on 1 January, no allowance lost"}${t28.earlyCostCHF ? ` · ${fmt.chf(t28.earlyCostCHF)} carrying cost` : ""}` : "2028 runs the 2027 estate", { id: "stat-stepup" })),
+      whatIf ? el("p", { class: "why-not-boundary", id: "why-not-boundary" }, el("b", {}, whatIf.noLoss ? "At a boundary. " : "Why not a boundary? "), whyNotBoundaryLine(result), explainButton("milestone.cutover", "Cutover")) : null,
       el("ul", { class: "flags", id: "timeline-flags" }, ...tl.flags.map(flagRow)),
       tl.oneOffs.length ? el("p", { class: "muted small" }, "One-offs from the schedule: ", tl.oneOffs.map((o) => `${o.label} ${fmt.chf(o.chf)} (${o.year})`).join(" · ")) : null)
     fill(milestones, 

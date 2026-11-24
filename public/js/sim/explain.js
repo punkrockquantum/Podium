@@ -20,6 +20,7 @@ import { CONTROLS, DEFAULTS } from "./model.js"
 import { K } from "./assumptions.js"
 import { costCapCHF } from "../customer.js"
 import { requirements, serviceMap, riskRegister, ROLES, CHECKLIST } from "./sa.js"
+import { whyNotBoundaryLine } from "./plan.js"
 
 // ---------------------------------------------------------------------------------------------
 // Small tables the copy and the context need
@@ -1705,7 +1706,7 @@ const STRATEGY_ENTRIES = {
 
 const MILESTONE_ENTRIES = {
   contract: { title: "Contract signature", one: "The day the colocation contract is signed; every lead time in the plan counts from here.", more: ["Fit-out, dark fibre and the hardware order all start at signature, so a later signature moves the cutover.", "The tool plans from today's date unless you set a later contract date."], analogy: "The day you pick up the keys.", inPlan: "{d.plan.goLiveLabel}{d.plan.slipNote}.", source: "G11 · D-e · model", terms: ["term.crossconnect", "term.darkfibre"] },
-  cutover: { title: "Cutover", one: "The day the airflow-computing cluster runs from the new estate; the plan targets an eight-week period boundary.", more: ["Moving at a period boundary avoids losing allowance mid-period; a mid-period move loses a share of that period.", "The go-live follows the longest lead time: fit-out, fibre or hardware."], analogy: "Moving house on the first of the month.", inPlan: "{d.plan.goLiveLabel}, {d.plan.criticalLabel} on the critical path{d.plan.slipNote}.", source: "F4.1.4 · C13 · model", terms: ["term.atp"] },
+  cutover: { title: "Cutover", one: "The day the airflow-computing cluster runs from the new estate; the plan targets an eight-week period boundary.", more: ["Moving at a period boundary avoids losing allowance mid-period; a mid-period move loses a share of that period.", "The go-live follows the longest lead time: fit-out, fibre or hardware.", "Why not wait for a boundary? Waiting loses nothing from the allowance but keeps the season on today's room for longer; the plan line below prices both."], analogy: "Moving house on the first of the month.", inPlan: "{d.plan.goLiveLabel}, {d.plan.criticalLabel} on the critical path{d.plan.slipNote}. {d.plan.boundaryLine}", source: "F4.1.4 · C13 · model", terms: ["term.atp"] },
   declaration: { title: "New declaration", one: "The FIA must be told about the new cluster, its location, cores and declared clock before it runs restricted airflow computing.", more: ["The regulations ask for the declaration ahead of use; the tool places it at the cutover boundary."], analogy: "Registering a new car before driving it.", inPlan: "Declared for the {d.plan.atpLabel27} boundary; {d.plan.goLiveLabel}.", source: "F4.4.3 · C7", terms: ["term.declaredClock"] },
   "stepup-order": { title: "Order the 2028 step-up", one: "The last day to order the 2028 hardware so it is delivered and burned in before 1 January 2028.", more: ["Lead time counts back from the step-up date; a late order pushes the GPU partition into the 2028 season."], analogy: "Ordering the turkey in time for Christmas.", inPlan: "Order by {d.plan.orderByLabel}; {d.plan.stepUpLabel}{d.plan.stepUpNote}.", source: "C13 · model", terms: ["term.gpu"] },
   stepup: { title: "2028 step-up", one: "The day the 2028 estate goes live, usually 1 January 2028 when graphics processors may join the solver.", more: ["A step-up that lands after 1 January leaves part of 2028 on the 2027 estate; one that lands early costs money before it is legal to use."], analogy: "The new term starting.", inPlan: "{d.plan.stepUpLabel}{d.plan.stepUpNote}.", source: "F4.4.4 · C10 · model", terms: ["term.gpu", "term.atp"] },
@@ -2141,6 +2142,7 @@ function planFacts(plan, x) {
     contractLabel: t27.changes && contractMs ? `Signed ${dateLabel(contractMs)}` : "No contract in this plan",
     declarationLabel: t27.declarationDue ? `2027 declaration due by ${dateLabel(t27.declarationDue)}` : "No new declaration in 2027",
     declaration28Label: t28.declarationDue ? `2028 declaration due by ${dateLabel(t28.declarationDue)}` : "No new declaration in 2028",
+    boundaryLine: (isPlanResult(plan) && whyNotBoundaryLine(plan)) || "No 2027 move in this plan, so there is no boundary to wait for.",
   }
 }
 
