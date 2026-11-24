@@ -655,11 +655,11 @@ const TILE_ENTRIES = {
     term: "Race weekends at risk",
     one: "How many of the season's race weekends the model expects to run without the factory link.",
     more: [
-      "Link availability times the 24 race weekends: a 99.9 % link loses about 0.02 weekends a season, a public-internet link ten times that.",
+      "Link availability times the 24 race weekends, said as odds: a 99.9 % link puts about 1 weekend in 42 seasons at risk; a public-internet link gives a 1 in 4 chance of losing a weekend each season.",
       "A second route or a satellite back-up moves this, not lap time.",
     ],
     analogy: "The number of matches the TV broadcast drops out for.",
-    inPlan: "{fmt.num(s.net.weekendsLost, 2)} of {s.net.raceWeekends} weekends vs {fmt.num(t.net.weekendsLost, 2)} Today, link {fmt.availability(s.net.linkAvailability)}.",
+    inPlan: "This plan: {fmt.weekends(s.net.weekendsLost)} (link {fmt.availability(s.net.linkAvailability)}); Today: {fmt.weekends(t.net.weekendsLost)}.",
     source: "I-b · C7",
     terms: [],
   },
@@ -890,7 +890,7 @@ const TILE_ENTRIES = {
     one: "How often the garage-to-factory link is up.",
     more: ["Each 0.1 % of downtime is a few race-weekend sessions a season without factory support."],
     analogy: "The share of calls that connect.",
-    inPlan: "{fmt.availability(s.net.linkAvailability)}: about {fmt.num(s.net.weekendsLost, 2)} race weekends a season at risk.",
+    inPlan: "{fmt.availability(s.net.linkAvailability)}: {fmt.weekends(s.net.weekendsLost)}.",
     source: "I-b",
     terms: [],
   },
@@ -1890,7 +1890,7 @@ export const PLAN_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.plan).map(([
 // Template resolver (no eval, no Function)
 // ---------------------------------------------------------------------------------------------
 
-const FMT_WHITELIST = ["chf", "chfDelta", "chfFull", "sec", "num", "pct", "signed", "hours", "ms", "availability", "position"]
+const FMT_WHITELIST = ["chf", "chfDelta", "chfFull", "sec", "num", "pct", "signed", "hours", "ms", "availability", "position", "weekends", "weekendsShort"]
 
 function tokenize(src) {
   const tokens = []

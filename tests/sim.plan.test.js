@@ -514,3 +514,47 @@ test("periods are labelled 'ATP n', never 'P n' (which reads like a championship
   assert.equal(CONTROLS.position.label, "Constructors' position used for the sliding scale")
   assert.equal(CONTROLS.position.format(8), "P8 · 105 %")
 })
+
+test("race weekends at risk read as words everywhere on screen; the JSON exports keep the number", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs")
+  const { fmt } = await import("../public/js/sim/dom.js")
+  const { EXPLAIN, explainContext, fillTemplate } = await import("../public/js/sim/explain.js")
+  // the three magnitudes and zero
+  assert.equal(fmt.weekends(0), "no weekends at risk")
+  assert.equal(fmt.weekends(0.024), "about 1 weekend in 42 seasons at risk")
+  assert.equal(fmt.weekends(0.0036), "about 1 weekend in 278 seasons at risk")
+  assert.equal(fmt.weekends(0.26), "1 in 4 chance of losing a weekend")
+  assert.equal(fmt.weekends(0.14), "1 in 7 chance of losing a weekend")
+  assert.equal(fmt.weekends(1.2), "about 1.2 weekends a season at risk")
+  assert.equal(fmt.weekends(1), "about 1 weekend a season at risk")
+  assert.equal(fmt.weekends(0.5), "about 0.5 weekends a season at risk")
+  assert.equal(fmt.weekends(null), "—")
+  assert.deepEqual([0, 0.024, 0.26, 1.2].map(fmt.weekendsShort), ["none", "1 in 42 seasons", "1 in 4 chance", "about 1.2 a season"])
+  // every plan in the model falls in a band the words cover, and the number survives in the exports
+  for (const preset of ["today", "dr2027", "gl2028"]) {
+    const r = evaluatePlan(presetPlan(preset))
+    const brief = solutionBrief(r)
+    for (const y of [2027, 2028]) {
+      const x = r.seasons[y].trackside.weekendsAtRisk
+      assert.ok(Number.isFinite(x) && x >= 0 && x < 24)
+      assert.equal(brief.seasons[y].figures.trackside.weekendsAtRisk, x, "the brief keeps the number")
+      assert.match(fmt.weekends(x), /^(no weekends at risk|about 1 weekend in \d+ seasons at risk|1 in \d+ chance of losing a weekend|about [\d.]+ weekends? a season at risk)$/)
+      const paddock = requirements(r, y).find((q) => q.id === "paddock")
+      if (paddock) assert.ok(paddock.detail.endsWith(`${fmt.weekends(r.seasons[y].sim.net.weekendsLost)}.`), "the Solutions Architect paddock row ends with the words")
+    }
+    const ctx = explainContext({ result: { scenario: r.seasons[2027].sim, today: r.seasons[2027].today, perf: r.seasons[2027].perf }, plan: r, fmt })
+    const inPlan = fillTemplate(EXPLAIN["tile.stat-weekends"].inPlan, ctx)
+    assert.ok(inPlan.includes(fmt.weekends(r.seasons[2027].sim.net.weekendsLost)) && inPlan.includes("Today: " + fmt.weekends(r.seasons[2027].today.net.weekendsLost)), inPlan)
+    assert.ok(fillTemplate(EXPLAIN["tile.stat-link"].inPlan, ctx).endsWith(`${fmt.weekends(r.seasons[2027].sim.net.weekendsLost)}.`))
+  }
+  // no view prints the metric as a bare number any more
+  const viewsDir = new URL("../public/js/sim/views/", import.meta.url)
+  for (const name of readdirSync(viewsDir)) {
+    const src = readFileSync(new URL(name, viewsDir), "utf8")
+    for (const m of src.matchAll(/weekends(?:AtRisk|Lost)[^\n]{0,40}/g)) {
+      const line = src.slice(src.lastIndexOf("\n", m.index) + 1, src.indexOf("\n", m.index))
+      if (/\bv: \(s\) => s\.trackside\.weekendsAtRisk/.test(m[0])) continue // the compare table's ranking key stays numeric
+      assert.ok(/fmt\.weekends(Short)?\(/.test(line) && !/fmt\.num\([^)]*weekends|weekends\w*\.toFixed/.test(line), `${name}: ${line.trim().slice(0, 120)}`)
+    }
+  }
+})

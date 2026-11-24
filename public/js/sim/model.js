@@ -573,7 +573,7 @@ export function trackside(x) {
     garageMs: t.garageMs,
     headroom: round(headroom, 2), telemetryPeakMbps: t.telemetryPeakMbps,
     linkAvailability: round(linkAvailability, 5),
-    weekendsLost: round((1 - linkAvailability) * t.raceWeekends, 2),
+    weekendsLost: round((1 - linkAvailability) * t.raceWeekends, 4),
     raceWeekends: t.raceWeekends,
     meanDecisionSec: round(meanDecisionSec, 2),
     decisionTargetSec: t.decisionTargetSec,
@@ -755,7 +755,7 @@ export function perfBlock(scenario, today, { wScenario = scenario.comp.effective
     decisionDeltaSec: round(today.net.venue.decisionSec - scenario.net.venue.decisionSec, 2),
     linkAvailability: scenario.net.linkAvailability, linkAvailabilityToday: today.net.linkAvailability,
     weekendsAtRisk: scenario.net.weekendsLost, weekendsAtRiskToday: today.net.weekendsLost,
-    weekendsAtRiskDelta: round(today.net.weekendsLost - scenario.net.weekendsLost, 2),
+    weekendsAtRiskDelta: round(today.net.weekendsLost - scenario.net.weekendsLost, 4),
     availabilityPct: scenario.comp.availabilityPct, availabilityTodayPct: today.comp.availabilityPct,
   }
 }

@@ -137,7 +137,10 @@ the charge factor (J-c); an MI430X at a 100 % charge exceeds a P8 allowance on i
 * Data-to-decision = 6.0 s + 2 round trips − 1.5 s with an edge node in the garage.
 * **Trackside value is read in its own units**, never in points: the data-to-decision time at the chosen venue
   (and its delta vs Today), the link availability and the **race weekends at risk** = (1 − link availability) × 24
-  weekends. The Overview's *Trackside value* row and the strategy cards carry these three numbers. The quality index
+  weekends. On screen the weekends figure is said in words (`fmt.weekends`): under 0.05 a weekend "about 1 weekend in
+  N seasons at risk" (N = round(1 / x)), up to 0.5 "1 in M chance of losing a weekend", from 0.5 "about X weekends a
+  season at risk", zero "no weekends at risk"; tables use the short form ("1 in 42 seasons", "1 in 4 chance") and the
+  JSON exports keep the number. The Overview's *Trackside value* row and the strategy cards carry these three figures. The quality index
   (50 % decision time, 30 % availability, 20 % headroom) is still computed for the Solutions Architect risk register
   but no longer converted into championship points (section 17).
 

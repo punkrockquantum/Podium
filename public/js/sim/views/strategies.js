@@ -104,7 +104,13 @@ function outcomeTiles(result, today, key) {
     stat("Availability", bothValues((s) => fmt.availability(s.availabilityPct / 100), result)),
     stat("Data-to-decision", bothValues((s) => `${fmt.num(s.trackside.decisionSec, 1)} s`, result), "at the race track"),
     stat("PUE · CO₂", bothValues((s) => `${s.sim.fac.pue.toFixed(2)} · ${fmt.num(s.money.co2MarketT, 0)} t`, result), "market-based"),
-    stat("Race weekends at risk", bothValues((s) => fmt.num(s.trackside.weekendsAtRisk, 2), result), "link availability"))
+    stat("Race weekends at risk", bothValues((s) => fmt.weekendsShort(s.trackside.weekendsAtRisk), result), weekendsSub(result)))
+}
+
+/** The sentence under the strategy card's weekends tile: one when both seasons agree, else one per season. */
+function weekendsSub(result) {
+  const words = SEASONS.map((y) => fmt.weekends(result.seasons[y].trackside.weekendsAtRisk))
+  return words[0] === words[1] ? words[0] : SEASONS.map((y, i) => `${y}: ${words[i]}`).join(" · ")
 }
 
 /** Horizontal strip Dec 2026 → Jan 2028: ATP boundaries as ticks ("ATP 1" … "ATP 6", then 2028's "ATP 1" beside the 1 Jan 2028 marker), plan milestones as markers (labels on four rows). */
@@ -198,7 +204,7 @@ const ROWS = [
   { label: "3-year TCO (2028 estate)", f: (s, r) => fmt.chf(r.totals.tco3), v: (s, r) => r.totals.tco3, best: "min" },
   { label: "Availability", f: (s) => fmt.availability(s.availabilityPct / 100), v: (s) => s.availabilityPct, best: "max" },
   { label: "Data-to-decision", f: (s) => `${fmt.num(s.trackside.decisionSec, 1)} s`, v: (s) => s.trackside.decisionSec, best: "min" },
-  { label: "Race weekends at risk", f: (s) => fmt.num(s.trackside.weekendsAtRisk, 2), v: (s) => s.trackside.weekendsAtRisk, best: "min" },
+  { label: "Race weekends at risk", f: (s) => fmt.weekendsShort(s.trackside.weekendsAtRisk), v: (s) => s.trackside.weekendsAtRisk, best: "min" },
   { label: "PUE", f: (s) => s.sim.fac.pue.toFixed(2), v: (s) => s.sim.fac.pue, best: "min" },
   { label: "kW at Digital Realty of 500", f: (s) => (s.envelope.drIT > 0 ? `${Math.round(s.envelope.drIT)} kW${s.envelope.fits ? "" : " · not possible"}` : "Hinwil") },
   { label: "Racks of 60", f: (s) => (s.envelope.drIT > 0 ? `${s.envelope.racks.total}` : "—") },

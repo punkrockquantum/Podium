@@ -117,6 +117,30 @@ export const fmt = {
     const v = safe(value)
     return v === null ? "—" : `P${Math.round(v)}`
   },
+  /**
+   * Expected race weekends lost a season (link downtime × 24 weekends) said in words. Under 0.05 a weekend
+   * the loss is spread over seasons ("about 1 weekend in 42 seasons at risk"); up to 0.5 it is a chance in
+   * the season ("1 in 4 chance of losing a weekend"); from 0.5 it is a count ("about 1.2 weekends a season
+   * at risk"); zero is "no weekends at risk". The number itself stays in the JSON exports.
+   */
+  weekends(value) {
+    const v = safe(value)
+    if (v === null) return "—"
+    if (v < 0.0005) return "no weekends at risk"
+    if (v < 0.05) return `about 1 weekend in ${Math.round(1 / v)} seasons at risk`
+    if (v < 0.5) return `1 in ${Math.round(1 / v)} chance of losing a weekend`
+    const x = v.toFixed(1)
+    return `about ${x === "1.0" ? "1 weekend" : `${x} weekends`} a season at risk`
+  },
+  /** The same figure as `weekends` without the sentence, for tile values and compare cells: "1 in 42 seasons", "1 in 4 chance", "about 1.2 a season", "none". */
+  weekendsShort(value) {
+    const v = safe(value)
+    if (v === null) return "—"
+    if (v < 0.0005) return "none"
+    if (v < 0.05) return `1 in ${Math.round(1 / v)} seasons`
+    if (v < 0.5) return `1 in ${Math.round(1 / v)} chance`
+    return `about ${v.toFixed(1)} a season`
+  },
 }
 
 /** Log every uncaught error to the console and to an on-page strip so the browser test can see it. */

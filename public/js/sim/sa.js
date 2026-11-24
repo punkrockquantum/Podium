@@ -10,6 +10,7 @@ import { K } from "./assumptions.js"
 import { FIGURES as F } from "../customer.js"
 import { SEASONS } from "./plan.js"
 import { fmtDate, isoDate } from "./timeline.js"
+import { fmt } from "./dom.js"
 
 const S = K.services
 const round = (x, d = 1) => Math.round(x * 10 ** d) / 10 ** d
@@ -66,7 +67,7 @@ export function requirements(result, year) {
   add("xc", "Connectivity", "Cross-connects", "2 × cross-connects (fibre routes to the cage)", "Ordered through the Digital Realty customer portal; continuity-tested by Remote Hands.", "interconnection", "ServiceFabric® Cross Connect", "VERIFIED")
   if (x.cloudOnRamp) add("cloud", "Connectivity", "Cloud on-ramps", "AWS Direct Connect · Azure ExpressRoute", "Private on-ramps for unrestricted ML and analytics bursts; not part of the Restricted CFD estate.", "interconnection", S.cloudOnRamps, "VERIFIED")
   add("internet", "Connectivity", "Internet and peering", x.cloudOnRamp ? "IP bandwidth + SwissIX port (optional)" : "IP bandwidth (optional SwissIX)", S.swissix, "interconnection", "ServiceFabric® Internet Exchange / IP Bandwidth", "VERIFIED")
-  add("paddock", "Connectivity", "Paddock link", TRACKSIDE[x.trackside], `Terminates at ${x.location === "hybrid" ? "Hinwil (Mission Control)" : "the campus"}; ${net.venue.name} round trip ${net.venue.rttMs} ms, data-to-decision ${net.venue.decisionSec} s.`, "team", null)
+  add("paddock", "Connectivity", "Paddock link", TRACKSIDE[x.trackside], `Terminates at ${x.location === "hybrid" ? "Hinwil (Mission Control)" : "the campus"}; ${net.venue.name} round trip ${net.venue.rttMs} ms, data-to-decision ${net.venue.decisionSec} s; ${fmt.weekends(net.weekendsLost)}.`, "team", null)
   add("hands", "Operations", "Remote Hands", x.support === "mission" ? "24×7 on-demand + scheduled" : "Scheduled + on-demand", S.remoteHands, "customer-success-remote-hands", "Remote Hands", "VERIFIED")
   add("support", "Operations", "HPE support", SUPPORT[x.support], x.consumption === "greenlake" ? S.greenlakeStartup : S.hpeSupport, "hpe", "HPE Tech Care via HPE GreenLake", "VERIFIED")
   add("windows", "Operations", "Maintenance windows", "At ATP boundaries or in the shutdowns", `Six ATPs a year (${K.timeline.atpRule}); summer shutdown ${K.timeline.summerShutdown.days} days, winter ${K.timeline.winterShutdown.days} days.`, "customer-success-remote-hands", "Customer portal", "VERIFIED")

@@ -27,7 +27,7 @@ export function compareView(ctx) {
       ["Seconds per lap vs Today", both((s) => fmt.sec(s.perf.sec)), "headline"],
       ["kW at Digital Realty of 500", both((s) => (s.envelope.drIT > 0 ? `${Math.round(s.envelope.drIT)} kW${s.envelope.fits ? "" : " · not possible"}` : "Hinwil"))],
       ["Data-to-decision", both((s) => `${fmt.num(s.trackside.decisionSec, 1)} s`)],
-      ["Race weekends at risk", both((s) => fmt.num(s.trackside.weekendsAtRisk, 2))],
+      ["Race weekends at risk", both((s) => fmt.weekendsShort(s.trackside.weekendsAtRisk))],
       ["Effective MAUh (season)", both((s) => fmt.num(s.effectiveMauh, 2))],
       ["Allowance used", both((s) => fmt.pct(s.usage))],
       ["Availability", both((s) => fmt.availability(s.availabilityPct / 100))],

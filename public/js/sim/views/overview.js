@@ -216,7 +216,7 @@ function renderRibbon(ribbon, result, plan, ctx) {
   const s28 = result.seasons[2028]
   const tone = (s) => (s.perf.sec > 0.005 ? "good" : s.perf.sec < -0.005 ? "bad" : "flat")
   const tr = (s) => `${fmt.num(s.trackside.decisionSec, 1)} s to decide`
-  const trSub = (s) => `link ${fmt.availability(s.trackside.linkAvailability)} · ${fmt.num(s.trackside.weekendsAtRisk, 2)} weekends at risk`
+  const trSub = (s) => `link ${fmt.availability(s.trackside.linkAvailability)} · ${fmt.weekends(s.trackside.weekendsAtRisk)}`
   fill(ribbon, 
     el("div", { class: "ribbon-head" },
       el("div", { class: "headline-kicker" }, `${plan.meta.name} · vs today's setup at ${plan.shared.confidence} % confidence`),
