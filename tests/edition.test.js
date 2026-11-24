@@ -17,10 +17,13 @@ const read = (path) => readFileSync(new URL(path, root), "utf8")
 const RETIRED_BRAND = new RegExp(["F", "L", "U", "X"].join(""), "i")
 const sources = read("docs/audi-f1-sources.md")
 /** Row ids in the fact pack: A1, C3-open, D-a, B-c … */
-const ROW_IDS = new Set([...sources.matchAll(/^\| \*{0,2}([A-F](?:\d+(?:-open)?|-[a-z]))\*{0,2} \|/gm)].map((m) => m[1]))
+const ROW_IDS = new Set([...sources.matchAll(/^\| \*{0,2}([A-K](?:\d+(?:-open)?|-[a-z]))\*{0,2} \|/gm)].map((m) => m[1]))
 
 test("the fact pack exists, has rows in every section, and nothing in docs/ mentions the retired product name", () => {
-  for (const section of ["## A.", "## B.", "## C.", "## D.", "## E.", "## F."]) assert.ok(sources.includes(section), `fact pack section ${section}`)
+  for (const section of ["## A.", "## B.", "## C.", "## D.", "## E.", "## F.", "## G.", "## H.", "## I.", "## J.", "## K."]) assert.ok(sources.includes(section), `fact pack section ${section}`)
+  for (const id of ["A15", "A-f", "C13", "C16", "C-a", "D10", "D11", "D-e", "G8", "G11", "G-e", "G-g", "G-h", "H3", "H-f", "J3", "J4", "J-g", "J-l", "K1", "K13", "K-a", "K-e"]) assert.ok(ROW_IDS.has(id), `fact-pack row ${id} (integration pass)`)
+  const ids = [...sources.matchAll(/^\| \*{0,2}([A-K](?:\d+(?:-open)?|-[a-z]))\*{0,2} \|/gm)].map((m) => m[1])
+  assert.equal(new Set(ids).size, ids.length, `duplicate fact-pack row ids: ${ids.filter((id, i) => ids.indexOf(id) !== i)}`)
   assert.ok(ROW_IDS.size >= 40, `fact-pack rows (${ROW_IDS.size})`)
   for (const id of ["A1", "A3", "A12", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "D1", "D2", "D3", "D4", "D5", "E1", "E2", "B-a", "B-b", "D-a", "D-d"]) assert.ok(ROW_IDS.has(id), `row ${id}`)
   assert.ok(/VERIFIED/.test(sources) && /ASSUMPTION/.test(sources), "rows are marked VERIFIED or ASSUMPTION")

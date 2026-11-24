@@ -1,4 +1,5 @@
 import test from "node:test"
+import { readFileSync } from "node:fs"
 import assert from "node:assert/strict"
 import {
   DEFAULTS, PRESETS, PRESET_ORDER, GROUPS, CONTROLS, normalize, simulate, evaluate, evaluateBothSeasons,
@@ -23,9 +24,12 @@ const assertNoNaN = (result, label) => walk(result, label, (path, value) => {
 test("constants: every entry is tagged VERIFIED or ASSUMPTION with a source row", () => {
   const rows = assumptionRows()
   assert.ok(rows.length >= 80, `expected at least 80 annotated constants, got ${rows.length}`)
+  const factPack = readFileSync(new URL("../docs/audi-f1-sources.md", import.meta.url), "utf8")
+  const rowIds = new Set([...factPack.matchAll(/^\| \*{0,2}([A-K](?:\d+(?:-open)?|-[a-z]))\*{0,2} \|/gm)].map((m) => m[1]))
   for (const r of rows) {
     assert.ok(["VERIFIED", "ASSUMPTION"].includes(r.status), `${r.path} status ${r.status}`)
     assert.match(r.source, /^[A-K](?:\d+(?:-open)?|-[a-z])$/, `${r.path} source ${r.source}`)
+    assert.ok(rowIds.has(r.source), `${r.path} cites fact-pack row ${r.source}, which does not exist`)
   }
   assert.equal(K.fia.baseline.mauh, 6)
   assert.deepEqual(K.fia.scale, [70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 115])
