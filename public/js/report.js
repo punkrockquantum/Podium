@@ -7,8 +7,37 @@
 import * as C from "./catalog.js"
 import { boardFor, choicesOf, pickedOption } from "./model.js"
 import { attemptWord } from "./approval.js"
+import { FIGURES as F } from "./customer.js"
 
 const stationOf = (id) => C.byId(C.STATIONS, id)
+
+/**
+ * One line on the 2028 path: does the board the race used still work when the IT load roughly
+ * doubles (F.load.it2028KW) and GPUs may run the solver (FIA F4.4.1, from 1 January 2028)?
+ */
+export function path2028For(team, stationIds = C.STATIONS.map((s) => s.id)) {
+  const choices = choicesOf(team)
+  const pick = (id) => (isApproved(team, id) ? choices : C.BASELINE_CHOICES)
+  const parts = []
+  if (stationIds.includes("dc")) {
+    const site = pickedOption("location", pick("dc"))
+    const cooling = pickedOption("cooling", pick("dc"))
+    const roomKW = site.expansionKW || site.siteKW
+    const fits = roomKW >= F.load.it2028KW
+    const liquid = cooling.id === "liquid"
+    parts.push(fits
+      ? `${site.name}: the expansion right covers the ${F.load.it2028KW} kW 2028 load${liquid ? " and direct-to-chip cooling is already in" : ", but 2028 GPUs want direct-to-chip cooling"}`
+      : `${site.name} tops out at ${roomKW} kW, short of the ${F.load.it2028KW} kW 2028 load: a second site or a new hall`)
+  }
+  if (stationIds.includes("compute")) {
+    const chips = pickedOption("chips", pick("compute"))
+    parts.push(chips.id === "cpu" ? "the CPU-only solver is legal now; plan the GPU partition for the first 2028 period" : chips.id === "mixed" ? "the GPU partition is ready for the 2028 solver rule" : "the GPU solver only becomes legal on 1 January 2028")
+  }
+  if (stationIds.includes("network") && pickedOption("link", pick("network")).id === "single") parts.push("a single route will not carry a doubled cluster's remote users")
+  if (!parts.length) return null
+  const text = parts.join("; ")
+  return `2028 path: ${text.charAt(0).toUpperCase()}${text.slice(1)}.`
+}
 
 /** The top three of the championship, in podium order: 2nd (left), 1st (centre), 3rd (right). */
 export function podium(race) {
@@ -108,7 +137,7 @@ export function positivesFor(team, row, race, stationIds = C.STATIONS.map((s) =>
   if (out.length < 3 && recovered.length) out.push(`${stationOf(recovered[0]).name}: rejected, adjusted and approved on the ${attemptWord(team.attempts[recovered[0]])}.`)
   if (out.length < 2 && approved.length) out.push(`${approved.length} of ${stationIds.length} boards approved by their Solutions Architects.`)
   if (out.length < 3 && row?.underSC) out.push("Your pit wall reacted to the Safety Car and pitted cheaply.")
-  if (out.length < 3 && row && !row.caught.length) out.push("A clean FIA audit: no penalty points.")
+  if (out.length < 3 && row && !row.caught.length) out.push("A clean audit: no FIA, finance or operations penalty points.")
   if (out.length < 2 && row?.position && row.position < row.grid) out.push(`Gained ${row.grid - row.position} place${row.grid - row.position === 1 ? "" : "s"} from the grid.`)
   if (out.length < 2 && row) out.push(`Finished the race in P${row.position} of ${race.results.length}.`)
   if (out.length < 2) out.push("You took part in every phase of the session.")
@@ -145,6 +174,7 @@ export function readoutFor(team, race, stationIds = C.STATIONS.map((s) => s.id),
     boards,
     wentWell: positivesFor(team, row, race, stationIds, budget),
     couldDo: suggestionsFor(team, stationIds, budget),
+    path2028: path2028For(team, stationIds),
     incidents: incidentsFor(team.id, race),
   }
 }

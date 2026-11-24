@@ -152,7 +152,7 @@ test("every scene label is 8 words or fewer, names its dial and quotes the secon
     }
   }
   const ref = boardFor("dc", C.REFERENCE_BUILD)
-  assert.match(sceneLabels(ref).find((l) => l.dial === "cooling").text, /^Liquid cooling: GPUs at 100% \(\+0\.\d\d s\)$/)
+  assert.match(sceneLabels(ref).find((l) => l.dial === "cooling").text, /^Liquid cooling: cluster at 100% \(\+0\.\d\d s\)$/)
 })
 
 test("the demo tune step lets a dial change the wind-tunnel scene", () => {

@@ -1,14 +1,15 @@
 /**
  * The live scenario at the top of every table: one SVG scene per table that defines the customer's
  * situation and reacts to every dial. CFD is an F1 car in a wind tunnel, Datacenter & Power is a
- * hall cross-section, Connectivity is data travelling from Austin to the factory, and OEMs is a rack
- * row with its budget purse. The headline is always the same: seconds found per lap.
+ * hall cross-section, Connectivity is data travelling from the circuit through the Zurich campus to
+ * Hinwil, and OEMs is a rack row with its budget purse. The headline is always the same: seconds found per lap.
  *
  * Pure SVG + CSS (plus SMIL motion for the data packets, which Safari supports natively). Animations
  * pause while the page is hidden. `still` scenes (thumbnails) carry no animation at all.
  */
 import * as C from "./catalog.js"
 import { boardFor, pickedOption } from "./model.js"
+import { FIGURES as F, chf } from "./customer.js"
 
 const NS = "http://www.w3.org/2000/svg"
 /** A tiny HTML builder, so the labels below stay importable (and testable) outside the browser. */
@@ -29,7 +30,7 @@ function s(tag, attrs = {}, ...children) {
 const text = (x, y, value, attrs = {}) => s("text", { x, y, ...attrs }, value)
 const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v))
 const show = (node, on) => node.classList.toggle("off", !on)
-const money = (v) => (Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}k`)
+const money = (v) => chf(v)
 const opt = (board, dial) => pickedOption(dial, board.choices)
 
 if (typeof document !== "undefined") {
@@ -53,11 +54,11 @@ function car() {
     s("circle", { cx: 532, cy: 188, r: 22, class: "wheel" }))
 }
 
-function fiaFlag(x, y, rule) {
+function fiaFlag(x, y, label) {
   return s("g", { class: "fia-flag off", transform: `translate(${x} ${y})` },
     s("line", { x1: 0, y1: 0, x2: 0, y2: 46, class: "flag-pole" }),
     s("path", { d: "M0 0 L44 8 L0 18 Z", class: "flag-cloth" }),
-    text(0, 62, `FIA ${rule}`, { class: "flag-text" }))
+    text(0, 62, label, { class: "flag-text" }))
 }
 
 /* ------------------------------------------------------------ CFD: the wind tunnel */
@@ -93,7 +94,7 @@ function computeScene(root) {
   const lapText = text(598, 86, "", { class: "disp-big" })
   display.append(cyclesText, targetText, lapText)
   const counter = text(26, 34, "", { class: "scene-counter" })
-  const flag = fiaFlag(40, 120, "2.4")
+  const flag = fiaFlag(40, 120, "FIA F4.6.1")
   root.append(display, counter, flag)
   return (board) => {
     const v = board.values
@@ -114,7 +115,7 @@ function computeScene(root) {
     show(flag, over)
     cyclesText.textContent = over ? `${cycles} cycles a week: not allowed` : `${cycles} cycles a week`
     cyclesText.classList.toggle("bad", over || v.cycles < 10)
-    targetText.textContent = `Target 10+ · ${Math.round(v.usage)}% of FIA cap`
+    targetText.textContent = `Target 10+ · ${Math.round(v.usage)}% of ${F.fia.mauhAllowance} MAUh allowance`
     lapText.textContent = !board.allowed ? "Not allowed" : board.seconds > 0 ? `Lap time −${board.seconds.toFixed(2)} s` : "Lap time: no gain yet"
     counter.textContent = `Aero efficiencies found this week: ${over ? 0 : Math.round(v.cycles * 2)}`
   }
@@ -122,7 +123,7 @@ function computeScene(root) {
 
 /* ------------------------------------------------------------ Datacenter & Power: the hall */
 
-const SITE_NAME = { factory: "Factory server room", colo: "Colo near the factory", cheap: "Cheap-power region" }
+const SITE_NAME = { factory: "Hinwil data room", colo: `Zurich campus · ${F.offer.committedKW} kW`, cheap: "Remote low-cost region" }
 
 function dcScene(root) {
   root.append(s("rect", { x: 6, y: 6, width: 788, height: 228, rx: 16, class: "sky" }))
@@ -166,7 +167,7 @@ function dcScene(root) {
     racks.classList.toggle("boost", ch.power === "boost" && gpu >= 100)
     root.dataset.glow = gpu < 100 ? "throttled" : ch.power === "boost" ? "boost" : "full"
     racks.style.setProperty("--glow", (0.25 + 0.75 * gpu / 100).toFixed(2))
-    throttle.textContent = gpu < 100 ? `GPUs running at ${gpu}%` : `GPUs at 100%${ch.power === "cap85" ? " (85% power cap)" : ""}`
+    throttle.textContent = gpu < 100 ? `Cluster running at ${gpu}%` : `Cluster at 100%${ch.power === "cap85" ? " (85% power cap)" : ""}`
     throttle.classList.toggle("bad", gpu < 100)
     show(shimmer, ch.cooling === "air" && (ch.power === "boost" || gpu < 100))
     show(air, ch.cooling === "air")
@@ -190,21 +191,26 @@ function dcScene(root) {
   }
 }
 
-/* ------------------------------------------------------------ Connectivity: Austin to the factory */
+/* ------------------------------------------------------------ Connectivity: trackside → Zurich campus → Hinwil */
 
 function networkScene(root, still) {
   const id = `net${++uid}`
   root.append(s("rect", { x: 6, y: 6, width: 788, height: 228, rx: 16, class: "sky" }))
   root.append(s("g", { class: "cota", transform: "translate(34 96)" },
     s("path", { d: "M10 50 C 0 20, 30 0, 50 14 C 66 24, 80 4, 100 10 C 118 16, 112 46, 92 50 C 70 54, 60 70, 40 66 C 24 62, 18 58, 10 50 Z", class: "cota-track" }),
-    text(56, 92, "Austin · COTA", { class: "place-text", "text-anchor": "middle" })))
+    text(56, 92, "Trackside · Austin", { class: "place-text", "text-anchor": "middle" })))
+  root.append(s("g", { class: "campus", transform: "translate(568 100)" },
+    s("rect", { x: 0, y: 0, width: 40, height: 44, rx: 4, class: "factory" }),
+    [10, 22, 34].map((y) => s("rect", { x: 7, y, width: 26, height: 6, rx: 1.5, class: "rack-led" })),
+    text(20, 66, "Zurich campus", { class: "place-text", "text-anchor": "middle" })))
   root.append(s("g", { transform: "translate(660 92)" },
     s("path", { d: "M0 60 L0 20 L30 4 L60 20 L60 0 L74 0 L74 60 Z", class: "factory" }),
-    text(37, 82, "Factory strategists", { class: "place-text", "text-anchor": "middle" })))
+    s("path", { d: "M-52 30 L0 30", class: "route route-dark" }),
+    text(37, 82, "Hinwil Mission Control", { class: "place-text", "text-anchor": "middle" })))
   const paths = {
-    main: s("path", { id: `${id}-a`, d: "M150 122 C 300 112, 500 112, 656 122", class: "route" }),
-    second: s("path", { id: `${id}-b`, d: "M150 140 C 300 206, 500 206, 656 140", class: "route" }),
-    sat: s("path", { id: `${id}-c`, d: "M150 108 Q 400 -10 656 108", class: "route sat-route" }),
+    main: s("path", { id: `${id}-a`, d: "M150 122 C 300 112, 460 112, 566 122", class: "route" }),
+    second: s("path", { id: `${id}-b`, d: "M150 140 C 300 206, 460 206, 566 140", class: "route" }),
+    sat: s("path", { id: `${id}-c`, d: "M150 108 Q 360 -10 566 108", class: "route sat-route" }),
   }
   root.append(paths.main, paths.second, paths.sat)
   const satellite = s("g", { class: "satellite off", transform: "translate(400 50)" },
@@ -229,7 +235,7 @@ function networkScene(root, still) {
   const wifi = s("g", { class: "wifi off" }, [8, 14, 20].map((r) => s("path", { d: `M${-r} 0 A ${r} ${r} 0 0 1 ${r} 0`, class: "wifi-arc" })))
   const edge = s("g", { class: "edge off" }, s("rect", { x: -18, y: -6, width: 36, height: 22, rx: 4 }), text(0, 10, "edge", { "text-anchor": "middle", class: "edge-text" }))
   garage.append(wifi, edge)
-  const flag = fiaFlag(60, 160, "5.2")
+  const flag = fiaFlag(60, 160, "Audi F1 req.")
   const latency = text(400, 228, "", { class: "latency-text", "text-anchor": "middle" })
   const latTrack = s("rect", { x: 270, y: 196, width: 260, height: 10, rx: 5, class: "meter-track" })
   const latFill = s("rect", { x: 270, y: 196, height: 10, rx: 5, class: "meter-fill" })
@@ -269,7 +275,7 @@ function networkScene(root, still) {
 
 /* ------------------------------------------------------------ OEMs: the rack row and the purse */
 
-const HW_LABEL = { incumbent: "2019 kit", tier1: "Dell · HPE · Lenovo", dgx: "NVIDIA DGX" }
+const HW_LABEL = { incumbent: "Last-generation kit", tier1: "Dell · HPE · Lenovo", dgx: "NVIDIA DGX" }
 
 function oemScene(root) {
   root.append(s("rect", { x: 6, y: 6, width: 788, height: 228, rx: 16, class: "sky" }))
@@ -294,14 +300,14 @@ function oemScene(root) {
     g.append(fill, cap, value, text(35, -8, label, { class: "meter-sub", "text-anchor": "middle" }))
     return { g, fill, value }
   }
-  const capex = jar(310, "CapEx")
-  const opex = jar(430, "OpEx a year")
+  const capex = jar(310, "Capital")
+  const opex = jar(430, "Cost cap a year")
   const payText = text(405, 72, "", { class: "place-text", "text-anchor": "middle" })
   const clock = s("g", { class: "support-clock", transform: "translate(610 140)" },
     s("circle", { r: 30, class: "clock-face" }), s("line", { x1: 0, y1: 0, x2: 0, y2: -20, class: "clock-hand" }), s("line", { x1: 0, y1: 0, x2: 14, y2: 0, class: "clock-hand" }))
   const clockText = text(640, 196, "", { class: "meter-text", "text-anchor": "middle" })
   const cal = s("g", { transform: "translate(620 62)" }, s("rect", { x: 0, y: 0, width: 160, height: 12, rx: 6, class: "meter-track" }))
-  const raceFlag = s("g", { transform: `translate(${160 * (12 / 24)} 0)` }, s("line", { x1: 0, y1: -14, x2: 0, y2: 26, class: "meter-target" }), text(0, 40, "First race", { class: "meter-sub", "text-anchor": "middle" }))
+  const raceFlag = s("g", { transform: `translate(${160 * (12 / 24)} 0)` }, s("line", { x1: 0, y1: -14, x2: 0, y2: 26, class: "meter-target" }), text(0, 40, "Bahrain test", { class: "meter-sub", "text-anchor": "middle" }))
   const delivery = s("circle", { cy: 6, r: 9, class: "delivery" })
   const leadText = text(80, -22, "", { class: "meter-text", "text-anchor": "middle" })
   cal.append(raceFlag, delivery, leadText)
@@ -338,22 +344,22 @@ const SCENES = { compute: computeScene, dc: dcScene, network: networkScene, oem:
 const LABELS = {
   compute: {
     size: (b) => `${opt(b, "size").nodes} nodes: ${Math.round(b.values.cycles)} cycles a week`,
-    chips: (b) => `${{ cpu: "CPU only", mixed: "Mixed chips", gpu: "GPU heavy" }[b.choices.chips]}: ${Math.round(b.values.usage)}% of FIA cap`,
+    chips: (b) => `${{ cpu: "CPU solver", mixed: "CPU+GPU", gpu: "GPU solver" }[b.choices.chips]}: ${Math.round(b.values.usage)}% of MAUh allowance`,
     storage: (b) => `${{ basic: "Office NAS", parallel: "Parallel files", cache: "Flash cache" }[b.choices.storage]}: nodes ${Math.round(b.values.feed)}% fed`,
   },
   dc: {
-    location: (b) => ({ factory: "Factory room: no N+1 backup", colo: "Colo: N+1 power and cooling", cheap: "Cheap region: single grid feed" })[b.choices.location],
-    cooling: (b) => `${{ air: "Air", reardoor: "Rear-door", liquid: "Liquid" }[b.choices.cooling]} cooling: GPUs at ${Math.round(clamp(b.values.capacity / 100) * 100)}%`,
+    location: (b) => ({ factory: "Hinwil room: no N+1 backup", colo: "Zurich campus: 2N power, N+1 cooling", cheap: "Remote region: single grid feed" })[b.choices.location],
+    cooling: (b) => `${{ air: "Air", reardoor: "Rear-door", liquid: "Liquid" }[b.choices.cooling]} cooling: cluster at ${Math.round(clamp(b.values.capacity / 100) * 100)}%`,
     power: (b) => `${{ cap85: "85% cap", standard: "Standard power", boost: "Max boost" }[b.choices.power]}: PUE ${b.values.pue.toFixed(2)}`,
   },
   network: {
-    link: (b) => `${{ single: "Single tunnel", redundant: "Two paths", satellite: "Satellite backup" }[b.choices.link]}: online ${b.values.availability}%`,
-    path: (b) => `${{ public: "Public internet", crossconnect: "Cross-connect", darkfibre: "Dark fibre" }[b.choices.path]}: ${Math.round(b.values.latency)} ms round trip`,
-    garage: (b) => ({ wifi: "Garage Wi-Fi: breaks FIA 5.2", umbilical: "Wired umbilical: legal and steady", edge: "Edge cache: −20 ms in garage" })[b.choices.garage],
+    link: (b) => `${{ single: "Single route", redundant: "Two diverse routes", satellite: "Satellite backup" }[b.choices.link]}: online ${b.values.availability}%`,
+    path: (b) => `${{ public: "Public internet", crossconnect: "Private circuit", darkfibre: "Private WAN" }[b.choices.path]}: ${Math.round(b.values.latency)} ms round trip`,
+    garage: (b) => ({ wifi: "Garage Wi-Fi: breaks Audi F1 requirement", umbilical: "Wired umbilical: compliant and steady", edge: "Edge node: −20 ms in garage" })[b.choices.garage],
   },
   oem: {
     vendor: (b) => `${{ incumbent: "Incumbent kit", tier1: "Dell/HPE/Lenovo", dgx: "NVIDIA DGX" }[b.choices.vendor]}: ${b.values.perf.toFixed(1)}× today's performance`,
-    payment: (b) => (b.payment === "buy" ? `Buy outright: ${money(b.caps.find((c) => c.id === "capex").used)} CapEx now` : `${b.payment === "aas" ? "As-a-service" : "Lease"}: ${money(b.caps.find((c) => c.id === "opex").used)} a year`),
+    payment: (b) => (b.payment === "buy" ? `Buy outright: ${money(b.caps.find((c) => c.id === "capex").used)} capital now` : `${b.payment === "aas" ? "As-a-service" : "Lease"}: ${money(b.caps.find((c) => c.id === "opex").used)} a year`),
     support: (b) => ({ basic: "Basic support: 72 h fixes", nbd: "Next-day support: 24 h fixes", "4h": "4-hour support: 4 h fixes" })[b.choices.support],
   },
 }
