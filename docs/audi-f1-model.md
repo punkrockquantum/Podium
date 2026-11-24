@@ -1,15 +1,19 @@
-# Audi F1 Team × Digital Realty — how the infrastructure performance simulator works
+# Audi F1 Team × Digital Realty — how the Swiss infrastructure planning tool works
 
-The simulator (`public/sim.html`, code in `public/js/sim/`) takes one scenario — the Restricted CFD cluster,
-where it lives, how it is paid for and how the paddock is connected — and turns it into FIA compliance,
-effective compute, trackside responsiveness, money and sustainability, then into **seconds per lap found over a
-season against Today's setup** in the same season. Everything is deterministic and recomputed on every input
-change by pure functions in `public/js/sim/model.js`; the constants live in `public/js/customer.js` (`FIGURES`)
-and `public/js/sim/assumptions.js` (`K`), each keyed to a row of [`audi-f1-sources.md`](audi-f1-sources.md).
-Row keys in brackets below point there.
+The planning tool (`public/sim.html`, code in `public/js/sim/`) holds **one plan for two seasons, 2027 and 2028**:
+the Restricted CFD cluster, where it lives, how it is paid for, how the paddock is connected and **when** each change
+lands. Each season is evaluated by the same deterministic engine (`model.js`, sections 1–6) and the plan layer
+(`plan.js`, `timeline.js`, sections 7–10) blends the two estates over the deployment timeline. The result is read
+as **seconds per lap found over a season against Today's setup** in the same season, plus the FIA, money,
+availability and CO₂ lines for each season and the health of the plan as a whole. The Solutions Architect view
+(`sa.js`, section 11) derives what the plan asks of the Zurich campus.
 
-The provider is **Digital Realty** (Zurich campus). The OEM dimension assumes **HPE via HPE GreenLake**: the sales
-lead's working assumption for the demo, not a statement about the team's actual suppliers.
+Everything is recomputed on every input change by pure functions; the constants live in `public/js/customer.js`
+(`FIGURES`) and `public/js/sim/assumptions.js` (`K`), each keyed to a row of
+[`audi-f1-sources.md`](audi-f1-sources.md). Row keys in brackets below point there.
+
+The provider is **Digital Realty** (Zurich campus, Glattbrugg/Opfikon). The OEM dimension assumes **HPE via HPE
+GreenLake**: the sales lead's working assumption for the demo, not a statement about the team's actual suppliers.
 
 ## 1. Inputs
 
@@ -127,21 +131,130 @@ strategy points from section 4. The lap-time ladder shows the P5–P11 rungs aro
 and NAS storage, air cooling, N redundancy, a five-year-old fleet, one carrier circuit to the paddock. In 2027 it is
 ≈ 94 kW short of the estate; in 2028 ≈ 479 kW short, which is why the 2028 deltas are large.
 
-## 7. Presets (headline at 60 % confidence, P8)
+## 7. Two seasons, one plan (`plan.js`)
 
-| Preset | Season | Effective MAUh / ATP | Seconds per lap vs Today | Cost-cap charge Δ | Notes |
-|---|---|---|---|---|---|
-| Today: Hinwil on-prem | 2027 | 3.84 | 0 | 0 | 99 % of 6.3 MAUh used; room 94 kW short, NAS-starved, N redundancy |
-| Digital Realty Zurich 2027 | 2027 | 6.15 | ≈ +0.14 s (P8 → P7) | ≈ +CHF 0.95 M | 12 nodes, InfiniBand NDR, parallel storage, rear-door rows, N+1, two fibre routes, edge |
-| Digital Realty + HPE GreenLake 2028 | 2028 | 7.21 | ≈ +0.39 s (P8 → P5) | ≈ +CHF 1.4 M | 8 nodes at 3.0 GHz + 2 solver GPUs (6 unrestricted), Slingshot, flash, direct liquid, 2N, expansion right |
+A plan is `{ meta, shared, seasons: { 2027, 2028 }, timeline }`:
 
-The headline numbers move with every slider; `npm test` pins their direction (monotonicity) and their order, not the
-decimals.
+* **shared** — held once for both seasons: constructors' position, model confidence, venue, the Property share of
+  the fee, the fit-out and migration one-offs.
+* **seasons.2027** — every per-season control (compute, facility, connectivity).
+* **seasons.2028** — only the controls that are **detached**: everything else reads *"Same as 2027"* and inherits
+  the 2027 value. Editing a 2028 control detaches it; *Same as 2027* re-attaches it. `deltas.changed` lists the
+  controls whose effective 2028 value differs from 2027; `deltas.stepUp` is true when any of them is a compute or
+  facility control (a real step-up of the estate rather than a commercial or connectivity tweak).
+* **timeline** — contract date, cutover target, parallel-running weeks, 2028 step-up date (section 8).
+* `leadWeeks` and `migrationTiming` from the single-season engine are **planned by the timeline**: the plan layer
+  passes `leadWeeks = 0`, `migrationTiming = "boundary"` and a computed `scheduleLoss` (below) into `simulate()`.
 
-## 8. What the model does not do
+Each season blends the estates that actually run during it:
+
+```
+W_2027 = shareOld27 × W(today, 2027) + shareNew27 × W(plan 2027)·(1 − loss27)
+W_2028 = shareToday28 × W(today, 2028) + shareCarry28 × W(plan 2027 in 2028) + shareNew28 × W(plan 2028)·(1 − loss28)
+```
+
+`shareNew` is the fraction of the calendar year after go-live (2027: the cutover; 2028: the step-up, or 1 January
+when nothing steps up). `shareCarry28` is the part of 2028 still on the 2027 estate before the step-up;
+`shareToday28` is only non-zero when the 2027 move itself slips into 2028. `loss` is the season's allowance lost at
+the switch (section 8) divided by `shareNew`, so `scheduleLoss` acts as an efficiency on the new estate only.
+Seconds per lap and points per season come from section 6 with `W_season` against `W(today, season)`; the money
+lines are per season (yearly, cost-cap charge, cash = blended yearly + that year's one-offs), the totals add the two
+seasons, and *3-year TCO* compares the 2028 estate (plus the 2027 one-offs it does not already carry) with today's
+room carried into 2028.
+
+Presets are full two-season plans: **Today: stay at Hinwil** (nothing moves) · **Digital Realty Zurich from 2027**
+(the 2027 scenario, 2028 inherits it) · **Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028** (same
+2027 under GreenLake, 2028 detaches nodes, clock, GPUs, Slingshot, flash, Tech Care Critical, 3-year refresh, 60 kW
+racks on direct liquid, 2N, 400G fibre, dual-path paddock link and cloud on-ramps).
+
+## 8. Deployment timeline (`timeline.js`) [C7, C9, C10, C13, C14, C15, C-a, D-e, G-e, G8, H-f, A-e]
+
+**Calendar.** Six Aerodynamic Testing Periods a year (F4.1.4, C13): ATP 1 runs from 1 January to the end of week 9,
+ATP 2 and 3 eight weeks each, ATP 4 ten weeks (it contains the summer shutdown), ATP 5 eight weeks, ATP 6 to
+31 December. Weeks start on a Monday and week 1 is the ISO week containing 4 January, so the boundaries are:
+
+| | ATP 1 | ATP 2 | ATP 3 | ATP 4 | ATP 5 | ATP 6 |
+|---|---|---|---|---|---|---|
+| 2027 | 1 Jan – 7 Mar | 8 Mar – 2 May | 3 May – 27 Jun | 28 Jun – 5 Sep | 6 Sep – 31 Oct | 1 Nov – 31 Dec |
+| 2028 | 1 Jan – 5 Mar | 6 Mar – 30 Apr | 1 May – 25 Jun | 26 Jun – 3 Sep | 4 Sep – 29 Oct | 30 Oct – 31 Dec |
+
+Windows and markers: the 14-day summer shutdown (F3.1.1.a; assumed to start on the first Monday of August) and the
+nine-day winter shutdown from 24 December (F3.1.1.b), the 2027 pre-season test and Round 1 (VERIFIED, C7), the 2028
+equivalents (ASSUMPTION: the 2027 pattern, C-a), GPU legality on 1 January 2028 (F4.4.1, C10) and the planning
+date 24 November 2026.
+
+**Lead times (all ASSUMPTION, planning values).** From the contract date: Digital Realty fit-out 12 weeks (16 with a
+liquid loop, 16 for the 2028 expansion rows) [G-e]; dark fibre 14 weeks for one route, +2 for a second diverse route
+[D-e]; HPE hardware 6 weeks under GreenLake (pre-staged, 4–8) or 14 weeks purchased built-to-order (10–18) [H-f];
+Hinwil works 10 weeks [A-e]; cross-connects 1 week after the suite is ready [G8]; acceptance and burn-in 2 weeks
+[H-f]; then the parallel-running weeks the team chooses. The **earliest feasible cutover** is
+`max(burn-in end, fibre ready) + parallel weeks`; the critical path is whichever task ends last. If the target is
+feasible the plan lands on the target (slack shown), otherwise the cutover **slips** to the first feasible day and
+the plan is flagged.
+
+**What a switch costs.** Allowance is use-it-or-lose-it per ATP (F4.6.10, C9), so a switch inside a period wastes
+solver days: 7 without parallel running (physical move, re-cabling, re-commissioning), 1 with it (the queue drains
+on the old cluster and restarts on the new one) — and **0 at an ATP boundary or inside a shutdown**. The period
+loss is `downtimeDays / ATP days`, the season loss is `periodLoss / 6`, and parallel running costs CHF 20k a week
+(old room's electricity, overlapping fee and staff). A switch after Round 1 is flagged: the first ATPs of the
+season still run on today's room.
+
+**2028 step-up.** The step-up kit is ordered on `stepUpDate − lead time` (GreenLake or purchase, plus fit-out for
+the expansion rows when the 2028 estate exceeds the 2027 room or changes cooling), never before the contract or the
+planning date, so a tight date slips. A GPU partition that lands **before 1 January 2028** cannot run the solver
+(F4.4.1): the first four weeks count as burn-in, every week beyond that is carrying cost (the 2028 estate's extra
+yearly charge, pro rata) with no ATR value. A step-up after 1 January leaves `shareCarry28` of the season on the
+2027 estate; inside ATP 1 it also loses solver days like any other switch.
+
+**Declarations.** A new F4.4.3 declaration is due within one month of a change of hardware, core count or location,
+or at the ATP report 14 days after the period ends if that is earlier (F4.6.4) [C15]; both are milestones. The
+*Sign by* strip works the lead times backwards from every boundary of 2027: the contract date each cutover needs.
+
+Milestones: contract, cutover, declaration (2027), step-up order, step-up, declaration (2028), next refresh.
+
+## 9. Plan health
+
+`planHealth()` turns the two seasons and the timeline into one status (ok / warn / bad) with one-line reasons that
+each point at a component route: the engine's per-season flags (MAUh over capacity, power shortfall, cooling,
+clock, GPUs before 2028, delivery, availability …), the timeline flags (slip, late cutover, switch inside a
+period, early or late step-up, declaration due) and plan-level checks (a GPU partition declared for 2027, a 2028
+estate beyond the commitment without the expansion right, a campus estate without fibre, 2N on a single fibre
+route, a plan that changes nothing, a 2028 GPU partition that is idle). The Overview shows the worst level per
+decision card and the full list; the compact badge in the plan bar counts what is left to tune.
+
+## 10. Presets (headline at 60 % confidence, P8)
+
+| Preset | 2027 | 2028 | Cost-cap charge (2027 / 2028) | Health |
+|---|---|---|---|---|
+| Today: stay at Hinwil | 0 s · P8 · 99 % of allowance · 3.84 eff. MAUh | 0 s · P8 · 99 % · 1.95 eff. MAUh | CHF 1.25 M / 1.98 M | **bad**: Hinwil room 94 kW short in 2027, 479 kW short in 2028 |
+| Digital Realty Zurich from 2027 | ≈ +0.08 s · P8 → P7 · +20 pts · live 3 May 2027 (ATP 3 boundary, 33 % of the season on today's room, no allowance lost) | ≈ +0.33 s · P8 → P5 · +75 pts | CHF 2.20 M / 3.04 M (+0.95 M / +1.06 M vs today) | **warn**: live after Round 1 (12 Mar) |
+| Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028 | ≈ +0.08 s · P7 · +21 pts (same move, GreenLake) | ≈ +0.39 s · P5 · +75 pts · 94 % of allowance · 7.21 eff. MAUh · step-up ordered 28 Aug 2027, live 1 Jan 2028 | CHF 2.13 M / 3.37 M (+0.89 M / +1.39 M) | **warn**: live after Round 1 (12 Mar) |
+
+Two-season totals: cash CHF 3.6 M (today), 7.8 M (DR 2027), 8.7 M (DR + GreenLake step-up); lap time over both
+seasons +0.41 s and +0.47 s. The headline numbers move with every control; `npm test` pins their direction, their
+order and the schedule rules, not the decimals.
+
+## 11. Solutions Architect view (`sa.js`)
+
+Derived from the same result, nothing is entered twice: **requirements per season** (site, IT load at PUE, committed
+kW and expansion right, redundancy, racks and cooling, fibre routes and bandwidth, cross-connects, cloud on-ramps,
+internet/IX, paddock link, Remote Hands, HPE support tier, maintenance windows against the ATP calendar, renewable
+supply and heat reuse, the F4.4.3 declaration, cost-cap treatment, ready-by date), each with an owner and the public
+Digital Realty service that answers it (PlatformDIGITAL® colocation, ServiceFabric® Campus/Metro/Cross Connect,
+Internet Exchange and IP Bandwidth, cloud on-ramps, Remote Hands, SwissIX; dark fibre and HPE are external) [G5,
+G6, G8, G9, G10, D10, H3]; **owner roles** (generic Digital Realty roles, ASSUMPTION G-f); a **discovery
+checklist** whose notes stay in the browser; a **live risk register** (likelihood × impact, triggered by the current
+plan, with mitigations); and a **solution brief** for print plus a JSON hand-over, both carrying the HPE-via-GreenLake
+footnote.
+
+## 12. What the model does not do
 
 * No stochastic simulation: availability and failures are expected values.
 * No GPU conversion rule exists yet (F4.4.1); the FP64 normalisation and the charge-factor slider are assumptions.
 * Wind-tunnel hours, RATGs and occupancy hours follow the sliding scale but are not traded against compute.
 * Indexation of the cost cap and FX movements are ignored; the cap is shown at the Initial Applicable Rate.
 * The rest of the IT estate costs the same in every scenario and is only modelled for power and PUE.
+* Lead times are planning values, not quotations; the 2028 calendar is the 2027 pattern until the FIA publishes it;
+  the summer shutdown start is the team's choice and is assumed, not known.
+* Allowance carried between periods (F4.6.10 deductions) and the FIA's exact treatment of a mid-period hardware
+  change are simplified to "solver days lost"; the model never moves allowance between periods.

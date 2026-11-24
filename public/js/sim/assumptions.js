@@ -5,7 +5,7 @@
  * `K` is the same tree with the annotations stripped, for the model; `assumptionRows()` lists every
  * entry for the "Assumptions & sources" panel.
  *
- * The provider is Digital Realty (Zurich campus, Glattbrugg/Rümlang). The OEM dimension is HPE via
+ * The provider is Digital Realty (Zurich campus, Glattbrugg/Opfikon). The OEM dimension is HPE via
  * HPE GreenLake: the sales lead's working assumption for this demo, not a statement about the
  * Audi F1 Team's actual suppliers.
  */
