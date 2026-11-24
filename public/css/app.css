@@ -747,6 +747,7 @@ dl.brief-words { font-size: 15px; }
 /* ----------------------------------------------------------- Audi F1 edition: readout 2028 line, business case */
 .readout-2028 { margin: 6px 0 0; padding: 8px 12px; border-left: 4px solid var(--select); background: color-mix(in srgb, var(--select) 10%, transparent); border-radius: 6px; }
 .case { max-width: 1180px; margin: 0 auto; padding: 26px 18px 60px; display: grid; gap: 18px; }
+.case > * { min-width: 0; } /* the wide table scrolls inside .table-scroll instead of widening the page */
 .case-intro h1 { font-size: 34px; margin-bottom: 8px; }
 .case-controls .sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px 22px; margin: 12px 0; }
 .slider { display: grid; gap: 4px; font-size: 14px; }
