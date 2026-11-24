@@ -66,6 +66,8 @@ export const DEFAULTS = Object.freeze({
   venue: "singapore",
   // Model
   confidence: K.performance.confidenceDefault,
+  // Share of the season's allowance lost to the deployment schedule (set by plan.js from the timeline; not a control)
+  scheduleLoss: 0,
 })
 
 /** Named scenarios. "today" is the baseline every scenario is compared against (same season). */
@@ -157,7 +159,7 @@ export const GROUPS = [
       { id: "termYears", label: "GreenLake term", type: "segmented", options: [{ value: 3, label: "3 years" }, { value: 5, label: "5 years" }], showIf: (x) => x.consumption === "greenlake", why: "A shorter term costs more per year and refreshes sooner.", fia: null },
       { id: "support", label: "Support SLA", type: "select", options: [{ value: "nbd", label: "Next business day" }, { value: "4h", label: "4-hour response" }, { value: "mission", label: "24×7 mission-critical, on-site spares" }], why: "A failed node in week 7 of a period is allowance you never get back.", fia: null },
       { id: "refreshYears", label: "Refresh cadence", type: "segmented", options: [{ value: 3, label: "3 yr" }, { value: 4, label: "4 yr" }, { value: 5, label: "5 yr" }], why: "Newer cores do more per clock, and the FIA charges clock, not work. Shorter cadences cost more per year.", fia: "F4.4.4" },
-      { id: "leadWeeks", label: "Delivery vs 1 January", type: "range", min: -8, max: 12, step: 1, format: (v) => (v === 0 ? "On 1 Jan" : v < 0 ? `${-v} wk early` : `${v} wk late`), why: "ATP 1 starts on 1 January. Every week the hardware is late wastes 1/52 of the year's allowance.", fia: "F4.1.4" },
+      { id: "leadWeeks", label: "Delivery vs 1 January", type: "range", min: -8, max: 12, step: 1, format: (v) => (v === 0 ? "On 1 Jan" : v < 0 ? `${-v} wk early` : `${v} wk late`), plannedBy: "timeline", why: "ATP 1 starts on 1 January. Every week the hardware is late wastes 1/52 of the year's allowance.", fia: "F4.1.4" },
     ],
   },
   {
@@ -179,7 +181,7 @@ export const GROUPS = [
       { id: "heatReuse", label: "Heat reuse", type: "toggle", showIf: (x) => x.location !== "hinwil", why: "The campus feeds its waste heat to the Opfikon network from 2029 and to neighbours before that; heat-recovery costs are Sustainability Initiative Costs, outside the cap.", fia: "D5.1.1" },
       { id: "fitOutCHF", label: "Fit-out (one-off)", type: "range", min: 0, max: 2_000_000, step: 50_000, format: (v) => `CHF ${(v / 1e6).toFixed(2)} M`, showIf: (x) => x.location !== "hinwil", why: "Cage, racks, in-rack power, CDU provision and cabling: a leasehold improvement, outside the cap.", fia: "D5.1.1.j" },
       { id: "migrationCHF", label: "Migration (one-off)", type: "range", min: 0, max: 1_000_000, step: 50_000, format: (v) => `CHF ${(v / 1e6).toFixed(2)} M`, showIf: (x) => x.location !== "hinwil", why: "Move, parallel running and services; an operating cost in the year of the move.", fia: null },
-      { id: "migrationTiming", label: "Migration timing", type: "segmented", options: [{ value: "boundary", label: "At an ATP boundary" }, { value: "midperiod", label: "Mid-period" }], showIf: (x) => x.location !== "hinwil", why: "A new declaration is due within a month of moving any part of the cluster (F4.4.3); moving inside a period wastes solver days of a use-it-or-lose-it allowance.", fia: "F4.4.3" },
+      { id: "migrationTiming", label: "Migration timing", type: "segmented", options: [{ value: "boundary", label: "At an ATP boundary" }, { value: "midperiod", label: "Mid-period" }], showIf: (x) => x.location !== "hinwil", plannedBy: "timeline", why: "A new declaration is due within a month of moving any part of the cluster (F4.4.3); moving inside a period wastes solver days of a use-it-or-lose-it allowance.", fia: "F4.4.3" },
       { id: "propertySharePct", label: "Share of the fee treated as Property Costs", type: "range", min: 0, max: 100, step: 10, unit: "%", showIf: (x) => x.location !== "hinwil", why: "Property Costs (rent, lease costs, leasehold improvements) are outside the cap; the service share of a colocation fee is inside. Open point for the team's finance function (C3).", fia: "D5.1.1.j" },
     ],
   },
@@ -220,6 +222,7 @@ export function normalize(raw = {}) {
     }
   }
   for (const id of BOOL_IDS) x[id] = Boolean(x[id])
+  x.scheduleLoss = round(clamp(finite(Number(x.scheduleLoss), 0), 0, 1), 6)
   x.solverGpus = Math.min(x.solverGpus, x.gpus)
   if (x.location === "hinwil") { x.heatReuse = false; x.expansionRight = false }
   if (x.location === "dr") x.hinwilRetrofit = false
@@ -360,7 +363,8 @@ export function compute(x, fia, hw, fac) {
   const availEff = fac.availability * (1 - nodeLoss) * (1 - fibreLoss)
   const deliveryEff = 1 - Math.max(0, x.leadWeeks) / c.deliveryLossWeeksPerYear
   const migrationEff = x.location !== "hinwil" && x.migrationTiming === "midperiod" ? 1 - K.facility.migrationLossDays / 365 : 1
-  const siteEff = availEff * deliveryEff * migrationEff * fac.powerEff
+  const scheduleEff = 1 - x.scheduleLoss
+  const siteEff = availEff * deliveryEff * migrationEff * scheduleEff * fac.powerEff
 
   const cpuWork = hw.cores * hoursRun * cpuPerCoreHour
   const gpuWork = gpuSolverN * hoursRun * gpuPerHour
@@ -382,7 +386,7 @@ export function compute(x, fia, hw, fac) {
     hours, hoursRun: round(hoursRun, 1), gpuSolverN, gpuBlocked: x.solverGpus > 0 && !fia.gpuSolverAllowed,
     cpuMauh: round(cpuAuh / 1e6, 3), gpuMauh: round(gpuAuh / 1e6, 3), usedMauh: round(usedMauh, 3), usage: round(usage, 4), throttle: round(throttle, 4),
     idleShare: round(1 - throttle, 4), unusedShare: round(Math.max(0, 1 - usage), 4),
-    eff: { interconnect: round(icEff, 4), io: round(ioEff, 4), memory: memF, ipc, thermal: fac.thermalEff, gpuThermal: fac.gpuThermalEff, availability: round(availEff, 5), delivery: round(deliveryEff, 4), migration: round(migrationEff, 4), power: round(fac.powerEff, 4), site: round(siteEff, 5) },
+    eff: { interconnect: round(icEff, 4), io: round(ioEff, 4), memory: memF, ipc, thermal: fac.thermalEff, gpuThermal: fac.gpuThermalEff, availability: round(availEff, 5), delivery: round(deliveryEff, 4), migration: round(migrationEff, 4), schedule: round(scheduleEff, 5), power: round(fac.powerEff, 4), site: round(siteEff, 5) },
     ioDemandGBs: round(ioDemand, 1), ioSupplyGBs: ioSupply,
     clockWorkPerAuh: round(clockWork / x.clockGHz, 4),
     workPerAuh: round(workPerAuh, 4),
@@ -553,13 +557,15 @@ export function simulate(raw) {
 export const aeroSeconds = (effectiveMauh) => K.performance.aeroA * Math.log(1 + Math.max(0, effectiveMauh) / K.performance.aeroW0)
 export const reinvestSeconds = (savedCHF) => Math.sign(savedCHF) * K.performance.reinvestMaxSec * (1 - Math.exp(-Math.abs(savedCHF) / K.performance.reinvestScaleCHF))
 
-/** Scenario vs Today's setup in the same season; the performance block is the headline. */
-export function evaluate(raw) {
-  const scenario = simulate(raw)
+/**
+ * The performance block for a simulated scenario against a simulated baseline. `wScenario` / `wToday`
+ * default to the two clusters' effective MAUh; plan.js passes season blends (part of the year on the old
+ * estate, part on the new one) instead.
+ */
+export function perfBlock(scenario, today, { wScenario = scenario.comp.effectiveMauh, wToday = today.comp.effectiveMauh } = {}) {
   const x = scenario.inputs
-  const today = simulate(todayInputs(x.season, x.position, x.confidence))
   const conf = x.confidence / 100
-  const aero = aeroSeconds(scenario.comp.effectiveMauh) - aeroSeconds(today.comp.effectiveMauh)
+  const aero = aeroSeconds(wScenario) - aeroSeconds(wToday)
   const saved = today.money.capCharge - scenario.money.capCharge
   const reinvest = reinvestSeconds(saved)
   const raw_ = aero + reinvest
@@ -573,19 +579,25 @@ export function evaluate(raw) {
   const ladder = []
   for (let p = Math.min(lo, x.position); p <= Math.max(hi, x.position); p++) ladder.push({ position: p, sec: round((p - x.position) * perf.secPerPosition, 2) })
   return {
-    scenario, today,
-    perf: {
-      aeroSec: round(aero, 3), reinvestSec: round(reinvest, 3), rawSec: round(raw_, 3), sec: round(sec, 3),
-      savedCHF: Math.round(saved), confidence: x.confidence,
-      aeroTodaySec: round(aeroSeconds(today.comp.effectiveMauh), 3), aeroScenarioSec: round(aeroSeconds(scenario.comp.effectiveMauh), 3),
-      positionsGained: round(positionsGained, 2), scenarioPosition: round(scenarioPosition, 2), points: round(points, 1),
-      strategyPoints: round(strategyPoints, 1), ladder,
-      effectiveMauhDelta: round(scenario.comp.effectiveMauh - today.comp.effectiveMauh, 3),
-      capChargeDelta: Math.round(scenario.money.capCharge - today.money.capCharge),
-      yearlyDelta: Math.round(scenario.money.yearly - today.money.yearly),
-      co2Delta: round(scenario.money.co2MarketT - today.money.co2MarketT, 1),
-    },
+    aeroSec: round(aero, 3), reinvestSec: round(reinvest, 3), rawSec: round(raw_, 3), sec: round(sec, 3),
+    savedCHF: Math.round(saved), confidence: x.confidence,
+    aeroTodaySec: round(aeroSeconds(wToday), 3), aeroScenarioSec: round(aeroSeconds(wScenario), 3),
+    effectiveMauh: round(wScenario, 3), effectiveMauhToday: round(wToday, 3),
+    positionsGained: round(positionsGained, 2), scenarioPosition: round(scenarioPosition, 2), points: round(points, 1),
+    strategyPoints: round(strategyPoints, 1), ladder,
+    effectiveMauhDelta: round(wScenario - wToday, 3),
+    capChargeDelta: Math.round(scenario.money.capCharge - today.money.capCharge),
+    yearlyDelta: Math.round(scenario.money.yearly - today.money.yearly),
+    co2Delta: round(scenario.money.co2MarketT - today.money.co2MarketT, 1),
   }
+}
+
+/** Scenario vs Today's setup in the same season; the performance block is the headline. */
+export function evaluate(raw) {
+  const scenario = simulate(raw)
+  const x = scenario.inputs
+  const today = simulate(todayInputs(x.season, x.position, x.confidence))
+  return { scenario, today, perf: perfBlock(scenario, today) }
 }
 
 /** The same inputs evaluated for both seasons (the "2027 plan · 2028 path" strip). */
