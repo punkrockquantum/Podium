@@ -1,5 +1,6 @@
 /** Commercials: run-rate and cash per season, what sits inside and outside the cost cap, the 3-year view and the link to the business case. */
 import { costCapCHF, FIGURES as F } from "../../customer.js"
+import { K } from "../assumptions.js"
 import { el, fmt, fill } from "../dom.js"
 import { gauge, stat, badge } from "../widgets.js"
 import { controlsSection, seasonCols, roleStrip } from "./common.js"
@@ -23,7 +24,10 @@ export function commercialsView(ctx) {
     const s28 = result.seasons[2028]
     const x27 = result.inputs[2027]
     const x28 = result.inputs[2028]
-    const caseQuery = new URLSearchParams({ load2027: String(Math.round(Math.max(300, Math.min(500, s27.sim.fac.drIT || s27.sim.fac.hinwilIT)))), load2028: String(Math.round(Math.max(600, Math.min(1000, s28.sim.fac.drIT || s28.sim.fac.hinwilIT)))), campusRp: String(x27.location === "hinwil" ? F.tariffs.campusCHFPerKWh * 100 : x27.tariffRp), feePerKWMonth: String(F.offer.feeCHFPerKWMonth) })
+    // The case page's 2027 load is the whole estate; its 2028 campus estate is what this plan puts at Digital Realty
+    // (inside the 500 kW offer), while the Hinwil paths keep the demand the estate would have if it stayed (J-f).
+    const estate2028 = Math.round(Math.max(300, Math.min(F.offer.committedKW, s28.sim.fac.drIT || s28.sim.fac.totalIT)))
+    const caseQuery = new URLSearchParams({ load2027: String(Math.round(Math.max(300, Math.min(500, s27.sim.fac.totalIT)))), demand2028: String(K.facility.estateDemandKW[2028]), estate2028: String(estate2028), campusRp: String(x27.location === "hinwil" ? F.tariffs.campusCHFPerKWh * 100 : x27.tariffRp), feePerKWMonth: String(F.offer.feeCHFPerKWMonth) })
     const summary = el("section", { class: "card" },
       el("h3", {}, "Two seasons, one cheque book"),
       el("div", { class: "stats three" },
@@ -33,7 +37,7 @@ export function commercialsView(ctx) {
       el("p", { class: "muted small" }, "Run-rate is the estate's yearly cost once it is in; cash blends the old and the new estate by the share of the year each runs and adds that year's one-offs."),
       el("div", { class: "actions-row" },
         el("a", { class: "btn btn-link", id: "case-link-figures", href: `/case.html?${caseQuery.toString()}`, target: "_blank", rel: "noopener" }, "Open the business case with these figures ↗"),
-        el("span", { class: "muted small" }, `Passes the IT load per season (${Math.round(s27.sim.fac.totalIT)} / ${Math.round(s28.sim.fac.totalIT)} kW) and the tariff to the slider page.`)))
+        el("span", { class: "muted small" }, `Passes the 2027 IT load (${Math.round(s27.sim.fac.totalIT)} kW), the 2028 estate at Digital Realty (${estate2028} kW inside the ${F.offer.committedKW} kW offer) and the tariff to the slider page; the Hinwil paths keep the ${K.facility.estateDemandKW[2028]} kW the estate would draw in 2028.`)))
     const cols = seasonCols(result, (year, s) => {
       const sim = s.sim
       const x = sim.inputs

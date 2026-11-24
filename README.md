@@ -377,7 +377,7 @@ or less.
 
 | Dial | Settings |
 | --- | --- |
-| Where the 2027 cluster lives | ★ Hinwil data room (300 kW, single feed) · Zurich campus, 500 kW (CHF 180 per kW a month, 2N power, N+1 cooling, expansion right to 1,000 kW) · Remote low-cost region (single grid feed; F4.4.3 re-declaration) |
+| Where the 2027 cluster lives | ★ Hinwil data room (300 kW, single feed) · Zurich campus, 500 kW (CHF 180 per kW a month, 2N power, N+1 cooling, a hard 500 kW envelope with no expansion right) · Remote low-cost region (single grid feed; F4.4.3 re-declaration) |
 | Cooling | ★ Air · Rear-door water · Direct-to-chip liquid |
 | Power setting | Capped at 85% · ★ Standard · Max boost |
 
@@ -523,8 +523,9 @@ setup in almost every seed, by more than five seconds on average.
 - **What went well:** 2–3 lessons achieved (each in-zone approved board says why it matters);
 - **What you could have done differently:** 2–3 suggestions, each naming the dial, the better
   setting, the seconds and FIT gain, why it matters and how a provider helps;
-- **2028 path:** one line on whether the boards the race used carry the 800 kW 2028 load and the
-  GPU-solver rule (where the cluster lives, its cooling, the chips, the routes);
+- **2028 path:** one line on whether the boards the race used carry 2028 (≈ 760 kW if the estate
+  stays in Hinwil; the GPU step-up inside the 500 kW offer at the campus) and the GPU-solver rule
+  (where the cluster lives, its cooling, the chips, the routes);
 - the incidents that affected the plan.
 
 The readout is at `/race.html?team=t1` (linked from the host controls) and, once the host taps
@@ -746,8 +747,9 @@ The customer is the **Audi F1 Team** (entrant "Audi Revolut F1 Team"; the Sauber
 Canton of Zurich, became Audi's works team for 2026). Its race cars, race operations ("Mission
 Control"), wind tunnel and today's data room are in Hinwil, about 30 km from Zurich; the power unit
 comes from Neuburg an der Donau and a technology centre opened in Bicester in 2025. We are the
-colocation provider. The decision on the table: **500 kW of colocation in our Zurich campus for 2027,
-with a contractual expansion right to 1,000 kW for 2028, versus staying on-prem in Hinwil.**
+colocation provider. The decision on the table: **500 kW of colocation in our Zurich campus for 2027 and 2028, a hard
+envelope with no expansion right (ZUR4's 15 MW in 2028 is a separate commercial conversation), versus
+staying on-prem in Hinwil.**
 
 Everything the game says about the customer is one of two things:
 
@@ -760,8 +762,9 @@ Everything the game says about the customer is one of two things:
   championship (105% on the sliding scale, so 6.3 MAUh), ElCom/EKZ/ewz 2026–2027 tariffs, Zurich
   data-centre norms and the 2027 calendar (Austin, 22–24 October, stays the game's finale);
 - a labelled **ASSUMPTION** with a one-line rationale: today's room (≈ 300 kW, PUE ≈ 1.6, single
-  feed), the 2027 IT load (≈ 400 kW) and the 2028 load (≈ 800 kW), our fee (CHF 180 per kW per
-  month, power metered on top), fit-out and migration (CHF 1.2M), the all-in planning tariffs
+  feed), the 2027 IT load (≈ 400 kW), the 2028 demand if the estate stays in Hinwil (≈ 760 kW) and
+  the 2028 estate inside the 500 kW offer (≈ 405 kW), our fee (CHF 180 per kW per month, power
+  metered on top), fit-out and migration (CHF 1.2M), the all-in planning tariffs
   (16 Rp/kWh Hinwil, 15 Rp/kWh campus), the planning FX (1 USD = 0.84 CHF) and the node arithmetic
   behind "12 nodes sized to the allowance".
 
@@ -790,8 +793,10 @@ answer `410`.
 2. Open the **Business case** (`/case.html`, linked from the landing page and the host console) on
    the projector first: Hinwil as is, Hinwil upgraded and the Zurich campus side by side for 2027 and
    2028 (IT load, PUE, facility kWh, electricity in CHF, fee, one-off, yearly cost-cap charge, 3-year
-   TCO 2027–2029, CO2, resilience, 2028 headroom, heat reuse, cost-cap treatment). Move the sliders
-   (electricity prices, 2027 and 2028 loads, fee) live; **Print** gives a clean handout with the
+   TCO 2027–2029, CO2, resilience, 2028 headroom, heat reuse, cost-cap treatment). The Hinwil paths
+   carry the ≈ 760 kW the estate would draw in 2028; the campus hosts the 2028 estate inside the
+   500 kW offer (≈ 405 kW), with no expansion right. Move the sliders (electricity prices, the 2027
+   load, the two 2028 figures, fee) live; **Print** gives a clean handout with the
    values and the sources.
 3. **The four tables.** Put one iPad on each: `/station.html?station=network`,
    `/station.html?station=oem`, `/station.html?station=dc`, `/station.html?station=compute`. Each
@@ -831,10 +836,11 @@ in-zone counts and the word limits).
 | Figure | Value | Status | Where |
 | --- | --- | --- | --- |
 | 2027 IT load | 400 kW (350–450) | ASSUMPTION B-a | `load.it2027KW` |
-| 2028 IT load | 800 kW (700–900) | ASSUMPTION B-b | `load.it2028KW` |
+| 2028 demand if the estate stays in Hinwil | 760 kW (700–900) | ASSUMPTION J-f on B-b | `load.it2028KW` |
+| 2028 estate at Digital Realty | 405 kW inside the 500 kW offer (GreenLake step-up preset) | ASSUMPTION J-g · G-h | `load.it2028CampusKW` |
 | Today's room | 300 kW, PUE 1.6, single feed | ASSUMPTION A-a..A-c | `room.*` |
 | Hinwil upgrade | CHF 3.0M → 450 kW, PUE 1.4, N+1 | ASSUMPTION A-e | `room.upgrade*` |
-| Campus offer | 500 kW, PUE 1.2, 2N/N+1, CHF 180/kW/month, CHF 1.2M fit-out + migration, expansion right 1,000 kW | ASSUMPTION D-d | `offer.*` |
+| Campus offer | 500 kW in both seasons, PUE 1.2, 2N/N+1, CHF 180/kW/month, CHF 1.2M fit-out + migration, CHF 0.45M liquid rows for the 2028 step-up; no expansion right (ZUR4 is a commercial note) | ASSUMPTION D-d · G-h · J-h | `offer.*` |
 | Electricity | Hinwil 16 Rp/kWh (EKZ 2027 MV 17.11/12.91 + CHF 8/kW/month), campus 15 Rp/kWh (ewz 2027 NNC) | ASSUMPTION D-a/D-b on VERIFIED D2/D3 | `tariffs.*` |
 | Grid CO2 | 75 g CO2eq/kWh | ASSUMPTION D-c on VERIFIED D4 | `tariffs.gridCO2gPerKWh` |
 | FX | 1 USD = 0.84 CHF planning; FIA rate 1.1316 USD/CHF | ASSUMPTION E-a / VERIFIED C2 | `fx.*` |

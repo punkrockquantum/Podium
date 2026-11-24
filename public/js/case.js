@@ -1,14 +1,21 @@
 /**
  * The business case: Audi F1's IT estate in the Hinwil data room (as is, or upgraded) versus
- * 500 kW committed at Digital Realty's Zurich campus, for 2027 and for the 2028 load. Pure arithmetic over
+ * 500 kW committed at Digital Realty's Zurich campus, for 2027 and for 2028. Pure arithmetic over
  * customer.js (`caseModel`), plus the page that renders it with live sliders. No dependencies.
+ *
+ * The 2028 load differs by path, as in the planning tool (public/js/sim/model.js `envelope()`):
+ *   Hinwil paths     carry the demand the estate would have if it stayed there (≈ 760 kW, J-f: the
+ *                    room stays power-short, as the planning tool's Today baseline shows);
+ *   the campus path  hosts the 2028 estate that fits the 500 kW offer (base estate + GPU step-up
+ *                    cluster + any ML partition; ≈ 405 kW in the GreenLake step-up preset, J-g).
+ *   The offer has no expansion right (G-h); ZUR4's 15 MW is a commercial note, never modelled.
  *
  * Formulae (per option o, per year y with IT load L kW):
  *   served kW        = min(L, o.capacity[y])                      what the site can actually power
  *   shortfall kW     = L − served                                 flagged, never hidden in the cost
  *   facility kWh/yr  = served × loadFactor × 8760 × o.pue[y]      loadFactor 0.85 = average vs installed
  *   electricity CHF  = facility kWh × tariff[o.site]              Rp/kWh slider ÷ 100
- *   colo fee CHF     = feePerKWMonth × max(committed[y], L) × 12  campus only; 2028 commitment rises
+ *   colo fee CHF     = feePerKWMonth × max(committed[y], L) × 12  campus only; 500 kW in both seasons
  *   CO2 t/yr         = facility kWh × gCO2/kWh ÷ 1e6
  *   yearly cash      = electricity + colo fee
  *   cost-cap charge  = yearly cash + plant capex ÷ 10             straight-line, zero residual (D6.1.1.k);
@@ -16,7 +23,7 @@
  *                                                                 plant as in-cap (C3, C3-open)
  *   one-off 2027     = o.capex2027                                patch / retrofit / fit-out + migration
  *   one-off 2028     = o.capex2028(L2028)                         new hall at CHF/kW × shortfall, or
- *                                                                 the campus expansion fit-out
+ *                                                                 the campus liquid rows for the GPU step-up (J-h)
  *   3-year TCO       = one-off 2027 + one-off 2028 + cash(2027) + 2 × cash(2028)   2027, 2028, 2029
  * IT hardware is identical in every option and left out of the comparison.
  */
@@ -30,7 +37,8 @@ export const DEFAULT_INPUTS = {
   hinwilRp: Math.round(F.tariffs.hinwilCHFPerKWh * 100),
   campusRp: Math.round(F.tariffs.campusCHFPerKWh * 100),
   load2027: F.load.it2027KW,
-  load2028: F.load.it2028KW,
+  demand2028: F.load.it2028KW,
+  estate2028: F.load.it2028CampusKW,
   feePerKWMonth: F.offer.feeCHFPerKWMonth,
 }
 
@@ -38,14 +46,15 @@ export const SLIDERS = [
   { id: "hinwilRp", label: "Hinwil electricity (EKZ, all-in)", unit: "Rp/kWh", min: 8, max: 30, step: 0.5, source: "D-a" },
   { id: "campusRp", label: "Campus electricity (ewz, pass-through)", unit: "Rp/kWh", min: 8, max: 30, step: 0.5, source: "D-b" },
   { id: "load2027", label: "2027 IT load", unit: "kW", min: 300, max: 500, step: 10, source: "B-a" },
-  { id: "load2028", label: "2028 IT load", unit: "kW", min: 600, max: 1000, step: 10, source: "B-b" },
+  { id: "demand2028", label: "2028 demand if the estate stays in Hinwil", unit: "kW", min: 500, max: 900, step: 10, source: "J-f" },
+  { id: "estate2028", label: `2028 estate at Digital Realty (inside the ${F.offer.committedKW} kW offer)`, unit: "kW", min: 300, max: F.offer.committedKW, step: 5, source: "J-g" },
   { id: "feePerKWMonth", label: "Campus fee", unit: "CHF/kW/month", min: 120, max: 250, step: 5, source: "D-d" },
 ]
 
 /** A new Hinwil hall's design PUE: better than the retrofit, worse than a purpose-built campus. */
 const NEW_HALL_PUE = 1.3
 
-/** The three options. `capacity`/`pue` are per year; `capex2028` depends on the 2028 load. */
+/** The three options. `capacity`/`pue` are per year; `load2028` is the path's own 2028 load; `capex2028` depends on it. */
 function options(inputs) {
   const room = F.room
   const offer = F.offer
@@ -58,6 +67,7 @@ function options(inputs) {
       short: "As is",
       site: "hinwil",
       tariff: inputs.hinwilRp / 100,
+      load2028: inputs.demand2028,
       capacity: { 2027: room.capacityKW, 2028: room.capacityKW },
       pue: { 2027: room.pue, 2028: room.pue },
       fee: 0,
@@ -76,8 +86,9 @@ function options(inputs) {
       short: "Upgraded",
       site: "hinwil",
       tariff: inputs.hinwilRp / 100,
-      capacity: { 2027: room.upgradedCapacityKW, 2028: Math.max(room.upgradedCapacityKW, inputs.load2028) },
-      pue: { 2027: room.upgradedPue, 2028: blendedPue(inputs.load2028, room.upgradedCapacityKW, room.upgradedPue) },
+      load2028: inputs.demand2028,
+      capacity: { 2027: room.upgradedCapacityKW, 2028: Math.max(room.upgradedCapacityKW, inputs.demand2028) },
+      pue: { 2027: room.upgradedPue, 2028: blendedPue(inputs.demand2028, room.upgradedCapacityKW, room.upgradedPue) },
       fee: 0,
       committed: { 2027: 0, 2028: 0 },
       capex2027: room.upgradeCapexCHF,
@@ -94,17 +105,19 @@ function options(inputs) {
       short: "Digital Realty Zurich",
       site: "campus",
       tariff: inputs.campusRp / 100,
-      capacity: { 2027: offer.committedKW, 2028: offer.expansionRightKW },
+      load2028: inputs.estate2028,
+      capacity: { 2027: offer.committedKW, 2028: offer.committedKW },
       pue: { 2027: offer.designPue, 2028: offer.designPue },
       fee: inputs.feePerKWMonth,
-      committed: { 2027: offer.committedKW, 2028: Math.max(offer.committedKW, inputs.load2028) },
+      committed: { 2027: offer.committedKW, 2028: offer.committedKW },
       capex2027: offer.fitOutCHF + offer.migrationCHF,
-      capex2028: (load) => (load > offer.committedKW ? offer.expansionFitOutCHF : 0),
+      // The 2028 GPU step-up needs liquid-cooled rows (CDUs, manifolds, hoses) inside the same envelope [J-h]
+      capex2028: () => offer.liquidLoopCHF,
       resilience: `${offer.power} power, ${offer.cooling} cooling`,
       heatReuse: "Waste heat to district heating (campus-side)",
       co2: F.tariffs.gridCO2gPerKWh,
-      treatment: "Electricity pass-through in the cap. The fee is modelled in the cap; its space component may qualify as Property Costs (excluded) and the fit-out as leasehold improvement, both to confirm with the team's Cost Cap Administration contact (C3-open).",
-      notes: ["D-d", "D5", "D6"],
+      treatment: "Electricity pass-through in the cap. The fee is modelled in the cap; its space component may qualify as Property Costs (excluded) and the fit-out and the liquid rows as leasehold improvement, all to confirm with the team's Cost Cap Administration contact (C3-open).",
+      notes: ["D-d", "D5", "D6", "G-h", "J-h"],
     },
   ]
 }
@@ -125,17 +138,17 @@ export function caseModel(inputs = DEFAULT_INPUTS) {
   const plantYears = F.fia.depreciationYearsPlant
   const rows = opts.map((o) => {
     const y27 = year(o, inputs.load2027, 2027)
-    const y28 = year(o, inputs.load2028, 2028)
-    const capex2028 = o.capex2028(inputs.load2028)
+    const y28 = year(o, o.load2028, 2028)
+    const capex2028 = o.capex2028(o.load2028)
     const tco = o.capex2027 + capex2028 + y27.cash + 2 * y28.cash
     const costCap2027 = y27.cash + o.capex2027 / plantYears
     const costCap2028 = y28.cash + (o.capex2027 + capex2028) / plantYears
     return {
-      id: o.id, name: o.name, short: o.short, resilience: o.resilience, heatReuse: o.heatReuse, treatment: o.treatment, notes: o.notes,
+      id: o.id, name: o.name, short: o.short, site: o.site, resilience: o.resilience, heatReuse: o.heatReuse, treatment: o.treatment, notes: o.notes,
       y2027: y27, y2028: y28,
       capex2027: o.capex2027, capex2028,
       tco, costCap2027, costCap2028,
-      headroom2028: o.capacity[2028] - inputs.load2028,
+      headroom2028: o.capacity[2028] - o.load2028,
       viable2027: y27.shortfall === 0,
       viable2028: y28.shortfall === 0,
     }
@@ -167,13 +180,13 @@ function rowsFor(m) {
     ["Colocation fee 2027", (r) => (r.y2027.fee ? chfFull(r.y2027.fee) : "—")],
     ["One-off 2027", (r) => chfFull(r.capex2027)],
     ["Yearly cost-cap charge 2027", (r) => `${chfFull(r.costCap2027)} (${pct(r.costCap2027 / m.costCap.market)} of the cap)`],
-    ["2028 IT load", (r) => `${kW(r.y2028.served)} of ${kW(r.y2028.load)}${flag(r, "y2028")}`],
-    ["One-off 2028", (r) => (r.capex2028 ? chfFull(r.capex2028) : "—")],
+    ["2028 IT load", (r) => (r.site === "campus" ? `${kW(r.y2028.load)} estate inside the ${kW(r.y2028.capacity)} offer` : `${kW(r.y2028.served)} of the ${kW(r.y2028.load)} the estate would draw${flag(r, "y2028")}`)],
+    ["One-off 2028", (r) => (r.capex2028 ? `${chfFull(r.capex2028)}${r.site === "campus" ? " (liquid rows for the GPU step-up)" : " (new hall)"}` : "—")],
     ["Yearly cash 2028", (r) => chfFull(r.y2028.cash)],
     ["3-year TCO 2027–2029", (r) => `${chfFull(r.tco)}${r.viable2027 && r.viable2028 ? "" : " · does not carry the load"}`, "tco"],
     ["CO2 2027 (location-based)", (r) => `${r.y2027.co2t.toFixed(0)} t`],
     ["Resilience", (r) => r.resilience],
-    ["2028 headroom", (r) => (r.headroom2028 >= 0 ? `+${kW(r.headroom2028)}${r.capex2028 && r.id !== "campus" ? " after the new hall" : ""}` : `${kW(r.headroom2028)} (new hall needed)`)],
+    ["2028 headroom", (r) => (r.site === "campus" ? `+${kW(r.headroom2028)} inside the ${kW(r.y2028.capacity)} envelope (no expansion right; ZUR4 is a separate conversation)` : r.headroom2028 >= 0 ? `+${kW(r.headroom2028)}${r.capex2028 ? " after the new hall" : ""}` : `${kW(r.headroom2028)} (new hall needed)`)],
     ["Heat reuse", (r) => r.heatReuse],
     ["Cost-cap treatment", (r) => r.treatment, "small"],
   ]
@@ -193,14 +206,14 @@ function render(root, el, m) {
     el("div", { class: m.delta.tco >= 0 ? "good" : "bad" }, el("b", {}, abs(m.delta.tco)), el("span", {}, `3-year TCO ${m.delta.tco >= 0 ? "below" : "above"} the Hinwil upgrade path`)),
     el("div", { class: m.delta.costCap2027 >= 0 ? "good" : "bad" }, el("b", {}, abs(m.delta.costCap2027)), el("span", {}, `${m.delta.costCap2027 >= 0 ? "lower" : "higher"} yearly cost-cap charge in 2027 (fee modelled in-cap)`)),
     el("div", { class: m.delta.co2 >= 0 ? "good" : "bad" }, el("b", {}, `${Math.abs(m.delta.co2).toFixed(0)} t`), el("span", {}, `CO2 ${m.delta.co2 >= 0 ? "avoided" : "added"} over three years vs the upgrade`)),
-    el("div", { class: campus.headroom2028 >= 0 ? "good" : "bad" }, el("b", {}, kW(campus.headroom2028)), el("span", {}, "campus headroom above the 2028 load")))
+    el("div", { class: campus.headroom2028 >= 0 ? "good" : "bad" }, el("b", {}, kW(campus.headroom2028)), el("span", {}, `to spare inside the ${kW(campus.y2028.capacity)} envelope in 2028 (estate ${kW(campus.y2028.load)})`)))
   const path = el("section", { class: "panel case-2028", id: "path2028" },
     el("h2", {}, "The 2028 path"),
-    el("p", { class: "muted" }, `From 1 January 2028 the FIA allows GPU cores for the CFD solver (F4.4.1) and the estate is planned to double to ${kW(m.inputs.load2028)} [B-b, C6]. What each option needs to carry it:`),
+    el("p", { class: "muted" }, `From 1 January 2028 the FIA allows GPU cores for the CFD solver (F4.4.1). Left in Hinwil, the estate would grow to about ${kW(m.inputs.demand2028)} as a GPU partition joins it [J-f, C6]. At Digital Realty the plan keeps the GPU step-up inside the ${kW(F.offer.committedKW)} offer: the 2028 estate is ${kW(m.inputs.estate2028)}, the base estate plus the stepped-up cluster${m.inputs.estate2028 === F.load.it2028CampusKW ? " (the GreenLake step-up preset)" : ` (the GreenLake step-up preset reads ${kW(F.load.it2028CampusKW)})`} [J-g], and any larger unrestricted ML partition is sized separately. What each path needs:`),
     el("ul", {},
-      el("li", {}, el("b", {}, `${asis.name}: `), asis.viable2028 ? "fits." : `${kW(-asis.headroom2028)} short. Not a 2028 option without a new hall at ${chfFull(F.room.newHallCapexPerKWCHF)} per kW [D8].`),
-      el("li", {}, el("b", {}, `${upgrade.name}: `), upgrade.capex2028 ? `the retrofit tops out at ${kW(F.room.upgradedCapacityKW)}; a new hall for the rest costs about ${chfFull(upgrade.capex2028)} and 12–18 months of building [D8].` : "the retrofit covers the 2028 load."),
-      el("li", {}, el("b", {}, `${campus.name}: `), `the contractual expansion right to ${kW(F.offer.expansionRightKW)} covers it; the commitment rises to ${kW(m.rows[2].y2028.load)} at the same fee${campus.capex2028 ? `, plus ${chfFull(campus.capex2028)} of fit-out for the liquid-cooled GPU rows` : ""}. No second move, no second FIA re-declaration (F4.4.3).`)))
+      el("li", {}, el("b", {}, `${asis.name}: `), asis.viable2028 ? "carries the 2028 demand." : `${kW(-asis.headroom2028)} short of the ${kW(asis.y2028.load)} it would draw. Not a 2028 option without a new hall at ${chfFull(F.room.newHallCapexPerKWCHF)} per kW [D8].`),
+      el("li", {}, el("b", {}, `${upgrade.name}: `), upgrade.capex2028 ? `the retrofit tops out at ${kW(F.room.upgradedCapacityKW)}; a new hall for the rest costs about ${chfFull(upgrade.capex2028)} and 12–18 months of building [D8].` : "the retrofit carries the 2028 demand."),
+      el("li", {}, el("b", {}, `${campus.name}: `), `the ${kW(campus.y2028.load)} 2028 estate stays inside the ${kW(campus.y2028.capacity)} commitment with ${kW(campus.headroom2028)} to spare; the fee stays ${chfFull(campus.y2028.fee)} a year, plus ${chfFull(campus.capex2028)} one-off for the liquid-cooled GPU rows [J-h]. No second move, no second FIA re-declaration (F4.4.3). Commercial note: the offer carries no expansion right; ZUR4 adds 15 MW on the campus in 2028, a separate conversation for anything beyond ${kW(F.offer.committedKW)} [G-h].`)))
   root.replaceChildren(headline, el("div", { class: "table-scroll" }, table), path)
 }
 

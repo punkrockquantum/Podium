@@ -12,8 +12,10 @@ import { FIGURES as F } from "./customer.js"
 const stationOf = (id) => C.byId(C.STATIONS, id)
 
 /**
- * One line on the 2028 path: does the board the race used still work when the IT load roughly
- * doubles (F.load.it2028KW) and GPUs may run the solver (FIA F4.4.1, from 1 January 2028)?
+ * One line on the 2028 path: does the board the race used still work in 2028, when GPUs may run the
+ * solver (FIA F4.4.1, from 1 January 2028)? A Hinwil or remote site must carry what the estate would
+ * draw there (F.load.it2028KW); the campus hosts the GPU step-up inside its 500 kW offer
+ * (F.load.it2028CampusKW) — there is no expansion right, ZUR4 is a separate conversation.
  */
 export function path2028For(team, stationIds = C.STATIONS.map((s) => s.id)) {
   const choices = choicesOf(team)
@@ -22,12 +24,12 @@ export function path2028For(team, stationIds = C.STATIONS.map((s) => s.id)) {
   if (stationIds.includes("dc")) {
     const site = pickedOption("location", pick("dc"))
     const cooling = pickedOption("cooling", pick("dc"))
-    const roomKW = site.expansionKW || site.siteKW
-    const fits = roomKW >= F.load.it2028KW
+    const roomKW = site.siteKW
     const liquid = cooling.id === "liquid"
-    parts.push(fits
-      ? `${site.name}: the expansion right covers the ${F.load.it2028KW} kW 2028 load${liquid ? " and direct-to-chip cooling is already in" : ", but 2028 GPUs want direct-to-chip cooling"}`
-      : `${site.name} tops out at ${roomKW} kW, short of the ${F.load.it2028KW} kW 2028 load: a second site or a new hall`)
+    const coolingNote = liquid ? " and direct-to-chip cooling is already in" : ", but 2028 GPUs want direct-to-chip cooling"
+    if (site.id === "colo") parts.push(`${site.name}: the 2028 GPU step-up stays inside the ${roomKW} kW commitment (≈ ${F.load.it2028CampusKW} kW; more kW is a separate ZUR4 conversation, not a right)${coolingNote}`)
+    else if (roomKW >= F.load.it2028KW) parts.push(`${site.name} carries the ${F.load.it2028KW} kW the estate would draw in 2028${coolingNote}`)
+    else parts.push(`${site.name} tops out at ${roomKW} kW, short of the ${F.load.it2028KW} kW the estate would draw in 2028: a second site or a new hall`)
   }
   if (stationIds.includes("compute")) {
     const chips = pickedOption("chips", pick("compute"))

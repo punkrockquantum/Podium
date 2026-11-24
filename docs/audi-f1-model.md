@@ -109,8 +109,10 @@ racks) and the ML partition when it is placed there — and compares it with 500
   hidden. Setting a 2027 control re-clamps the dependent 2028 controls.
 * **Fit to the envelope** trims, in order, the ML partition, the solver GPUs, the nodes and the rack density until
   the season fits, and reports what it changed.
-* There is **no expansion right**: more kW is a separate commercial conversation (ZUR4, 2028). The old business-case
-  2028 estate (≈ 760 kW) therefore does not fit; the ML / GPU partition that fits is ≤ ≈ 100 kW.
+* There is **no expansion right**: more kW is a separate commercial conversation (ZUR4, 2028). The ≈ 760 kW the estate
+  would draw if it stayed in Hinwil (J-f) therefore does not fit at the campus; the business case carries it only as the
+  Hinwil paths' 2028 demand, the campus hosts the 2028 estate inside 500 kW (≈ 405 kW in the GreenLake preset), and the
+  ML / GPU partition that fits is ≤ ≈ 100 kW.
 
 ### 3b. Processor families and accelerators [K1 … K13, K-a … K-e, J2, J-i]
 
@@ -237,7 +239,7 @@ equivalents (ASSUMPTION: the 2027 pattern, C-a), GPU legality on 1 January 2028 
 date 24 November 2026.
 
 **Lead times (all ASSUMPTION, planning values).** From the contract date: Digital Realty fit-out 12 weeks (16 with a
-liquid loop, 16 for the 2028 expansion rows) [G-e]; dark fibre 14 weeks for one route, +2 for a second diverse route
+liquid loop, 16 for the 2028 step-up rows) [G-e]; dark fibre 14 weeks for one route, +2 for a second diverse route
 [D-e]; HPE hardware 6 weeks under GreenLake (pre-staged, 4–8) or 14 weeks purchased built-to-order (10–18) [H-f];
 Hinwil works 10 weeks [A-e]; cross-connects 1 week after the suite is ready [G8]; acceptance and burn-in 2 weeks
 [H-f]; then the parallel-running weeks the team chooses. The **earliest feasible cutover** is
@@ -253,7 +255,7 @@ loss is `downtimeDays / ATP days`, the season loss is `periodLoss / 6`, and para
 season still run on today's room.
 
 **2028 step-up.** The step-up kit is ordered on `stepUpDate − lead time` (GreenLake or purchase, plus fit-out for
-the expansion rows when the 2028 estate exceeds the 2027 room or changes cooling), never before the contract or the
+the step-up rows when the 2028 estate needs more racks at the campus or changes cooling, inside the 500 kW envelope), never before the contract or the
 planning date, so a tight date slips. A GPU partition that lands **before 1 January 2028** cannot run the solver
 (F4.4.1): the first four weeks count as burn-in, every week beyond that is carrying cost (the 2028 estate's extra
 yearly charge, pro rata) with no ATR value. A step-up after 1 January leaves `shareCarry28` of the season on the

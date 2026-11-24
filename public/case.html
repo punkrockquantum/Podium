@@ -18,16 +18,17 @@
   <main class="case" id="case">
     <section class="case-intro">
       <h1>Where should Audi F1's 2027 IT estate live?</h1>
-      <p class="muted">Three paths for the same hardware: keep the Hinwil data room as it is, retrofit it, or commit 500 kW at Digital Realty's Zurich campus (Glattbrugg/Opfikon, 30 km away) with a contractual right to grow for 2028. Cash, cost-cap charge, electricity, CO2, resilience and 2028 headroom, side by side. IT hardware is identical in every path and left out here; the <a href="/">planning tool</a> models it season by season, with HPE via HPE GreenLake as the working assumption for the OEM.</p>
+      <p class="muted">Three paths for the same hardware: keep the Hinwil data room as it is, retrofit it, or commit 500 kW at Digital Realty's Zurich campus (Glattbrugg/Opfikon, 30 km away). The 500 kW is a hard envelope for both seasons: the 2028 GPU step-up is planned inside it, there is no expansion right, and ZUR4's 15 MW in 2028 is a separate commercial conversation. Cash, cost-cap charge, electricity, CO2, resilience and 2028 headroom, side by side. IT hardware is identical in every path and left out here; the <a href="/">planning tool</a> models it season by season, with HPE via HPE GreenLake as the working assumption for the OEM.</p>
     </section>
     <div id="caseBody"></div>
     <section class="panel case-formulae">
       <h2>How the numbers are built</h2>
       <ul class="small">
         <li><b>Facility electricity</b> = IT load served × 0.85 load factor × 8,760 h × PUE. <b>Electricity cost</b> = kWh × the site's all-in tariff (sliders, Rp/kWh).</li>
-        <li><b>Digital Realty fee</b> = CHF per kW per month × committed kW (500 kW in 2027; the 2028 load from 2028 under the expansion right) × 12. Power is metered on top.</li>
+        <li><b>Digital Realty fee</b> = CHF per kW per month × committed kW (500 kW in both seasons; the 2028 estate stays inside it) × 12. Power is metered on top.</li>
+        <li><b>2028 load</b>: the Hinwil paths carry what the estate would draw if it stayed there (≈ 760 kW once a GPU partition joins it [J-f]); the campus path hosts the 2028 estate planned inside the 500 kW offer (≈ 405 kW in the GreenLake step-up preset [J-g]). The offer has no expansion right [G-h]; ZUR4's 15 MW is a commercial note, not a modelled right.</li>
         <li><b>Yearly cost-cap charge</b> = electricity + fee + one-off plant ÷ 10 years (straight-line, zero residual, FIA Financial Regulations D6.1.1.k). Conservative: the fee, fit-out and plant are all treated as in-cap; see the treatment row for what the auditors may exclude.</li>
-        <li><b>3-year TCO</b> (2027–2029, cash) = one-off 2027 + one-off 2028 + yearly cash 2027 + 2 × yearly cash 2028. A Hinwil path that cannot carry the 2028 load is charged a new hall at CHF 12,000 per IT kW for the shortfall [D8]; the campus path is charged its expansion fit-out.</li>
+        <li><b>3-year TCO</b> (2027–2029, cash) = one-off 2027 + one-off 2028 + yearly cash 2027 + 2 × yearly cash 2028. A Hinwil path that cannot carry its 2028 demand is charged a new hall at CHF 12,000 per IT kW for the shortfall [D8]; the campus path is charged the liquid-cooled rows for the 2028 GPU step-up (CHF 450,000 [J-h]).</li>
         <li><b>CO2</b> = facility kWh × 75 g CO2eq/kWh, the Swiss location-based consumer mix midpoint of 2024 and 2025 [D4, D-c]. A certified renewable product lowers it; the comparison between sites does not change.</li>
         <li>Cost cap in CHF: USD 215M is CHF 190.0M at the FIA's fixed 1.1316 USD/CHF [C1, C2], CHF 180.6M at the 0.84 planning rate [E-a]. Shares of the cap use the planning rate.</li>
       </ul>

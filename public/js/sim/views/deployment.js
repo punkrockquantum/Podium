@@ -51,7 +51,7 @@ export function deploymentView(ctx) {
     el("div", { class: "view-head" }, el("h2", {}, "Deployment"), el("p", { class: "card-sub" }, "November 2026 to the end of 2028: six Aerodynamic Testing Periods a year, the pre-season tests, GPU legality on 1 January 2028 and every milestone of the move.")),
     roleStrip({
       team: "Contract date, cutover boundary, parallel running, step-up date; the F4.4.3 declaration within a month of the change and the ATP report 14 days after each period.",
-      dr: "Fit-out of the suite (12–16 weeks), cross-connects, maintenance windows at period boundaries; the 2028 expansion rows.",
+      dr: "Fit-out of the suite (12–16 weeks), cross-connects, maintenance windows at period boundaries; the 2028 step-up rows inside the 500 kW envelope.",
       hpe: "Delivery (GreenLake 4–8 weeks, purchase 10–18 weeks), acceptance and burn-in, the step-up kit, support during the move.",
     }),
     chart,

@@ -80,8 +80,9 @@ export const CUSTOMER = {
     todayKW: a(260, "A ~300 kW room running close to full: the cluster plus enterprise IT"),
     it2027KW: a(400, "B-a: bottom-up estate (RCFD solver ≈25, CFD pre/post + ML ≈60, FEA/vehicle dynamics ≈60, simulator ≈30, enterprise IT ≈150, trackside ≈25, buffer ≈50)"),
     it2027RangeKW: a([350, 450], "B-a"),
-    it2028KW: a(800, "B-b: GPU cores allowed for the RCFD solver from 1 Jan 2028 (FIA F4.4.1); a first liquid-cooled GPU partition adds ≈300–450 kW"),
+    it2028KW: a(760, "J-f on B-b: what the estate would draw in 2028 if it stayed in Hinwil and GPU cores joined the RCFD solver there (FIA F4.4.1 from 1 Jan 2028); the planning tool's Today baseline (375 / 760 kW)"),
     it2028RangeKW: a([700, 900], "B-b"),
+    it2028CampusKW: a(405, "J-g · G-h: the 2028 estate that fits the 500 kW offer: the 375 kW base estate plus the ≈ 30 kW GPU step-up cluster of the GreenLake preset; an unrestricted ML partition is sized separately inside the envelope"),
     loadFactor: a(0.85, "Average draw vs installed IT load for an HPC-heavy estate"),
   },
   room: {
@@ -99,8 +100,7 @@ export const CUSTOMER = {
 
   /* ------------------------------------------------------------ our offer */
   offer: {
-    committedKW: a(500, "The 2027 commitment: the 400 kW estate plus 25% headroom"),
-    expansionRightKW: a(1000, "Contractual expansion right covering the 2028 load (B-b) with margin"),
+    committedKW: a(500, "The offer: 500 kW of critical IT in both seasons (the 400 kW 2027 estate plus 25% headroom); no expansion right, more kW is a separate ZUR4 conversation (G-h)"),
     designPue: a(1.2, "D5: modern Zurich campuses design to ~1.1–1.2; our hall's design PUE with liquid-ready rows"),
     power: "2N",
     cooling: "N+1",
@@ -109,8 +109,7 @@ export const CUSTOMER = {
     feeCHFPerKWMonth: a(180, "D-d: inside the European band (CBRE Q1 2026 Frankfurt ≤ EUR 225; broker asks EUR 130–200 with power on top); Zurich publishes no benchmark"),
     fitOutCHF: a(800_000, "D-d: cage, racks, in-rack power, CDU provision and cabling ≈ CHF 1,600 per kW"),
     migrationCHF: a(400_000, "D-d: move, parallel running, services"),
-    expansionFitOutCHF: a(600_000, "2028 fit-out for the GPU rows (+300 kW): liquid manifolds, CDUs, busway"),
-    liquidLoopCHF: a(450_000, "Customer-side direct-to-chip loop: CDUs, manifolds, hoses for ~1 MW of rows"),
+    liquidLoopCHF: a(450_000, "J-h: customer-side direct-to-chip loop for the liquid-cooled rows: CDUs, manifolds, hoses (the 2028 GPU step-up inside the 500 kW envelope)"),
     rearDoorCHF: a(300_000, "Rear-door heat exchangers for ~40 racks"),
   },
 

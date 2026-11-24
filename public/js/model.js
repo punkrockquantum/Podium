@@ -96,7 +96,8 @@ const PHYSICS = {
       notes: site.note ? [site.note] : [],
       need,
       facilityKW,
-      headroom2028: (site.expansionKW || site.siteKW) - F.load.it2028KW,
+      // 2028: the campus hosts the GPU step-up inside its 500 kW offer (no expansion right); a Hinwil or remote site must carry the whole 2028 demand
+      headroom2028: site.siteKW - (site.id === "colo" ? F.load.it2028CampusKW : F.load.it2028KW),
       speed: plan.speed,
     }
   },

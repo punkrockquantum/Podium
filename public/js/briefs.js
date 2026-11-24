@@ -116,7 +116,7 @@ export const BRIEFS = {
   dc: {
     title: "Datacenter & Power brief",
     situation: [
-      `Audi F1's 2027 IT estate needs about ${kw} kW: CFD, simulators, design and Mission Control [B-a]. Today it lives in the Hinwil data room: about ${F.room.capacityKW} kW on one utility feed at a PUE near ${F.room.pue} [A-a, A-b]. In 2028 the load doubles to ${F.load.it2028KW} kW as GPUs join the solver [B-b, C6]. Electricity counts in the cost cap [C3].`,
+      `Audi F1's 2027 IT estate needs about ${kw} kW: CFD, simulators, design and Mission Control [B-a]. Today it lives in the Hinwil data room: about ${F.room.capacityKW} kW on one utility feed at a PUE near ${F.room.pue} [A-a, A-b]. In 2028 the Hinwil load nearly doubles to ${F.load.it2028KW} kW as GPUs join the solver [B-b]. Electricity counts in the cost cap [C3].`,
     ],
     wants: [
       "Power and cooling for 100% of the 2027 IT load.",
@@ -132,7 +132,7 @@ export const BRIEFS = {
     decisions: [
       d("Where the 2027 cluster lives", "The site sets the power price, the supply, the backup and the 2028 headroom.", [
         `Hinwil data room (today): ${chf(300_000)} to patch up, no fee, power ${chfFull(kwYearCHF(F.tariffs.hinwilCHFPerKWh))} per kW a year, a ${F.room.capacityKW} kW supply, PUE +0.15, single feed.`,
-        `Zurich campus, ${F.offer.committedKW} kW: ${chf(F.offer.fitOutCHF + F.offer.migrationCHF)} fit-out and migration, ${chfFull(F.offer.feeCHFPerKWMonth)} per kW a month, power ${chfFull(kwYearCHF(F.tariffs.campusCHFPerKWh))} per kW a year, 2N power, N+1 cooling, expansion right to ${F.offer.expansionRightKW.toLocaleString("en-US")} kW [D-d].`,
+        `Zurich campus, ${F.offer.committedKW} kW: ${chf(F.offer.fitOutCHF + F.offer.migrationCHF)} fit-out and migration, ${chfFull(F.offer.feeCHFPerKWMonth)} per kW a month, power ${chfFull(kwYearCHF(F.tariffs.campusCHFPerKWh))} per kW a year, 2N power, N+1 cooling, a hard 500 kW envelope, no expansion right [D-d].`,
         `Remote low-cost region: ${chf(900_000)} to fit out, ${chfFull(110)} per kW a month, power ${chfFull(kwYearCHF(F.tariffs.remoteCHFPerKWh))} per kW a year, a 2,000 kW supply, PUE −0.05, single grid feed, 900 km away.`,
       ], "Cheap power tempts, but only the campus has the backup Audi F1 requires and 2028 headroom."),
       d("Cooling", "How the heat leaves the racks: each option cools a fixed amount and sets the PUE.", [
@@ -147,7 +147,7 @@ export const BRIEFS = {
       ], "Running harder needs more cooling and costs more every year."),
     ],
     provider: [
-      `A ${F.offer.committedKW} kW commitment in the Zurich campus buys 2N power, N+1 cooling and liquid-ready rows for a monthly fee instead of a ${chf(F.room.upgradeCapexCHF, 0)} building project in Hinwil [A-e], with a contractual path to ${F.offer.expansionRightKW.toLocaleString("en-US")} kW for 2028 and waste heat to district heating [D5].`,
+      `A ${F.offer.committedKW} kW commitment in the Zurich campus buys 2N power, N+1 cooling and liquid-ready rows for a monthly fee instead of a ${chf(F.room.upgradeCapexCHF, 0)} building project in Hinwil [A-e], with the 2028 GPU step-up inside it and waste heat to district heating [D5].`,
       "Power is metered per rack at the ewz tariff: a power cap is a lower bill and cost-cap charge.",
     ],
     words: [
