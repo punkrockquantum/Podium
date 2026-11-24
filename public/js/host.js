@@ -6,9 +6,9 @@ import { designSummary } from "/js/summary.js"
 import { designStatus, approvalGrid, lockedDials, ghostsAt, STATUS_LABEL, STATUS_ORDER, PITCH_SECONDS, REJECT_REASON_MAX } from "/js/approval.js"
 import { phaseOf, phaseInfo, phaseRemainingMs, playOpen } from "/js/session.js"
 import { DEMO_STEPS, buildDemo } from "/js/demo.js"
-import { readoutFor } from "/js/report.js"
+import { readoutFor, finaleSummary } from "/js/report.js"
 import { readoutCard } from "/js/readoutview.js"
-import { podiumGraphic } from "/js/podium.js"
+import { finaleGraphic } from "/js/podium.js"
 import { briefView } from "/js/briefview.js"
 import { el, clock, post, login, logout, session, watchState, gameClock, installErrorLogging, instructionsButton, confirmDialog, button, teamChip, stateBanner, WORDS, patchSlot, replaceKeepingScroll, setText } from "/js/ui.js"
 
@@ -25,6 +25,9 @@ let demoIndex = null
 /** The host can act as the Solutions Architect (SA) of one table; an SA always reviews the table chosen at login. */
 let hostLeads = null
 let selectedTeam = null
+
+/** The one participant: the customer's team, created by the server. */
+const customer = (s) => s.teams.find((t) => t.id === C.CUSTOMER_TEAM.id) || s.teams[0] || null
 
 const watcher = watchState((next, off) => {
   state = next
@@ -66,7 +69,6 @@ async function act(url, body, done) {
   }
 }
 
-const shortName = (id) => C.byId(C.STATIONS, id)?.name.split(/[ &]/)[0] || id
 const ago = (ms) => (ms < 60_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : `${Math.floor(ms / 60_000)} min`)
 const hhmm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 const panel = (cls, ...children) => el("div", { class: `panel ${cls || ""}` }, ...children)
@@ -116,7 +118,7 @@ function renderLogin() {
   input.addEventListener("keydown", (e) => e.key === "Enter" && signIn(Boolean(table.value)))
   app.replaceChildren(el("div", { class: "pin-box panel" },
     el("h2", {}, WORDS.hostPin),
-    el("p", { class: "small muted" }, "The timer, the race, the teams and restart are behind the host PIN. Teams need no PIN: they play from the table iPads."),
+    el("p", { class: "small muted" }, `The timer, the race and restart are behind the host PIN. The ${C.CUSTOMER_TEAM.name} needs no PIN: it plays from the four table iPads.`),
     input,
     el("button", { class: "btn primary", onclick: () => signIn(false), id: "loginGo" }, "Open host controls"),
     el("div", { class: "sa-login" },
@@ -168,51 +170,35 @@ function renderTimer() {
     controls.length ? el("div", { class: "row timer-controls" }, controls) : null)
 }
 
-/** The race: run it at any time, then show the readouts; clearing it reopens play. Once it has run, the readout links sit here. */
+/**
+ * The race: the customer's 2027 plan against today's Hinwil setup. Run it at any time, then show
+ * the readout; clearing it reopens play. Once it has run, the result and the readout link sit here.
+ */
 function renderRace() {
   const s = state
+  const team = customer(s)
   if (!s.race) {
-    const none = !s.teams.length
     const seed = el("input", { type: "text", placeholder: "Seed (optional)", maxlength: 64, id: "raceSeed" })
     const go = async () => {
-      const ask = playOpen(state) ? "Run the race now? Play ends for every table, and tables not approved race on the customer's existing setup." : "Run the race? Tables not approved race on the customer's existing setup."
+      const ask = playOpen(state) ? "Run the race now? Play ends for every table, and tables not approved race on today's Hinwil setup." : "Run the race? Tables not approved race on today's Hinwil setup."
       if (await confirmDialog(ask, WORDS.runRace)) act("/api/host/race", { seed: seed.value }, "Lights out!")
     }
+    const found = team ? raceSeconds(team, s.settings.budget, s.settings.stations) : 0
     return panel("race-panel", el("h2", {}, "Race"),
-      el("p", { class: "muted small" }, none ? "The race needs at least one team. Teams add themselves on the table iPads." : "Run it whenever the room is ready, with or without a timer. Running the race ends play; the projector shows it in 30 seconds."),
-      el("div", { class: "row" }, el("button", { class: "btn primary", id: "hostRunRace", disabled: none, onclick: go }, WORDS.runRace), seed))
+      el("p", { class: "muted small" }, `Two cars over ${C.FINALE.laps} laps: the ${team?.name || C.CUSTOMER_TEAM.name}'s ${WORDS.plan2027} (${found.toFixed(2)} s per lap from the approved tables so far) against ${WORDS.todayHinwil.toLowerCase()} at 0.00 s. Run it whenever the room is ready, with or without a timer. Running the race ends play; the projector shows it in 30 seconds.`),
+      el("div", { class: "row" }, el("button", { class: "btn primary", id: "hostRunRace", onclick: go }, WORDS.runRace), seed))
   }
   const r = s.race.result
   const readouts = phaseOf(s) === "readout"
-  return panel("wide race-panel", el("h2", {}, readouts ? "Race · readouts on the projector" : "Race · finished"),
+  const finale = finaleSummary(r)
+  return panel("wide race-panel", el("h2", {}, readouts ? "Race · readout on the projector" : "Race · finished"),
+    el("p", { class: "finale-line", id: "finaleLine" }, finale.text),
     el("div", { class: "row" },
-      readouts ? null : el("button", { class: "btn go", id: "showReadouts", onclick: () => act("/api/host/readout", {}, "Readouts on the projector") }, "Show readouts"),
+      readouts ? null : el("button", { class: "btn go", id: "showReadouts", onclick: () => act("/api/host/readout", {}, "Readout on the projector") }, "Show readout"),
       el("button", { class: "btn danger", id: "clearRace", onclick: async () => (await confirmDialog("Clear the race? Its result is discarded and play reopens with no timer.", "Clear the race")) && act("/api/host/unrace", {}, "Race cleared: play is open") }, "Clear the race")),
-    el("p", { class: "small muted" }, "Each team's readout opens on one screen, ready for a screenshot. Show readouts makes the projector cycle through them."),
-    el("div", { class: "readout-links", id: "readoutLinks" }, r.standings.map((row, i) => {
-      const t = s.teams.find((x) => x.id === row.id)
-      return el("a", { class: "readout-link", href: `/race.html?team=${encodeURIComponent(row.id)}`, target: "_blank", style: `--c:${row.color}` }, el("b", {}, `${i + 1}. ${t?.name || row.name}`), el("span", { class: "small muted" }, `P${r.results.find((x) => x.id === row.id)?.position} in the race · ${row.score} pts`))
-    })))
-}
-
-/** The compact team list: teams add themselves at the tables; the host renames or removes one to fix a typo. */
-function renderTeams() {
-  const s = state
-  const raced = Boolean(s.race)
-  const rows = s.teams.map((t) => {
-    const name = el("input", { type: "text", value: t.name, maxlength: C.TEAM_NAME_MAX, autocomplete: "off", "data-team-name": t.id, "aria-label": `Name of ${t.name}`, disabled: raced })
-    const rename = () => {
-      if (!name.value.trim() || name.value.trim() === t.name) return toast("Type the new name first")
-      act("/api/host/team", { team: t.id, action: "rename", name: name.value }, "Team renamed")
-    }
-    name.addEventListener("keydown", (e) => e.key === "Enter" && rename())
-    const remove = async () => (await confirmDialog(`Remove ${t.name}? Its choices, plans and approvals are deleted.`, "Remove")) && act("/api/host/team", { team: t.id, action: "remove" }, `${t.name} removed`)
-    return el("tr", { "data-team-row": t.id }, el("td", {}, el("i", { class: "swatch", style: `background:${t.color}` })), el("td", {}, name),
-      el("td", { class: "team-admin-actions" }, button("Rename", rename, { small: true, disabled: raced }), button("Remove", remove, { small: true, kind: "danger", disabled: raced })))
-  })
-  return panel("", el("h2", {}, `Teams · ${s.teams.length} of ${C.MAX_TEAMS}`),
-    el("p", { class: "small muted" }, raced ? "The race has run: clear it to rename or remove a team." : "Teams add themselves on the table iPads. Rename or remove one here to fix a typo."),
-    rows.length ? el("table", { class: "grid setup-grid team-admin", id: "teamAdmin" }, el("tbody", {}, rows)) : el("p", { class: "muted", id: "noTeamsYet" }, "No teams yet."))
+    el("p", { class: "small muted" }, "The customer's readout opens on one screen, ready for a screenshot. Show readout puts it on the projector."),
+    el("div", { class: "readout-links", id: "readoutLinks" },
+      el("a", { class: "readout-link", href: `/race.html?team=${encodeURIComponent(C.CUSTOMER_TEAM.id)}`, target: "_blank", style: `--c:${team?.color || C.CUSTOMER_TEAM.color}` }, el("b", {}, `${team?.name || C.CUSTOMER_TEAM.name} · readout`), el("span", { class: "small muted" }, `${finale.gap.toFixed(1)} s over ${r.laps} laps`))))
 }
 
 /** One budget level for the whole session: it moves every table's cap lines. */
@@ -248,16 +234,7 @@ function cellBoard(s, team, id, d) {
   return { fit: b.fit, status: b.status, seconds: b.seconds }
 }
 
-function fitCell(s, team, id, d) {
-  const b = cellBoard(s, team, id, d)
-  return el("div", { class: "fit-cell", "data-cell": `${team.id}-${id}` },
-    miniFit(b ? b.fit : NaN, { status: b?.status, grey: d.status !== "approved", title: b ? `FIT ${b.fit}` : "Not started" }),
-    el("span", { class: `cell-sec${d.status === "approved" ? " on" : ""}` }, b ? `${b.seconds.toFixed(2)} s` : "—"),
-    el("span", { class: `status-pill st-${d.status}`, title: d.label }, STATUS_LABEL[d.status]),
-    d.attempts ? el("span", { class: "attempt-tag", "data-attempt": d.attempts }, WORDS.attempt(d.attempts)) : null)
-}
-
-/** What the approvals grid shows, for its content key: statuses, attempts, FIT and seconds. */
+/** What the approvals grid shows, for its content key: per table the status, attempt, FIT and seconds. */
 function approvalsKey(s) {
   const grid = approvalGrid(s)
   return grid.rows.map((row) => [row.team.id, row.team.name, ...grid.stations.map((id) => {
@@ -267,50 +244,77 @@ function approvalsKey(s) {
   })])
 }
 
+/**
+ * The customer's four tables, one row each: where the design stands, which attempt, the seconds
+ * the board finds, its FIT and whether the SA has approved it. The total is what the race uses.
+ */
 function renderApprovals(s) {
-  if (!s.teams.length) return panel("wide", el("h2", {}, "Approvals"), el("p", { class: "muted", id: "noApprovals" }, "No teams yet. Teams add themselves on the table iPads and appear here as they join."))
+  const team = customer(s)
+  if (!team) return panel("wide", el("h2", {}, "Approvals"), el("p", { class: "muted", id: "noApprovals" }, "Waiting for the game server to create the customer's team."))
   const grid = approvalGrid(s)
-  const head = el("tr", {}, el("th", {}, "Team"), ...grid.stations.map((id) => el("th", {}, shortName(id))), el("th", {}, "Approved"), el("th", {}, WORDS.secondsFound))
-  const rows = grid.rows.map((row) => el("tr", {},
-    el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${row.team.color}` }), el("b", {}, row.team.name)),
-    ...grid.stations.map((id) => el("td", {}, fitCell(s, row.team, id, row.cells[id]))),
-    el("td", {}, el("b", {}, `${row.approved}/${grid.stations.length}`)),
-    el("td", { class: "team-seconds", "data-team": row.team.id }, el("b", {}, `${raceSeconds(row.team, s.settings.budget, grid.stations).toFixed(2)} s`))))
+  const row = grid.rows.find((r) => r.team.id === team.id) || grid.rows[0]
+  const head = el("tr", {}, ["Table", "Status", "Attempt", WORDS.secondsFound, "FIT", "Approved"].map((h) => el("th", {}, h)))
+  const rows = grid.stations.map((id) => {
+    const station = C.byId(C.STATIONS, id)
+    const d = row.cells[id]
+    const b = cellBoard(s, team, id, d)
+    const approved = d.status === "approved"
+    return el("tr", { "data-table": id, class: approved ? "approved" : "" },
+      el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${station.color}` }), el("b", {}, station.name)),
+      el("td", {}, el("span", { class: `status-pill st-${d.status}`, title: d.label }, STATUS_LABEL[d.status])),
+      el("td", {}, d.attempts ? el("span", { class: "attempt-tag", "data-attempt": d.attempts }, WORDS.attempt(d.attempts)) : el("span", { class: "muted" }, "—")),
+      el("td", { class: "table-seconds" }, el("b", { class: approved ? "on" : "muted" }, b ? `${b.seconds.toFixed(2)} s` : "—"), approved ? null : el("span", { class: "small muted" }, b ? " not yet counted" : "")),
+      el("td", {}, miniFit(b ? b.fit : NaN, { status: b?.status, grey: !approved, title: b ? `FIT ${b.fit}` : "Not started" })),
+      el("td", { class: "approved-cell" }, approved ? el("span", { class: "done" }, `✓ ${hhmm(d.review.at)}`) : el("span", { class: "muted" }, "—")))
+  })
+  const total = raceSeconds(team, s.settings.budget, grid.stations)
+  const foot = el("tr", { id: "tablesTotal" },
+    el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${team.color}` }), el("b", {}, `Total · ${team.name}`)),
+    el("td", { colspan: 2 }, el("span", { class: "small muted" }, `${row.approved} of ${grid.stations.length} tables approved`)),
+    el("td", { class: "table-seconds" }, el("b", { class: "on", id: "secondsTotal" }, `${total.toFixed(2)} s`)),
+    el("td", { colspan: 2 }, el("span", { class: "small muted" }, "per lap in the race")))
   const counts = STATUS_ORDER.filter((st) => grid.counts[st]).map((st) => el("span", { class: `status-pill st-${st}` }, `${STATUS_LABEL[st]} ${grid.counts[st]}`))
-  return panel("wide", el("h2", {}, "Approvals"),
-    el("p", { class: "small muted" }, `Each cell shows the board's seconds found per lap, FIT (grey until approved) and which attempt the team is on. ${WORDS.secondsFound} adds up approved tables only: that is what the race uses; the rest race on ${WORDS.todaySetup.toLowerCase()}. ${grid.counts.approved} of ${grid.total} approved · ${C.budgetFor(s.settings.budget).name} budget.`),
+  return panel("wide", el("h2", {}, `Approvals · ${team.name}`),
+    el("p", { class: "small muted" }, `One row per table: the board's seconds found per lap, its FIT (grey until approved) and which attempt the table is on. The total adds up approved tables only: that is the ${WORDS.plan2027}'s pace in the race; the rest race on ${WORDS.todaySetup.toLowerCase()}. ${row.approved} of ${grid.stations.length} approved · ${C.budgetFor(s.settings.budget).name} budget.`),
     el("div", { class: "row", id: "approvalCounts" }, counts),
-    el("div", { class: "table-scroll", id: "approvalsGrid" }, el("table", { class: "grid approvals" }, el("thead", {}, head), el("tbody", {}, rows))))
+    el("div", { class: "table-scroll", id: "approvalsGrid" }, el("table", { class: "grid approvals tables-grid", id: "tablesGrid" }, el("thead", {}, head), el("tbody", {}, rows), el("tfoot", {}, foot))))
 }
 
-/** One team's row of the live feed, minus the ticking "seen" time. */
-function feedRow(s, pres, t) {
-  const p = pres.presence?.[t.id]
-  const seat = Object.entries(s.tables || {}).find(([, x]) => x.team === t.id)
-  const where = p ? `${shortName(p.station)} · ${p.step}` : seat ? shortName(seat[0]) : "—"
-  const queued = Object.entries(s.queues || {}).filter(([, list]) => list.some((e) => e.team === t.id)).map(([id]) => shortName(id))
-  const sims = Object.entries(t.sims || {}).filter(([, r]) => Number.isFinite(r.lastFit)).sort((a, b) => b[1].lastAt - a[1].lastAt)[0]
-  const latest = sims ? `${Number.isFinite(sims[1].lastSeconds) ? `${sims[1].lastSeconds.toFixed(2)} s · ` : ""}FIT ${sims[1].lastFit}${sims[1].inZone ? " ✓" : ""} ${shortName(sims[0])}` : "—"
-  return { where, latest, queued: queued.length ? queued.join(", ") : "—", seenAt: p?.at || null }
+/** One table's row of the live feed, minus the ticking "seen" time. */
+function feedRow(s, pres, team, id) {
+  const p = pres.presence?.[id]
+  const seat = s.tables?.[id]
+  const where = p?.step ? `On ${p.step}` : seat ? "Seated" : "—"
+  const queued = (s.queues?.[id] || []).some((e) => e.team === team.id)
+  const sim = team.sims?.[id]
+  const latest = sim && Number.isFinite(sim.lastFit) ? `${Number.isFinite(sim.lastSeconds) ? `${sim.lastSeconds.toFixed(2)} s · ` : ""}FIT ${sim.lastFit}${sim.inZone ? " ✓" : ""}` : "—"
+  return { where, latest, queued: queued ? "Waiting for the SA" : "—", seenAt: p?.at || null }
 }
 
-const feedKey = (s, pres) => s.teams.map((t) => {
-  const r = feedRow(s, pres, t)
-  return [t.id, t.name, r.where, r.latest, r.queued, r.seenAt == null ? null : true]
-})
+const feedKey = (s, pres) => {
+  const team = customer(s)
+  return team ? s.settings.stations.map((id) => {
+    const r = feedRow(s, pres, team, id)
+    return [id, r.where, r.latest, r.queued, r.seenAt == null ? null : true]
+  }) : null
+}
 
 function renderFeed(s, pres) {
-  const rows = s.teams.map((t) => {
-    const r = feedRow(s, pres, t)
-    return el("tr", {},
-      el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${t.color}` }), el("b", {}, t.name)),
+  const team = customer(s)
+  if (!team) return null
+  const rows = s.settings.stations.map((id) => {
+    const station = C.byId(C.STATIONS, id)
+    const r = feedRow(s, pres, team, id)
+    return el("tr", { "data-feed": id },
+      el("td", { class: "team-cell" }, el("i", { class: "swatch", style: `background:${station.color}` }), el("b", {}, station.name)),
       el("td", { class: "small" }, r.where),
       el("td", { class: "small" }, r.latest),
       el("td", { class: "small" }, r.queued),
       el("td", { class: "small" }, r.seenAt == null ? el("span", { class: "muted" }, "—") : ticking(r.seenAt, "ago", "seen")))
   })
   return panel("", el("h2", {}, "Live feed"),
-    el("div", { class: "table-scroll" }, el("table", { class: "grid feed" }, el("thead", {}, el("tr", {}, ["Team", "Now", "Latest board", "Queued", "Seen"].map((h) => el("th", {}, h)))), el("tbody", {}, rows))))
+    el("p", { class: "small muted" }, `The ${team.name}'s four iPads: which step each table is on, its latest board and whether it is waiting for its SA.`),
+    el("div", { class: "table-scroll" }, el("table", { class: "grid feed" }, el("thead", {}, el("tr", {}, ["Table", "Now", "Latest board", "Queue", "Seen"].map((h) => el("th", {}, h)))), el("tbody", {}, rows))))
 }
 
 function renderQueues(s) {
@@ -337,14 +341,16 @@ function renderLinks() {
 }
 
 function toolbar() {
+  const team = customer(state)
   return panel("row wide", instructionsButton("host"),
     button("Demo mode", () => { demoIndex = 0; render(true) }, { small: true }),
     el("button", { class: "btn danger small-btn", id: "restartExperience", onclick: restartExperience }, "Restart the experience"),
     button("Log out", () => { logout(); render(true) }, { small: true }),
-    el("span", { class: "muted small" }, `${state.teams.length} team${state.teams.length === 1 ? "" : "s"} · ${DEMO_STEPS.length}-step demo`))
+    team ? teamChip(team) : null,
+    el("span", { class: "muted small" }, `${state.settings.stations.length} tables · ${DEMO_STEPS.length}-step demo`))
 }
 
-const CONTROL_SLOTS = ["toolbarSlot", "timerSlot", "raceSlot", "approvalsSlot", "queuesSlot", "feedSlot", "teamsSlot", "budgetSlot", "linksSlot"]
+const CONTROL_SLOTS = ["toolbarSlot", "timerSlot", "raceSlot", "approvalsSlot", "queuesSlot", "feedSlot", "budgetSlot", "linksSlot"]
 
 /** The host controls: one slot per panel, each rebuilt only when what it shows changes. Nothing here needs setting up first. */
 function renderControl(force) {
@@ -353,22 +359,21 @@ function renderControl(force) {
     screen = "control"
     replaceKeepingScroll(app, el("div", { class: "host-grid", id: "hostControls" }, CONTROL_SLOTS.map((id) => el("div", { id, class: "slot" }))))
   }
-  const has = s.teams.length > 0
-  const teamNames = s.teams.map((t) => [t.id, t.name, t.color])
-  slot("toolbarSlot", [s.teams.length], toolbar)
+  const team = customer(s)
+  const teamKey = team ? [team.id, team.name, team.color] : null
+  slot("toolbarSlot", [teamKey, s.settings.stations], toolbar)
   slot("timerSlot", [phaseOf(s)], renderTimer)
-  slot("raceSlot", [phaseOf(s), s.race?.seed, has, s.race ? teamNames : null], renderRace)
-  slot("approvalsSlot", [approvalsKey(s), s.settings.budget, s.settings.stations], () => renderApprovals(s))
-  slot("queuesSlot", [s.queues, s.architects, s.pitches, s.settings.stations, teamNames], () => renderQueues(s))
-  slot("feedSlot", has ? feedKey(s, presence) : null, () => (has ? renderFeed(s, presence) : null))
-  slot("teamsSlot", [teamNames, Boolean(s.race)], renderTeams)
+  slot("raceSlot", [phaseOf(s), s.race?.seed, teamKey, s.race ? null : approvalsKey(s), s.settings.budget], renderRace)
+  slot("approvalsSlot", [approvalsKey(s), s.settings.budget, s.settings.stations, teamKey], () => renderApprovals(s))
+  slot("queuesSlot", [s.queues, s.architects, s.pitches, s.settings.stations, teamKey], () => renderQueues(s))
+  slot("feedSlot", feedKey(s, presence), () => renderFeed(s, presence))
   slot("budgetSlot", [s.settings.budget, budgetFixed(s)], renderBudget)
   slot("linksSlot", [s.settings.stations], renderLinks)
 }
 
 /* ------------------------------------------------------------ Solutions Architect */
 
-/** One table's SA view: the queue, the design as the team locked it, the brief and the 30-second pitch. Available is a courtesy to the teams, not a step. */
+/** One table's SA view: the queue (of one), the design as the customer locked it, the brief and the 30-second pitch. Available is a courtesy to the table, not a step. */
 function renderArchitect(stationId, force) {
   const s = state
   const station = C.byId(C.STATIONS, stationId)
@@ -379,12 +384,12 @@ function renderArchitect(stationId, force) {
   const now = Date.now() + offset
   const queue = s.queues?.[stationId] || []
   const byId = (id) => s.teams.find((t) => t.id === id)
-  if (!selectedTeam || !byId(selectedTeam)) selectedTeam = pitch?.team || queue[0]?.team || null
+  if (!selectedTeam || !byId(selectedTeam)) selectedTeam = pitch?.team || queue[0]?.team || customer(s)?.id || null
   const go = (url, body, done) => act(url, { station: stationId, by, ...body }, done)
 
   if (force || screen !== `architect:${stationId}` || !document.getElementById("architectView")) {
     screen = `architect:${stationId}`
-    replaceKeepingScroll(app, el("div", { class: "host-grid architect-grid", id: "architectView" }, ["saHead", "saPitch", "saDetail", "saQueue", "saTeams", "saBrief"].map((id) => el("div", { id, class: "slot" }))))
+    replaceKeepingScroll(app, el("div", { class: "host-grid architect-grid", id: "architectView" }, ["saHead", "saPitch", "saDetail", "saQueue", "saBrief"].map((id) => el("div", { id, class: "slot" }))))
   }
 
   slot("saHead", [stationId, arch.available, Boolean(pitch), by], () => panel("wide architect-head",
@@ -400,7 +405,7 @@ function renderArchitect(stationId, force) {
     if (!pitch) return null
     const t = byId(pitch.team)
     const secs = Math.ceil((pitch.endsAt - now) / 1000)
-    const reason = el("input", { type: "text", id: "rejectReason", maxlength: REJECT_REASON_MAX, placeholder: "Short reason the team will see" })
+    const reason = el("input", { type: "text", id: "rejectReason", maxlength: REJECT_REASON_MAX, placeholder: "Short reason the table will see" })
     return panel("wide pitch-live",
       el("div", { class: "row" }, el("h2", { style: "margin:0" }, `${WORDS.pitching}: `, teamChip(t)), el("span", { class: "status-pill st-pitching" }, WORDS.attempt(pitch.attempt || 1)), el("span", { style: "flex:1" }),
         el("div", { class: `pitch-timer${secs <= 0 ? " over" : ""}`, id: "pitchTimer", "data-ends": pitch.endsAt }, clock(pitch.endsAt - now))),
@@ -426,19 +431,13 @@ function renderArchitect(stationId, force) {
       const d = designStatus(s, t, stationId)
       return el("div", { class: `q${selectedTeam === t.id ? " selected" : ""}` }, el("b", {}, `${i + 1}.`), teamChip(t), el("span", { class: "muted small" }, WORDS.attempt(d.attempts)), ticking(entry.at, "waiting", "muted small"),
         button("Review", () => { selectedTeam = t.id; render(true) }, { small: true }), startButton(t))
-    })) : el("p", { class: "muted" }, `Nobody is queued. Teams join with ${WORDS.callArchitect} once their three choices are locked.`)))
-
-  slot("saTeams", [selectedTeam, s.teams.map((t) => { const d = designStatus(s, t, stationId); return [t.id, t.name, d.status, d.attempts, d.label] })], () => panel("", el("h2", {}, "Every team at this table"),
-    el("table", { class: "grid" }, el("tbody", {}, s.teams.map((t) => {
-      const d = designStatus(s, t, stationId)
-      return el("tr", { class: selectedTeam === t.id ? "selected" : "" }, el("td", {}, teamChip(t)), el("td", {}, el("span", { class: `status-pill st-${d.status}` }, d.label), d.attempts ? el("span", { class: "attempt-tag" }, WORDS.attempt(d.attempts)) : null), el("td", {}, button("Review", () => { selectedTeam = t.id; render(true) }, { small: true })))
-    })))))
+    })) : el("p", { class: "muted" }, `Nobody is queued. The table joins with ${WORDS.callArchitect} once its three choices are locked.`)))
 
   const sel = byId(selectedTeam)
   const selStatus = sel ? designStatus(s, sel, stationId) : null
   slot("saDetail", [selectedTeam, selStatus?.status, selStatus?.plan?.id, selStatus?.attempts, selStatus?.review?.at, sel?.choices, s.settings.budget, arch.available, Boolean(pitch)], () => {
     const t = sel
-    if (!t) return panel("wide", el("p", { class: "muted" }, "Pick a team to read its design."))
+    if (!t) return panel("wide", el("p", { class: "muted" }, "Waiting for the game server to create the customer's team."))
     const d = selStatus
     const choices = d.plan ? d.plan.choices : t.choices
     const draft = (() => {
@@ -448,25 +447,25 @@ function renderArchitect(stationId, force) {
       return view.el
     })()
     return panel("wide architect-summary",
-      el("div", { class: "row" }, el("h2", { style: "margin:0" }, teamChip(t)), el("span", { class: `status-pill st-${d.status}` }, d.label), d.attempts ? el("span", { class: "status-pill" }, WORDS.attempt(d.attempts)) : null,
+      el("div", { class: "row" }, el("h2", { style: "margin:0" }, teamChip(t), el("span", { class: "muted" }, ` at ${station.name}`)), el("span", { class: `status-pill st-${d.status}` }, d.label), d.attempts ? el("span", { class: "status-pill" }, WORDS.attempt(d.attempts)) : null,
         el("span", { style: "flex:1" }), d.plan ? el("span", { class: "small muted" }, `Plan ${d.plan.id}`) : null, startButton(t)),
-      !d.plan ? el("p", { class: "small warn-text" }, d.status === "rejected" || d.status === "adjusting" ? `Rejected: the team is adjusting (${WORDS.lockedCount(lockedDials(t, stationId).length)}). Dashed settings are what they locked last time.` : `Not all three choices are locked yet (${WORDS.lockedCount(lockedDials(t, stationId).length)}): this is their board so far.`) : null,
+      !d.plan ? el("p", { class: "small warn-text" }, d.status === "rejected" || d.status === "adjusting" ? `Rejected: the table is adjusting (${WORDS.lockedCount(lockedDials(t, stationId).length)}). Dashed settings are what they locked last time.` : `Not all three choices are locked yet (${WORDS.lockedCount(lockedDials(t, stationId).length)}): this is the board so far.`) : null,
       d.plan ? frozenBoard(d.plan, { id: "architectBoard", scene: "live" }) : draft,
       summaryBlock(designSummary(choices, stationId, d.plan?.budget || s.settings.budget)),
       d.review ? el("p", { class: "small muted" }, d.review.status === "approved" ? `Approved by ${d.review.by} at ${hhmm(d.review.at)} (${WORDS.attempt(d.review.attempt || 1).toLowerCase()}).` : `Rejected by ${d.review.by} at ${hhmm(d.review.at)}${d.review.reason ? `: "${d.review.reason}"` : ""} (${WORDS.attempt(d.review.attempt || 1).toLowerCase()}).`) : null)
   })
 
-  slot("saBrief", [stationId], () => panel("wide sa-brief", el("details", {}, el("summary", {}, `The ${station.name} brief the teams read`), briefView(stationId, { compact: true }))))
+  slot("saBrief", [stationId], () => panel("wide sa-brief", el("details", {}, el("summary", {}, `The ${station.name} brief the table reads`), briefView(stationId, { compact: true }))))
 }
 
 /* ------------------------------------------------------------ restart and demo */
 
-/** Restart: an empty game, open for the next group at once. The host is already behind the PIN, so one confirmation is enough. */
+/** Restart: a fresh game with the customer and nothing played, open at once. The host is already behind the PIN, so one confirmation is enough. */
 async function restartExperience() {
-  if (!(await confirmDialog("Restart the experience? Every team, choice, plan, queue and score is deleted, and an empty game opens for the next group.", "Restart"))) return
+  if (!(await confirmDialog(`Restart the experience? Every choice, plan, queue, approval and the race are deleted, and a fresh game opens with the ${C.CUSTOMER_TEAM.name} and nothing played.`, "Restart"))) return
   hostLeads = null
   selectedTeam = null
-  act("/api/host/reset", {}, "Restarted: an empty game is open")
+  act("/api/host/reset", {}, `Restarted: a fresh game is open for the ${C.CUSTOMER_TEAM.name}`)
 }
 
 function renderDemo() {
@@ -512,16 +511,16 @@ function renderDemo() {
   } else if (demo.step.screen === "architect") {
     screenNodes.push(panel("wide", el("h2", {}, `${station.architect} · ${WORDS.pitching}: ${team.name} · ${WORDS.attempt(2)}`), el("div", { class: "pitch-timer" }, `0:${PITCH_SECONDS}`),
       frozenBoard(team.plans[st], { id: "demoBoard", scene: "live" }), summaryBlock(designSummary(team.plans[st].choices, st, budget)),
-      el("div", { class: "row" }, el("span", { class: "btn go" }, WORDS.approve), el("input", { type: "text", placeholder: "Short reason the team will see", disabled: true }), el("span", { class: "btn danger" }, WORDS.reject))))
+      el("div", { class: "row" }, el("span", { class: "btn go" }, WORDS.approve), el("input", { type: "text", placeholder: "Short reason the table will see", disabled: true }), el("span", { class: "btn danger" }, WORDS.reject))))
     screenNodes.push(renderApprovals(s))
   } else if (demo.step.screen === "race") {
-    screenNodes.push(podiumGraphic(s.race.result), panel("", el("h2", {}, "Race ticker"), el("ul", { class: "small" }, s.race.result.events.filter((e) => e.team).slice(0, 6).map((e) => el("li", {}, `Lap ${e.lap}: ${e.text}`)))))
+    screenNodes.push(finaleGraphic(s.race.result), panel("", el("h2", {}, "Race ticker"), el("ul", { class: "small" }, s.race.result.events.filter((e) => e.team).slice(0, 6).map((e) => el("li", {}, `Lap ${e.lap}: ${e.text}`)))))
   } else if (demo.step.screen === "readout") {
     screenNodes.push(el("div", { class: "wide" }, readoutCard(readoutFor(team, s.race.result, s.settings.stations, budget))))
   }
   app.replaceChildren(el("div", { class: "host-grid" },
     panel("demo-narration wide", el("h2", {}, `Demo mode · ${demo.step.title}`), el("p", {}, demo.step.narration),
-      el("p", { class: "small muted" }, "Pretend teams, pretend game: nothing here touches the real game."),
+      el("p", { class: "small muted" }, "A pretend game: nothing here touches the real one."),
       el("div", { class: "row" },
         button("← Back", () => { demoIndex -= 1; render(true) }, { disabled: demo.index === 0 }),
         el("span", { class: "muted" }, `${demo.index + 1} / ${demo.total}`),

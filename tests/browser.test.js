@@ -257,7 +257,8 @@ test("host controls: one masked PIN field → the four tables grid → start and
     await host.waitFor(`document.querySelectorAll("#tablesGrid [data-table]").length === 4`, 8000, "the four tables in the grid")
     assert.equal(await count(host, "#teamAdmin, [data-team-name], #addTeam, #teamName"), 0, "no team setup on the host console")
     assert.ok((await text(host, '#tablesGrid [data-table="compute"]')).includes("Attempt 2"), "the grid shows the compute table on attempt 2")
-    assert.ok((await text(host, '#tablesGrid [data-table="compute"]')).includes("Locked"), "locked and waiting for the SA")
+    assert.ok((await text(host, '#tablesGrid [data-table="compute"]')).includes("All three locked"), "all three locked on attempt 2, not yet pitched")
+    assert.ok((await text(host, '#tablesGrid [data-table="dc"]')).includes("Not started"), "the other tables are not started")
     assert.ok((await text(host, "#tablesTotal")).includes("Total"), "a total row under the four tables")
     assert.ok((await text(host, "#hostControls")).includes(CUSTOMER_TEAM.name), "the console names the customer")
 

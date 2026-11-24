@@ -22,7 +22,7 @@ if (!station) {
   const old = C.RETIRED_STATIONS[requested]
   document.title = "Podium · Table not in play"
   document.getElementById("stationName").textContent = old ? `${old} table` : "Unknown table"
-  app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "panel step-zero" },
+  app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "panel not-in-play" },
     el("h2", {}, "This table is not in play"),
     el("p", {}, old ? `The ${old} table is not part of this game. Podium 2027 now has four tables.` : "This link does not match a table in this game."),
     el("div", { class: "tiles" }, C.STATIONS.map((s) => el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}` }, el("b", {}, s.name), el("span", { class: "muted" }, s.architect)))),
