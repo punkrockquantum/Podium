@@ -5,7 +5,7 @@ import { gauge, stat, badge } from "../widgets.js"
 import { controlsSection, seasonCols, roleStrip } from "./common.js"
 
 export function commercialsView(ctx) {
-  const controls = controlsSection(["facility"], ctx, { title: "Commercial controls", subtitle: "The accounting choices and one-offs are held once for the plan; the fee and tariff follow the facility choices." , exclude: ["location", "hinwilRetrofit", "committedKW", "expansionRight", "rackKW", "cooling", "redundancy", "pueMode", "pueValue", "renewable", "heatReuse"] })
+  const controls = controlsSection(["facility"], ctx, { title: "Commercial controls", subtitle: "The accounting choices and one-offs are held once for the plan; the fee and tariff follow the facility choices." , exclude: ["location", "hinwilRetrofit", "committedKW", "mlPartitionKW", "mlPlacement", "rackKW", "cooling", "redundancy", "pueMode", "pueValue", "renewable", "heatReuse"] })
   const outputs = el("div", { class: "outputs", id: "outputs-commercials" })
   const node = el("div", { class: "view view-commercials" },
     el("div", { class: "view-head" }, el("h2", {}, "Commercials"), el("p", { class: "card-sub" }, "Run-rate per season, cash in each year including one-offs, the cost-cap charge and the 3-year view. Figures are a planning model, not a quotation.")),
@@ -29,7 +29,7 @@ export function commercialsView(ctx) {
       el("div", { class: "stats three" },
         stat("Cash 2027 + 2028", fmt.chf(result.totals.cash), `${fmt.chfDelta(result.totals.cashDelta)} vs staying as today (${fmt.chf(result.totals.todayCash)})`, { id: "stat-cash-total" }),
         stat("3-year TCO (2028 estate)", fmt.chf(result.totals.tco3), `today's setup: ${fmt.chf(result.totals.todayTco3)}`, { id: "stat-tco3" }),
-        stat("Lap time, both seasons", fmt.sec(result.totals.sec), `${fmt.signed(result.totals.points, 0)} points over two seasons at ${state.plan.shared.confidence} % confidence`, { id: "stat-sec-total" })),
+        stat("Lap time, both seasons", fmt.sec(result.totals.sec), `2027 ${fmt.sec(s27.perf.sec)} · 2028 ${fmt.sec(s28.perf.sec)} at ${state.plan.shared.confidence} % confidence`, { id: "stat-sec-total" })),
       el("p", { class: "muted small" }, "Run-rate is the estate's yearly cost once it is in; cash blends the old and the new estate by the share of the year each runs and adds that year's one-offs."),
       el("div", { class: "actions-row" },
         el("a", { class: "btn btn-link", id: "case-link-figures", href: `/case.html?${caseQuery.toString()}`, target: "_blank", rel: "noopener" }, "Open the business case with these figures ↗"),

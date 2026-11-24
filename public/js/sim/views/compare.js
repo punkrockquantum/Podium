@@ -24,7 +24,9 @@ export function compareView(ctx) {
     const both = (f) => (r) => el("span", { class: "both" }, el("span", { class: "y27" }, f(r.seasons[2027], r, 2027)), el("span", { class: "y28" }, f(r.seasons[2028], r, 2028)))
     const metrics = [
       ["Seconds per lap vs Today", both((s) => fmt.sec(s.perf.sec)), "headline"],
-      ["Position", both((s, r) => `${fmt.position(r.plan.shared.position)} → ${fmt.position(s.perf.scenarioPosition)}`)],
+      ["kW at Digital Realty of 500", both((s) => (s.envelope.drIT > 0 ? `${Math.round(s.envelope.drIT)} kW${s.envelope.fits ? "" : " · not possible"}` : "Hinwil"))],
+      ["Data-to-decision", both((s) => `${fmt.num(s.trackside.decisionSec, 1)} s`)],
+      ["Race weekends at risk", both((s) => fmt.num(s.trackside.weekendsAtRisk, 2))],
       ["Effective MAUh (season)", both((s) => fmt.num(s.effectiveMauh, 2))],
       ["Allowance used", both((s) => fmt.pct(s.usage))],
       ["Availability", both((s) => fmt.availability(s.availabilityPct / 100))],

@@ -21,24 +21,72 @@ export function inputWidget(control, value, onChange, { id = `in-${control.id}`,
   let node
   if (control.type === "range") {
     const input = el("input", { type: "range", id, min: control.min, max: control.max, step: control.step, value, class: "slider", "aria-valuetext": readout(control, value), "aria-describedby": describedBy, "aria-label": control.label })
-    input.addEventListener("input", () => { const v = Number(input.value); input.setAttribute("aria-valuetext", readout(control, v)); onChange(v) })
-    node = el("div", { class: "input-range" }, input, el("div", { class: "slider-ticks", "aria-hidden": "true" }, el("span", {}, readout(control, control.min)), el("span", {}, readout(control, control.max))))
+    const tick = el("span", { class: "slider-ceiling", hidden: true, "aria-hidden": "true" })
+    const hint = el("span", { class: "clamp-hint", role: "status", hidden: true })
+    let ceiling = null
+    let hintTimer = 0
+    const showHint = (text) => { hint.textContent = text; hint.hidden = false; clearTimeout(hintTimer); hintTimer = setTimeout(() => { hint.hidden = true }, 2400) }
+    // Clamp on input: a value past the live ceiling (or under the floor) snaps back with a one-line hint
+    const clampValue = (v) => {
+      if (!ceiling) return v
+      if (ceiling.max !== undefined && v > ceiling.max + 1e-9) { showHint(`Clamped to ${readout(control, ceiling.max)} (${ceiling.reason || "ceiling"})`); return ceiling.max }
+      if (ceiling.min !== undefined && v < ceiling.min - 1e-9) { showHint(`Raised to ${readout(control, ceiling.min)} (${ceiling.reason || "floor"})`); return ceiling.min }
+      return v
+    }
+    input.addEventListener("input", () => { const v = clampValue(Number(input.value)); input.value = String(v); input.setAttribute("aria-valuetext", readout(control, v)); onChange(v) })
+    node = el("div", { class: "input-range" }, el("div", { class: "slider-wrap" }, input, tick), el("div", { class: "slider-ticks", "aria-hidden": "true" }, el("span", {}, readout(control, control.min)), el("span", {}, readout(control, control.max))), hint)
     node.sync = (v) => { input.value = String(v); input.setAttribute("aria-valuetext", readout(control, v)) }
+    /** Live ceiling `{ max?, min?, reason }`: the tick marks it and the track beyond it is dimmed. */
+    node.setCeiling = (c) => {
+      ceiling = c && (c.max !== undefined || c.min !== undefined) ? c : null
+      const span = control.max - control.min || 1
+      const maxPct = ceiling && ceiling.max !== undefined && ceiling.max < control.max ? ((ceiling.max - control.min) / span) * 100 : null
+      const minPct = ceiling && ceiling.min !== undefined && ceiling.min > control.min ? ((ceiling.min - control.min) / span) * 100 : null
+      tick.hidden = maxPct === null && minPct === null
+      if (maxPct !== null) { tick.style.left = `${maxPct.toFixed(2)}%`; tick.dataset.kind = "max"; tick.title = `Ceiling: ${readout(control, ceiling.max)}` }
+      else if (minPct !== null) { tick.style.left = `${minPct.toFixed(2)}%`; tick.dataset.kind = "min"; tick.title = `Floor: ${readout(control, ceiling.min)}` }
+      input.style.setProperty("--ceiling", maxPct !== null ? `${maxPct.toFixed(2)}%` : "100%")
+      input.style.setProperty("--floor", minPct !== null ? `${minPct.toFixed(2)}%` : "0%")
+      input.classList.toggle("has-ceiling", maxPct !== null || minPct !== null)
+      input.dataset.ceiling = ceiling && ceiling.max !== undefined ? String(ceiling.max) : ""
+      input.dataset.floor = ceiling && ceiling.min !== undefined ? String(ceiling.min) : ""
+    }
   } else if (control.type === "select") {
     const select = el("select", { id, class: "select", "aria-describedby": describedBy, "aria-label": control.label },
       ...control.options.map((o) => el("option", { value: String(o.value), selected: o.value === value }, o.label)))
     select.addEventListener("change", () => { const opt = control.options.find((o) => String(o.value) === select.value); onChange(opt ? opt.value : select.value) })
     node = select
     node.sync = (v) => { select.value = String(v) }
+    /** Options that would not fit: disabled, with the reason appended ("won't fit"). */
+    node.setDisabledOptions = (map = {}) => {
+      for (const opt of select.options) {
+        const o = control.options.find((c) => String(c.value) === opt.value)
+        const reason = o ? map[o.value] : undefined
+        opt.disabled = Boolean(reason)
+        opt.textContent = reason ? `${o.label} · won't fit` : o ? o.label : opt.textContent
+        if (reason) opt.title = reason
+        else opt.removeAttribute("title")
+      }
+    }
   } else if (control.type === "segmented") {
     const group = el("div", { class: "segmented", role: "group", "aria-label": control.label, id })
     for (const o of control.options) {
       const btn = el("button", { type: "button", class: "seg", "aria-pressed": o.value === value ? "true" : "false", dataset: { value: String(o.value) } }, o.label)
-      btn.addEventListener("click", () => { for (const b of group.children) b.setAttribute("aria-pressed", b === btn ? "true" : "false"); onChange(o.value) })
+      btn.addEventListener("click", () => { if (btn.disabled) return; for (const b of group.children) b.setAttribute("aria-pressed", b === btn ? "true" : "false"); onChange(o.value) })
       group.append(btn)
     }
     node = group
     node.sync = (v) => { for (const b of group.children) b.setAttribute("aria-pressed", b.dataset.value === String(v) ? "true" : "false") }
+    node.setDisabledOptions = (map = {}) => {
+      for (const b of group.children) {
+        const o = control.options.find((c) => String(c.value) === b.dataset.value)
+        const reason = o ? map[o.value] : undefined
+        b.disabled = Boolean(reason)
+        b.classList.toggle("wont-fit", Boolean(reason))
+        b.title = reason ? `Won't fit: ${reason}` : ""
+        b.setAttribute("aria-label", reason ? `${o.label} (won't fit: ${reason})` : o ? o.label : b.textContent)
+      }
+    }
   } else {
     const btn = el("button", { type: "button", class: "toggle", id, role: "switch", "aria-checked": value ? "true" : "false", "aria-describedby": describedBy, "aria-label": control.label },
       el("span", { class: "toggle-knob", "aria-hidden": "true" }), el("span", { class: "toggle-text" }, value ? "On" : "Off"))
@@ -77,6 +125,8 @@ export function planControl(control, view, handlers) {
     out28.textContent = readout(control, v.v28)
     in27.sync(v.v27)
     in28.sync(v.v28)
+    if (in27.setCeiling) { in27.setCeiling(v.ceiling27 || null); in28.setCeiling(v.ceiling28 || null) }
+    if (in27.setDisabledOptions) { in27.setDisabledOptions(v.disabled27 || {}); in28.setDisabledOptions(v.disabled28 || {}) }
     row.dataset.detached = v.detached ? "true" : "false"
     inherit.hidden = Boolean(v.detached)
     in28.hidden = !v.detached
@@ -84,6 +134,7 @@ export function planControl(control, view, handlers) {
     row.hidden = v.hidden === true
     row27.classList.toggle("na", v.na27 === true)
     row28.classList.toggle("na", v.na28 === true)
+    row.classList.toggle("at-ceiling", Boolean(v.atCeiling))
   }
   apply(view)
   row.sync = apply
@@ -215,7 +266,7 @@ export function gauge({ label, value, max = 1, display, sub, tone = "ok", marks 
         svg("line", { x1: x1.toFixed(1), y1: y1.toFixed(1), x2: x2.toFixed(1), y2: y2.toFixed(1) }),
         m.label ? svg("text", { x: polar(cx, cy, r + 15, deg)[0].toFixed(1), y: (polar(cx, cy, r + 15, deg)[1] + 3).toFixed(1), "text-anchor": "middle" }, m.label) : null)
     }),
-    svg("text", { x: cx, y: cy + 4, class: "gauge-display", "text-anchor": "middle" }, display),
+    svg("text", { x: cx, y: cy + 4, class: `gauge-display ${String(display).length > 8 ? "long" : ""}`, "text-anchor": "middle" }, display),
     sub ? svg("text", { x: cx, y: cy + 20, class: "gauge-sub", "text-anchor": "middle" }, sub) : null,
   )
   return el("div", { class: "gauge", id }, svgNode, el("div", { class: "gauge-label" }, label))
@@ -248,29 +299,35 @@ export function flagRow(f) {
 export const stat = (label, value, sub, extra = {}) => el("div", { class: `stat ${extra.class || ""}`, id: extra.id },
   el("div", { class: "stat-label" }, label), el("div", { class: "stat-value" }, value), sub ? el("div", { class: "stat-sub" }, sub) : null)
 
-/** The lap-time ladder: rungs for the midfield positions, Today at the team's position, the scenario marker. */
-export function ladder({ rungs, position, sec, scenarioPosition }) {
-  const w = 480
-  const rowH = 26
-  const h = rungs.length * rowH + 30
-  const minSec = Math.min(...rungs.map((r) => r.sec), -sec) - 0.05
-  const maxSec = Math.max(...rungs.map((r) => r.sec), -sec) + 0.05
-  const xOf = (s) => 120 + ((s - minSec) / (maxSec - minSec || 1)) * (w - 150)
-  const yOf = (p) => 22 + (p - rungs[0].position) * rowH + rowH / 2
-  const node = svg("svg", { viewBox: `0 0 ${w} ${h}`, class: "ladder-svg", role: "img", "aria-label": `Lap-time ladder: scenario at ${fmt.sec(-sec)} against today's position P${position}` })
-  for (const r of rungs) {
-    const y = yOf(r.position)
-    const isToday = r.position === position
-    node.append(svg("g", { class: `rung ${isToday ? "today" : ""}` },
-      svg("line", { x1: 100, y1: y, x2: w - 10, y2: y }),
-      svg("text", { x: 8, y: y + 4, class: "rung-pos" }, `P${r.position}`),
-      svg("text", { x: 40, y: y + 4, class: "rung-sec" }, isToday ? "today" : fmt.sec(r.sec)),
-    ))
-  }
-  const yScenario = yOf(Math.max(rungs[0].position, Math.min(rungs[rungs.length - 1].position, scenarioPosition)))
-  node.append(svg("line", { class: "ladder-path", x1: xOf(0), y1: yOf(position), x2: xOf(-sec), y2: yScenario }))
-  node.append(svg("circle", { class: "marker today", cx: xOf(0), cy: yOf(position), r: 6 }))
-  node.append(svg("circle", { class: "marker scenario", cx: xOf(-sec), cy: yScenario, r: 7 }))
-  node.append(svg("text", { class: "marker-text", x: xOf(-sec), y: yScenario - 12, "text-anchor": "middle" }, fmt.sec(sec)))
-  return node
+/**
+ * The envelope gauge: kW at Digital Realty against the 500 kW offer for one season. `env` is a model envelope;
+ * tone follows the plan-health rule (green ≤ 90 %, amber to 100 %, red over). In hybrid plans a second gauge
+ * shows what Hinwil keeps against the room.
+ */
+export function envelopeGauge(env, season, { id, size = 120 } = {}) {
+  const kw = Math.round(env.drIT)
+  const tone = env.drIT > env.offerKW ? "bad" : env.tone === "warn" ? "warn" : "ok"
+  const over = env.drIT > env.offerKW
+  return gauge({
+    id, size, tone,
+    label: `kW at Digital Realty of ${env.offerKW} · ${season}`,
+    value: Math.min(env.drIT, env.offerKW), max: env.offerKW,
+    display: over ? "Not possible" : `${kw} kW`,
+    sub: over ? `${kw} of ${env.offerKW} kW` : `${Math.round(env.headroomKW)} kW to spare`,
+    marks: [{ at: env.offerKW * 0.9 }],
+  })
+}
+
+/** The Hinwil-side gauge for hybrid plans: what the room keeps against its capacity. */
+export function hinwilGauge(env, season, { id, size = 120 } = {}) {
+  const kw = Math.round(env.hinwilIT)
+  const over = env.hinwilIT > env.hinwilCapacity
+  return gauge({
+    id, size, tone: over ? "bad" : env.hinwilIT > env.hinwilCapacity * 0.9 ? "warn" : "ok",
+    label: `kW kept at Hinwil of ${env.hinwilCapacity} · ${season}`,
+    value: Math.min(env.hinwilIT, env.hinwilCapacity), max: env.hinwilCapacity,
+    display: over ? "Not possible" : `${kw} kW`,
+    sub: over ? `${kw} of ${env.hinwilCapacity} kW` : `${Math.round(env.hinwilCapacity - env.hinwilIT)} kW to spare`,
+    marks: [{ at: env.hinwilCapacity * 0.9 }],
+  })
 }

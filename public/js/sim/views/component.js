@@ -40,11 +40,11 @@ export const COMPONENTS = {
     subtitle: "Where the estate lives decides power, cooling, availability, PUE and what the finance team can keep outside the cap.",
     groups: ["facility"],
     strip: {
-      team: "Hinwil, Digital Realty Zurich or hybrid; committed kW and the expansion right; redundancy; how the fee is treated in the cap.",
+      team: "Hinwil, Digital Realty Zurich or hybrid inside the 500 kW envelope; the ML partition and where it lives; redundancy; how the fee is treated in the cap.",
       dr: "Suite or cage, power whips, rear-door or liquid rows, 2N UPS / N+2 cooling, PUE, renewable supply and heat reuse.",
       hpe: "Rack density and cooling requirements of the configuration; CDUs for a liquid partition.",
     },
-    diagram: { id: "racks", title: "Rack layout", subtitle: "The room in the chosen season: cluster racks filled to their load, cooling per rack, A/B feeds, the rest of the estate and the expansion rows.", render: (sim, year) => rackLayout(sim, { year }) },
+    diagram: { id: "racks", title: "Rack layout", subtitle: "The room in the chosen season: cluster racks filled to their load, cooling per rack, A/B feeds, the rest of the estate and the ML partition rows, inside the 60 cage positions.", render: (sim, year) => rackLayout(sim, { year }) },
     outputs: facilityOutputs,
   },
   connectivity: {
@@ -173,8 +173,9 @@ function facilityOutputs(result) {
         stat("Redundancy", x.redundancy.toUpperCase().replace("N1", "N+1"), `${(sim.fac.availability * 100).toFixed(2)} % facility availability`),
         stat("Electricity", `${fmt.num(sim.fac.totalMWh, 0)} MWh`, `${fmt.chf(sim.money.lines.find((l) => l.id === "power")?.chf || 0)} a year at ${x.tariffRp} Rp/kWh${x.renewable ? " · renewable" : ""}`),
         stat("Heat reused", `${fmt.num(sim.money.heatMWh, 0)} MWh`, sim.money.heatMWh > 0 ? `≈ ${fmt.num(sim.money.co2HeatAvoidedT, 0)} t CO₂ avoided elsewhere` : x.location === "hinwil" ? "no heat recovery in the Hinwil room" : "heat reuse off")),
-      bar({ label: `${sim.fac.clusterSite === "hinwil" ? "Hinwil room" : "Digital Realty"} IT load vs capacity`, value: sitePower, max: Math.max(siteCap, sitePower) * 1.05, limit: siteCap, display: `${Math.round(sitePower)} / ${siteCap} kW`, tone: sim.fac.powerShortKW > 0 ? "bad" : sitePower / siteCap > 0.9 ? "warn" : "ok" }),
-      el("ul", { class: "flags" }, ...sim.flags.filter((f) => ["power", "hybridpower", "cooling", "loop"].includes(f.id)).map(flagRow)),
+      bar({ label: `${sim.fac.clusterSite === "hinwil" ? "Hinwil room" : "Digital Realty"} IT load vs ${sim.fac.clusterSite === "hinwil" ? "capacity" : "the 500 kW envelope"}`, value: sitePower, max: Math.max(siteCap, sitePower) * 1.05, limit: siteCap, display: `${Math.round(sitePower)} / ${siteCap} kW`, tone: sim.fac.powerShortKW > 0 || !sim.envelope.fits ? "bad" : sitePower / siteCap > 0.9 ? "warn" : "ok" }),
+      sim.fac.clusterSite === "dr" ? bar({ label: "Cage positions", value: sim.fac.racks.total, max: K.facility.cageRackPositions, limit: K.facility.cageRackPositions, display: `${sim.fac.racks.total} / ${K.facility.cageRackPositions} racks`, tone: sim.fac.racks.total > K.facility.cageRackPositions ? "bad" : sim.fac.racks.total > K.facility.cageRackPositions * 0.9 ? "warn" : "ok" }) : null,
+      el("ul", { class: "flags" }, ...sim.flags.filter((f) => ["power", "racks", "hybridpower", "cooling", "loop", "expansion"].includes(f.id)).map(flagRow)),
       sceneCard("Where the cluster lives", facilityScene(sim)),
     ]
   }, { id: "facility-seasons" })
@@ -196,7 +197,7 @@ function connectivityOutputs(result, ctx) {
         stat("Data-to-decision", `${sim.net.venue.decisionSec.toFixed(1)} s`, `${fmt.signed(sim.net.venue.decisionSec - today.net.venue.decisionSec, 1, " s")} vs Today at ${sim.net.venue.name}`),
         stat("Bandwidth headroom", `${sim.net.headroom.toFixed(1)}×`, `${sim.net.profile.mbps} Mbps vs a ${sim.net.telemetryPeakMbps} Mbps telemetry peak`),
         stat("Link availability", fmt.availability(sim.net.linkAvailability), `≈ ${sim.net.weekendsLost.toFixed(2)} race weekends a season at risk`),
-        stat("Strategy points", fmt.signed(s.perf.strategyPoints, 1), "a season vs Today, from latency, headroom and resilience"),
+        stat("Race weekends at risk", fmt.num(sim.net.weekendsLost, 2), `of ${sim.net.raceWeekends} · ${fmt.signed(today.net.weekendsLost - sim.net.weekendsLost, 2)} fewer than Today`),
         stat("Hinwil ↔ campus", sim.inputs.location === "hinwil" ? "not needed" : `${sim.inputs.fibrePairs === 2 ? "2 routes" : "1 route"} · ${sim.inputs.fibreGbps}G`, sim.inputs.location === "hinwil" ? "the estate stays in the room" : `${(K.trackside.fibreAvailability[sim.inputs.fibrePairs] * 100).toFixed(3)} % · ${fmt.chf(sim.money.lines.find((l) => l.id === "fibre")?.chf || 0)} a year`),
         stat("Cloud on-ramps", sim.inputs.cloudOnRamp ? "AWS · Azure" : "Off", sim.inputs.cloudOnRamp ? "ServiceFabric private on-ramps for unrestricted bursts" : "no private cloud connectivity")),
       sceneCard("Paddock to factory", tracksideScene(sim)),

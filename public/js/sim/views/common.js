@@ -1,9 +1,13 @@
 /** Building blocks shared by the plan views: per-season control sections, season columns, role strips, health lists. */
 import { GROUPS, CONTROLS } from "../model.js"
-import { SHARED_IDS, TIMELINE_IDS, isDetached, controlValue } from "../plan.js"
+import { SHARED_IDS, TIMELINE_IDS, isDetached, controlValue, seasonCeilings, optionFit } from "../plan.js"
 import { el, fmt } from "../dom.js"
 import { planControl, badge } from "../widgets.js"
 import { fmtDate } from "../timeline.js"
+
+/** The controls whose sliders carry a live ceiling (model.ceilings) and the reason shown when they clamp. */
+const CEILING_REASON = { nodes: "500 kW envelope", gpus: "500 kW envelope", solverGpus: "GPUs in the plan", mlPartitionKW: "what the envelope leaves", rackKW: "cooling ceiling", clockGHz: "CCF floor and the 500 kW envelope", committedKW: "the offer is 500 kW" }
+const OPTION_FIT_IDS = ["cooling", "gpuModel", "mlPlacement", "location", "redundancy", "coresPerNode", "cpuArch"]
 
 export const SEASONS = [2027, 2028]
 
@@ -19,33 +23,65 @@ export function controlsSection(groupIds, ctx, { title, subtitle, exclude = [] }
     onReattach: (id) => ctx.actions.reattach(id),
   }
   const state = ctx.getState()
+  let ceil = ceilingsOf(state)
   for (const g of groups) for (const c of g.controls) {
     if (c.id === "season" || TIMELINE_IDS.includes(c.id) || exclude.includes(c.id)) continue
-    const row = planControl(c, viewOf(c, state), handlers)
+    const row = planControl(c, viewOf(c, state, ceil), handlers)
     rows[c.id] = row
     node.append(row)
   }
   return {
     node,
-    sync(st) { for (const [id, row] of Object.entries(rows)) row.sync(viewOf(CONTROLS[id], st)) },
+    sync(st) { ceil = ceilingsOf(st); for (const [id, row] of Object.entries(rows)) row.sync(viewOf(CONTROLS[id], st, ceil)) },
   }
 }
 
-function viewOf(control, state) {
+const ceilingsOf = (state) => ({ 2027: seasonCeilings(state.plan, 2027), 2028: seasonCeilings(state.plan, 2028) })
+
+/** The live ceiling of a control in a season, in the shape the slider widget takes, or null. */
+function ceilingFor(control, ceil) {
+  const c = ceil && ceil[control.id]
+  if (!c) return null
+  const out = { reason: CEILING_REASON[control.id] || "ceiling" }
+  if (c.max !== undefined && c.max < control.max) out.max = c.max
+  if (c.min !== undefined && c.min > control.min) out.min = c.min
+  return out.max !== undefined || out.min !== undefined ? out : null
+}
+
+function viewOf(control, state, ceil = ceilingsOf(state)) {
   const { plan, result } = state
   const shared = SHARED_IDS.includes(control.id)
   const x27 = result.inputs[2027]
   const x28 = result.inputs[2028]
   const show27 = !control.showIf || control.showIf(x27)
   const show28 = !control.showIf || control.showIf(x28)
+  const v27 = controlValue(plan, 2027, control.id)
+  const v28 = controlValue(plan, 2028, control.id)
+  const detached = !shared && isDetached(plan, control.id)
+  let ceiling27 = control.type === "range" ? ceilingFor(control, ceil[2027]) : null
+  const ceiling28 = control.type === "range" ? ceilingFor(control, ceil[2028]) : null
+  // 2028 inherits an attached control, so the 2027 slider must stay inside both seasons' ceilings
+  if (control.type === "range" && !shared && !detached && (ceiling27 || ceiling28)) {
+    const both = { reason: (ceiling28 || ceiling27).reason }
+    const maxes = [ceiling27?.max, ceiling28?.max].filter((v) => v !== undefined)
+    const mins = [ceiling27?.min, ceiling28?.min].filter((v) => v !== undefined)
+    if (maxes.length) both.max = Math.min(...maxes)
+    if (mins.length) both.min = Math.max(...mins)
+    if (ceiling28 && ((both.max !== undefined && both.max === ceiling28.max && (!ceiling27 || ceiling27.max !== both.max)) || (both.min !== undefined && both.min === ceiling28.min && (!ceiling27 || ceiling27.min !== both.min)))) both.reason = `${ceiling28.reason}, 2028`
+    ceiling27 = both
+  }
+  const fitOptions = OPTION_FIT_IDS.includes(control.id) && control.options
   return {
     shared,
-    v27: controlValue(plan, 2027, control.id),
-    v28: controlValue(plan, 2028, control.id),
-    detached: !shared && isDetached(plan, control.id),
+    v27, v28,
+    detached,
     hidden: !show27 && !show28,
     na27: !show27,
     na28: !show28,
+    ceiling27, ceiling28,
+    atCeiling: Boolean((ceiling27 && ceiling27.max !== undefined && v27 >= ceiling27.max) || (ceiling28 && ceiling28.max !== undefined && v28 >= ceiling28.max)),
+    disabled27: fitOptions ? optionFit(plan, 2027, control.id) : undefined,
+    disabled28: fitOptions ? optionFit(plan, 2028, control.id) : undefined,
   }
 }
 

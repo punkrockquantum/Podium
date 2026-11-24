@@ -4,7 +4,8 @@
  */
 import { normalize } from "./model.js"
 import { PROVIDER } from "./assumptions.js"
-import { evaluatePlan, normalizePlan, presetPlan, PLAN_PRESETS, PLAN_PRESET_ORDER, SEASON_IDS, SHARED_IDS, matchingPreset, setControl as planSetControl, detach as planDetach, reattach as planReattach, setTimeline as planSetTimeline, renamePlan, NAME_MAX } from "./plan.js"
+import { evaluatePlan, normalizePlan, presetPlan, PLAN_PRESETS, PLAN_PRESET_ORDER, SEASON_IDS, SHARED_IDS, matchingPreset, setControlClamped, fitPlanToEnvelope, controlDisplay, detach as planDetach, reattach as planReattach, setTimeline as planSetTimeline, renamePlan, NAME_MAX } from "./plan.js"
+import { CONTROLS } from "./model.js"
 import { el, clear, installErrorLogging } from "./dom.js"
 import { badge } from "./widgets.js"
 import { createRouter, ROUTES, routeMeta } from "./router.js"
@@ -96,7 +97,20 @@ export function mountSim(root) {
     getState: () => state,
     navigate: (route) => router.go(route),
     actions: {
-      setControl(year, id, value) { state.plan = planSetControl(state.plan, year === null ? 2027 : year, id, value); render() },
+      setControl(year, id, value) {
+        const { plan, changes } = setControlClamped(state.plan, year === null ? 2027 : year, id, value)
+        state.plan = plan
+        render()
+        for (const c of changes) toast(`Also changed: ${CONTROLS[c.id].label.toLowerCase()} ${controlDisplay(c.id, c.from)} → ${controlDisplay(c.id, c.to)} (${c.reason})`)
+      },
+      fitEnvelope(year) {
+        const { plan, changes, fits } = fitPlanToEnvelope(state.plan, year)
+        state.plan = plan
+        render()
+        toast(changes.length ? `Fitted ${year} to the envelope: ${changes.map((c) => `${CONTROLS[c.id].label.toLowerCase()} ${controlDisplay(c.id, c.from)} → ${controlDisplay(c.id, c.to)}`).join(", ")}${fits ? "" : " (still over: see plan health)"}` : fits ? `${year} already fits the envelope` : `${year} cannot be fitted by clamping alone: see plan health`)
+      },
+      loadPlan(plan, note) { state.plan = normalizePlan(plan); render(); if (note) toast(note) },
+      toast,
       detach(id) { state.plan = planDetach(state.plan, id); render() },
       reattach(id) { state.plan = planReattach(state.plan, id); render() },
       setTimeline(patch) { state.plan = planSetTimeline(state.plan, patch); render() },
