@@ -369,6 +369,7 @@ function startTable() {
     const before = tune?.view.board()
     pending[decisionId] = value
     const after = refreshTune(team)
+    if (chosenDials(team).length === dialCount) patchTune(team)
     if (after?.inZone && !before?.inZone && !learned().has(station.id)) {
       markLearned()
       showLesson()
@@ -383,7 +384,7 @@ function startTable() {
       .then(() => watcher.refresh())
       .catch((err) => {
         delete pending[decisionId]
-        refreshTune(team)
+        patchTune(team)
         toast(err.message)
       })
   }
@@ -414,7 +415,8 @@ function startTable() {
    */
   function patchTune(team) {
     const locked = lockedDials(team, station.id).length
-    const plan = hasPlan(team)
+    /* The third tap counts as locked the moment it is made (optimistically, like the lock counter), so the banner never lags the dials. */
+    const plan = hasPlan(team) || chosenDials(team).length === dialCount
     const mode = plan ? "done" : briefRead(team) ? "warn" : "none"
     patchSlot(document.getElementById("oneShotSlot"), [mode], () => {
       if (mode === "none") return null
