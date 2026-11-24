@@ -25,13 +25,13 @@ export function swissMap(result) {
   node.append(svg("path", { class: "map-link remote", d: `M ${hx} ${hy} Q ${(hx + nx) / 2} ${hy - 40} ${nx - 8} ${ny + 8}` }))
   node.append(svg("text", { class: "map-link-text", x: (hx + nx) / 2 + 10, y: hy - 30 }, `≈ ${F.sites.neuburg.rttMsToZurich} ms carrier Ethernet`))
   node.append(svg("circle", { class: "map-pin neuburg", cx: nx, cy: ny, r: 6 }))
-  node.append(svg("text", { class: "map-label", x: nx - 90, y: ny + 24 }, "Neuburg an der Donau · power unit"))
+  node.append(svg("text", { class: "map-label", x: nx - 12, y: ny + 4, "text-anchor": "end" }, "Neuburg an der Donau · power unit"))
   // Zurich region
   const fibreClass = atDr(x27) || atDr(x28) ? "map-link fibre" : "map-link fibre off"
   node.append(svg("line", { class: fibreClass, x1: hx, y1: hy, x2: zx, y2: zy }))
   node.append(svg("circle", { class: "map-pin hinwil", cx: hx, cy: hy, r: 7 }))
   node.append(svg("circle", { class: `map-pin dr ${atDr(x27) || atDr(x28) ? "" : "dim"}`, cx: zx, cy: zy, r: 7 }))
-  node.append(svg("text", { class: "map-label", x: hx + 12, y: hy + 16 }, "Hinwil · factory, wind tunnel, Mission Control"))
+  node.append(svg("text", { class: "map-label", x: hx + 8, y: hy + 24, "text-anchor": "end" }, "Hinwil · factory, wind tunnel, Mission Control"))
   node.append(svg("text", { class: "map-label dr", x: zx - 6, y: zy - 12, "text-anchor": "end" }, "Digital Realty Zurich · ZUR1–ZUR3 Glattbrugg"))
   // UK Technology Centre off-map
   node.append(svg("text", { class: "map-label muted", x: 24, y: 40 }, `← Bicester Technology Centre · ≈ ${F.sites.bicester.rttMsToZurich} ms`))
@@ -68,12 +68,12 @@ const OWNER_LABEL = { team: "Team", dr: "Digital Realty", hpe: "HPE GreenLake", 
  * Overview); the full chart adds a row per task with owner colours and the critical path.
  */
 export function gantt(timeline, { compact = false, width = 960 } = {}) {
-  const labelW = compact ? 0 : 230
+  const labelW = compact ? 0 : 262
   const left = labelW + 8
   const right = width - 12
   const { start, end } = timeline.range
   const xOf = (ms) => left + ((Math.min(Math.max(ms, start), end) - start) / (end - start)) * (right - left)
-  const charW = compact ? 5.6 : 6.2 // approximate glyph width at the label font size, for collision checks
+  const charW = compact ? 5.0 : 4.9 // measured average glyph width at the label font sizes, for collision checks
   const laneH = compact ? 13 : 14
   const bandTop = 18
   const bandH = 22
@@ -98,7 +98,7 @@ export function gantt(timeline, { compact = false, width = 960 } = {}) {
     const flip = x + 4 + w > right
     return { m, x, text, w, flip, x0: flip ? x - 4 - w : x + 4 }
   }).sort((a, b) => a.x0 - b.x0)
-  const msLanes = placeInLanes(msLabels.map((l) => ({ x: l.x0, w: l.w })), compact ? 3 : 4)
+  const msLanes = placeInLanes(msLabels.map((l) => ({ x: l.x0, w: l.w })), compact ? 3 : 6)
   const msLaneCount = Math.max(1, ...msLanes.map((l) => l + 1))
   const height = msTop + 22 + msLaneCount * laneH + 8
   const node = svg("svg", { viewBox: `0 0 ${width} ${height}`, class: `gantt ${compact ? "compact" : ""}`, role: "img", "aria-label": compact ? "Deployment timeline: FIA periods and the plan's milestones" : "Deployment Gantt chart: FIA periods, lead-time tasks and milestones" })
@@ -138,7 +138,7 @@ export function gantt(timeline, { compact = false, width = 960 } = {}) {
     const y = rowsTop + i * rowH
     const x1 = xOf(t.start)
     const x2 = xOf(t.end)
-    node.append(svg("text", { class: "task-label", x: labelW, y: y + 15, "text-anchor": "end" }, t.label.length > 46 ? `${t.label.slice(0, 44)}…` : t.label))
+    node.append(svg("text", { class: "task-label", x: labelW, y: y + 15, "text-anchor": "end" }, svg("title", {}, t.label), t.label.length > 44 ? `${t.label.slice(0, 42).trimEnd()}…` : t.label))
     node.append(svg("rect", { class: `task owner-${t.owner} path-${t.path} status-${t.status}`, x: x1.toFixed(1), y: y + 4, width: Math.max(3, x2 - x1).toFixed(1), height: rowH - 8, rx: 4 }))
     node.append(svg("text", { class: "task-weeks", x: (x2 + 4).toFixed(1), y: y + 15 }, `${t.weeks} wk · ${OWNER_LABEL[t.owner] || t.owner}`))
   })

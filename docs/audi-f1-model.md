@@ -247,7 +247,26 @@ checklist** whose notes stay in the browser; a **live risk register** (likelihoo
 plan, with mitigations); and a **solution brief** for print plus a JSON hand-over, both carrying the HPE-via-GreenLake
 footnote.
 
-## 12. What the model does not do
+## 12. Pictures drawn from the plan (`visuals.js`, `diagrams.js`)
+
+Nothing in a picture is typed in: each SVG reads the result of the season it shows.
+
+* **Swiss schematic map** (Overview): Hinwil, the Glattbrugg campus and Neuburg, the fibre (one or two routes) and
+  where the Restricted CFD estate runs in each season.
+* **Gantt** (Deployment, compact strip on the Overview): the six ATPs of each year as bands, the two shutdowns, the
+  pre-season tests, Round 1 and the 1 January 2028 rule line as markers, one row per task coloured by owner, the
+  milestones with their lead-time status; the marker and milestone labels are placed in lanes so they never overlap.
+* **Architecture** (Compute, 2027 | 2028 switch): the Hinwil site and the campus cage, the fibre between them, the CPU
+  partition as one chip per node (GreenLake buffer nodes dashed), the GPU partition with the solver GPUs highlighted
+  (or greyed before 2028), the fabric and storage tier, the consumption model, and the campus services underneath
+  (cross-connects, cloud on-ramps, Remote Hands with the HPE support tier, power and cooling); at Hinwil the row shows
+  the room's headroom or shortfall instead.
+* **Rack layout** (Facility, 2027 | 2028 switch): the cluster racks (`ceil(clusterKW / rackKW)`, at most ten drawn)
+  filled to their average load, amber when the density exceeds the cooling limit, a rear-door panel or a liquid
+  manifold plus CDU per the cooling choice, A/B feeds per the redundancy, the rest of the estate as one block (no
+  rack plan exists for it in the model) and dashed expansion rows when the 1,000 kW right is held.
+
+## 13. What the model does not do
 
 * No stochastic simulation: availability and failures are expected values.
 * No GPU conversion rule exists yet (F4.4.1); the FP64 normalisation and the charge-factor slider are assumptions.

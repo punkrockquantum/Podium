@@ -1,12 +1,14 @@
-# Audi F1 Team × Digital Realty · Infrastructure performance simulator
+# Audi F1 Team × Digital Realty · Swiss infrastructure planning tool
 
-**The product for tomorrow's demo is the simulator at `http://localhost:8090/`.** It lets the Audi F1
-Team tweak every component of its 2027 and 2028 infrastructure inside the FIA envelope — the
-Restricted CFD cluster (HPE via HPE GreenLake as the working assumption for the OEM), where it lives
-(the Hinwil room, Digital Realty's Zurich campus, or a hybrid), how it is paid for, and how the
-paddock is connected — and reads the impact live: FIA compliance (MAUh, GPU legality, cost-cap
-charge), effective compute and turnaround, trackside latency and data-to-decision, money and
-sustainability, and the headline **seconds per lap found over a season against Today's setup**.
+**The product for the demo is the planning tool at `http://localhost:8090/`.** It lets the Audi F1
+Team tune its plan, deployment and architecture for the **2027 and 2028 seasons** inside the FIA
+envelope — the Restricted CFD cluster (HPE via HPE GreenLake as the working assumption for the OEM),
+where it lives (the Hinwil room, Digital Realty's Zurich campus, or a hybrid), how it is paid for,
+when it moves and how the paddock is connected — and reads the impact live for both seasons: FIA
+compliance (MAUh, GPU legality from 1 January 2028, cost-cap charge), effective compute and
+turnaround, trackside latency, money and sustainability, the deployment timeline against the six
+Aerodynamic Testing Periods, and the headline **seconds per lap found over each season against
+Today's setup**. The same plan opens as a **Solutions Architect view** for Digital Realty.
 
 ```bash
 sh start.command          # Mac: finds Node, starts the server on port 8090, opens the browser
@@ -14,24 +16,40 @@ sh start.command          # Mac: finds Node, starts the server on port 8090, ope
 npm start                 # http://localhost:8090/
 ```
 
-- **Presets:** *Today: Hinwil on-prem* · *Digital Realty Zurich 2027* · *Digital Realty + HPE GreenLake 2028*.
-  Season toggle (2027 plan · 2028 path), Save / Load (this browser), **Set as A / B** to compare against
-  Today, **Export JSON**, **Print**, a shareable link, and the business case one tap away (`/case.html`).
-- **Controls** in four cards: FIA envelope · Compute (HPE GreenLake) · Facility (Digital Realty Zurich) ·
-  Connectivity & trackside. Every control carries a "why it matters" line and the FIA article it touches;
-  choices outside the envelope are clamped and flagged *not allowed* or *not possible*.
-- **The model** is pure functions in `public/js/sim/model.js`; the formulae are in
-  [`docs/audi-f1-model.md`](docs/audi-f1-model.md) and every constant is tagged VERIFIED (with its row in
-  [`docs/audi-f1-sources.md`](docs/audi-f1-sources.md)) or ASSUMPTION, on the page under *Assumptions &
-  sources*. HPE GreenLake is the sales lead's working assumption, not a claim about the team's suppliers.
-- Files: `public/sim.html`, `public/js/sim/` (`model.js`, `assumptions.js`, `app.js`, `widgets.js`,
-  `scenes.js`, `store.js`, `dom.js`), `public/css/sim.css`; tests `tests/sim.model.test.js` and
-  `tests/sim.browser.test.js`.
+- **One plan, two seasons.** 2028 inherits 2027 by default ("same as 2027"); any control can be
+  detached for 2028 and tuned on its own. Presets are full two-season plans: *Today: stay at Hinwil* ·
+  *Digital Realty Zurich from 2027* · *Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028*.
+  Save / Load (this browser), Compare (A/B), Export JSON, Print, Copy link (route + plan in the URL),
+  and the business case one tap away (`/case.html`, with the plan's figures in the query string).
+- **Overview first, then the parts.** Routes: `#/overview` · `#/fia` · `#/compute` · `#/facility` ·
+  `#/connectivity` · `#/deployment` · `#/commercials` · `#/compare` · `#/sa` · `#/model`. The Overview has
+  the plan header with a Swiss schematic map, decision cards ("Tune the details →"), the outcome ribbon
+  for both seasons, the plan health strip, the compact timeline and the lap-time ladder. Each component
+  view has per-season controls (with the FIA article and a "why it matters" line), outputs for both
+  seasons and a *team decides · Digital Realty provides · HPE GreenLake provides* strip; Compute draws the
+  architecture, Facility the rack layout, Deployment the Gantt against ATPs, shutdowns, tests and races.
+- **Deployment timeline** Nov 2026 → end 2028: contract date, cutover target, parallel-running weeks and
+  the 2028 step-up date, with modelled consequences (downtime inside an ATP wastes allowance; a cutover
+  at an ATP boundary or in a shutdown loses nothing; late lead times flag and cost early-season
+  allowance; a GPU partition delivered long before 1 January 2028 costs money without ATR value).
+- **Solutions Architect view** (`?view=sa` or the view switch): requirements per season, service mapping
+  to public Digital Realty names, owner roles, a discovery checklist whose notes persist in this browser,
+  a live risk register and a printable solution brief with a JSON hand-over.
+- **The model** is pure functions: `public/js/sim/model.js` (one season), `plan.js` (two seasons,
+  inheritance, presets, health), `timeline.js` (ATP calendar, lead times, losses), `sa.js` (requirements,
+  services, risks). The formulae are in [`docs/audi-f1-model.md`](docs/audi-f1-model.md) and every
+  constant is tagged VERIFIED (with its row in [`docs/audi-f1-sources.md`](docs/audi-f1-sources.md)) or
+  ASSUMPTION, on the page under *Model & sources*. HPE GreenLake is the sales lead's working assumption,
+  not a claim about the team's suppliers.
+- Files: `public/sim.html`, `public/js/sim/` (`model.js`, `plan.js`, `timeline.js`, `sa.js`,
+  `assumptions.js`, `app.js`, `router.js`, `planstore.js`, `visuals.js`, `diagrams.js`, `widgets.js`,
+  `scenes.js`, `dom.js`, `views/`), `public/css/sim.css`; tests `tests/sim.model.test.js`,
+  `tests/sim.plan.test.js` and `tests/sim.browser.test.js` (headless Chrome at 1440×900 and 1024×768).
 
 ### Legacy game pages
 
 The table game below is still in the repository and still tested, but it is **unlinked from
-navigation**: `/` and `/index.html` open the simulator. The game's landing page is at
+navigation**: `/` and `/index.html` open the planning tool. The game's landing page is at
 `/home.html`, the tables at `/station.html?station=…`, the host console at `/host.html`, the
 projector at `/race.html`. The rest of this README describes that game.
 
@@ -472,7 +490,7 @@ the race (2027 plan against today) → readout. It does not touch the real game.
 **Requirements.** Node.js 18 or newer. There are no npm packages: do not run `npm install`.
 
 **Quick start on a Mac.** Double-click `start.command`. It finds Node (including nvm), starts Podium
-on this Mac only and opens `http://localhost:8090/` (the simulator; the game's landing page is
+on this Mac only and opens `http://localhost:8090/` (the planning tool; the game's landing page is
 `/home.html`). From Terminal: `npm start`.
 
 **On Wi-Fi for iPads.**
@@ -582,7 +600,7 @@ afterwards.
 
 ```text
 server.mjs               Node HTTP server: static files, JSON API, state, persistence (no dependencies)
-public/index.html        opens the simulator     public/sim.html       the infrastructure performance simulator (public/js/sim/, public/css/sim.css)
+public/index.html        opens the planning tool  public/sim.html       the Swiss infrastructure planning tool (public/js/sim/, public/css/sim.css)
 public/home.html         the game's landing page public/station.html   table iPad
 public/host.html         host controls / SA view  public/race.html     projector and readouts
 public/case.html         the business case (Hinwil on-prem vs the Zurich campus, 2027 and 2028)
@@ -713,7 +731,7 @@ answer `410`.
 ### How to run tomorrow's demo
 
 1. `npm start` (or `PORT=8199 DATA_DIR=/tmp/podium-audi node server.mjs` for a throwaway game), then
-   open `http://localhost:8090/home.html` (the game's landing page; `/` is the simulator). The header
+   open `http://localhost:8090/home.html` (the game's landing page; `/` is the planning tool). The header
    reads *Audi F1 Team · Hinwil → Zurich campus · 2027 plan, 2028 path*. The landing page names the four
    roles in the room: **The customer's table**,
    **Solutions Architects**, **Session host**, **Projector** (tap one for its instructions).
