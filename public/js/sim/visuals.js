@@ -32,7 +32,7 @@ export function swissMap(result) {
   node.append(svg("circle", { class: "map-pin hinwil", cx: hx, cy: hy, r: 7 }))
   node.append(svg("circle", { class: `map-pin dr ${atDr(x27) || atDr(x28) ? "" : "dim"}`, cx: zx, cy: zy, r: 7 }))
   node.append(svg("text", { class: "map-label", x: hx + 8, y: hy + 24, "text-anchor": "end" }, "Hinwil · factory, wind tunnel, Mission Control"))
-  node.append(svg("text", { class: "map-label dr", x: zx - 6, y: zy - 12, "text-anchor": "end" }, "Digital Realty Zurich · ZUR1–ZUR3 Glattbrugg"))
+  node.append(svg("text", { class: "map-label dr", x: zx - 6, y: zy - 12, "text-anchor": "end" }, "Digital Realty Zurich · Glattbrugg/Opfikon"))
   // UK Technology Centre off-map
   node.append(svg("text", { class: "map-label muted", x: 24, y: 40 }, `← Bicester Technology Centre · ≈ ${F.sites.bicester.rttMsToZurich} ms`))
   // Inset: Hinwil ↔ campus with the fibre routes
