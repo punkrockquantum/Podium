@@ -127,6 +127,18 @@ test("every route renders, the nav follows the hash and back/forward work", { sk
   await go(page, "#/compute")
   assert.ok((await count(page, ".view-compute .plan-control .fia-badge")) >= 3)
   assert.ok((await count(page, ".view-compute .plan-control .why")) >= 10)
+  // The architecture diagram draws the chosen season and switches with the toggle
+  assert.equal(await count(page, "#card-architecture svg.arch"), 1, "compute shows the architecture diagram")
+  assert.match(await page.evaluate("document.querySelector('#card-architecture svg.arch').getAttribute('aria-label')"), /^2027 architecture: \d+ CPU nodes/)
+  assert.ok((await count(page, "#card-architecture .chip")) >= 8, "CPU nodes are drawn as chips")
+  await page.click("#card-architecture .seg[data-season='2028']")
+  await settle()
+  assert.match(await page.evaluate("document.querySelector('#card-architecture svg.arch').getAttribute('aria-label')"), /^2028 architecture/)
+  assert.match(await text(page, "#diagram-architecture-note"), /inherits 2027|differ in 2028/)
+  await go(page, "#/facility")
+  assert.equal(await count(page, "#card-racks svg.racks"), 1, "facility shows the rack layout")
+  assert.ok((await count(page, "#card-racks .rack")) >= 1, "cluster racks are drawn")
+  assert.match(await page.evaluate("document.querySelector('#card-racks svg.racks').getAttribute('aria-label')"), /rack layout: \d+ cluster racks at \d+ kW/)
   // Back/forward: compute → facility → connectivity, then back and forward again
   await go(page, "#/facility")
   await go(page, "#/connectivity")

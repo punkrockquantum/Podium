@@ -436,6 +436,54 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .milestone-text { fill: var(--text); font-size: 9.5px; font-weight: 600; }
 .milestone-leader { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 2; }
 .gantt.compact .milestone-text { font-size: 9px; }
+/* architecture diagram and rack layout */
+.arch, .racks { width: 100%; height: auto; display: block; background: #0e1118; border-radius: 10px; border: 1px solid var(--line); }
+.diagram-card .card-head.row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.diagram-card .card-head .card-sub { margin: 4px 0 0; }
+.diagram-controls { display: flex; align-items: center; gap: 10px; flex: none; }
+.diagram-seasons .seg { min-height: 32px; min-width: 64px; }
+.diagram-host { margin-top: 10px; }
+.diagram-host .arch, .diagram-host .racks { max-width: 920px; margin: 0 auto; }
+.arch-title { fill: var(--text); font-size: 12px; font-weight: 800; }
+.arch-site { fill: #141a26; stroke: #2f3a4e; stroke-width: 1.5; }
+.arch-site.hinwil { stroke: var(--accent); }
+.arch-site.dr { stroke: var(--dr); }
+.arch-cage { fill: #0b0e15; stroke: var(--line); stroke-dasharray: 4 3; }
+.arch-site-title { fill: var(--accent); font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+.arch-site-title.dr { fill: var(--dr); }
+.arch-part-title { fill: var(--text); font-size: 11px; font-weight: 700; }
+.arch-part-title.muted { fill: var(--muted); }
+.arch-part-title.warn, .arch-note.warn { fill: var(--amber); }
+.arch-note { fill: var(--muted); font-size: 9.5px; }
+.arch-svc-title { fill: var(--dr); font-size: 10.5px; font-weight: 700; }
+.arch-svc-title.team { fill: var(--accent); }
+.arch-svc-title.muted { fill: var(--muted); }
+.arch-fibre { stroke: var(--dr); stroke-width: 3; }
+.arch-fibre.alt { stroke-dasharray: 6 4; opacity: 0.8; }
+.arch-link-text { fill: var(--muted); font-size: 9.5px; }
+.arch-divider { stroke: var(--line); stroke-width: 1; }
+.arch-fabric { fill: #1d2a40; stroke: var(--info); stroke-width: 1; }
+.arch-fabric-text { fill: var(--info); font-size: 9px; font-weight: 700; }
+.arch-legend { fill: var(--muted); font-size: 9.5px; }
+.chip { fill: #38bdf8; stroke: #04121c; stroke-width: 0.5; }
+.chip.buffer { fill: none; stroke: #38bdf8; stroke-dasharray: 2 2; stroke-width: 1; }
+.chip.gpu { fill: #a78bfa; }
+.chip.gpu.solver { fill: #f472b6; }
+.lg-team { fill: var(--accent); } .lg-dr { fill: var(--dr); } .lg-hpe { fill: #38bdf8; } .lg-gpu { fill: #a78bfa; } .lg-solver { fill: #f472b6; } .lg-buffer { fill: #0e1118; stroke: #38bdf8; stroke-width: 0.8; }
+.rack { fill: #141a26; stroke: #4b5a70; stroke-width: 1.2; }
+.rack.hot { stroke: var(--amber); }
+.rack-load { fill: #38bdf8; opacity: 0.75; }
+.rack-load.hot { fill: var(--amber); }
+.rack-door { fill: var(--dr); }
+.rack-manifold { fill: #60a5fa; }
+.rack-cdu { fill: #0b0e15; stroke: #60a5fa; stroke-width: 1; }
+.rack-cdu-text { fill: #60a5fa; font-size: 9px; font-weight: 700; }
+.rack-floor { stroke: var(--line); stroke-width: 2; }
+.rack-feed { stroke: var(--amber); stroke-width: 2; }
+.rack-feed.b { stroke: var(--muted); } .rack-feed.b.full { stroke: var(--amber); }
+.rack-feed-text { fill: var(--muted); font-size: 8px; font-weight: 700; }
+.rack-rest { fill: #10151f; stroke: #2f3a4e; stroke-dasharray: 3 3; }
+.rack-expansion { fill: none; stroke: var(--dr); stroke-dasharray: 4 3; opacity: 0.7; }
 .gantt-legend { display: flex; gap: 8px 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
 .lg::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; background: #1a2233; border: 1px solid var(--line); }
 .lg.shutdown::before { background: rgba(245, 158, 11, 0.3); border-color: var(--amber); }
@@ -498,7 +546,11 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
   .plan-name { border: 0; padding: 0; background: none; font-size: 16px; }
   .view-layout, .season-cols, .sa-grid, .decision-grid, .overview-hero, .ladder-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .role-strip { grid-template-columns: repeat(3, 1fr); }
-  .map, .gantt { background: #fff; border-color: #bbb; }
+  .map, .gantt, .arch, .racks { background: #fff; border-color: #bbb; }
+  .arch-site, .rack, .rack-rest, .arch-cage, .rack-cdu { fill: #fff; }
+  .arch-fabric { fill: #e0f2fe; }
+  .arch-title, .arch-part-title, .arch-site-title, .arch-svc-title, .arch-note, .arch-link-text, .arch-legend, .arch-fabric-text, .rack-cdu-text { fill: #111 !important; }
+  .lg-buffer { fill: #fff; }
   .map-country { fill: #f3f4f6; stroke: #999; }
   .map-label, .year-text, .task-label, .milestone-text, .map-seasons { fill: #111 !important; }
   .atp-band.odd { fill: #e5e7eb; } .atp-band.even { fill: #f3f4f6; }

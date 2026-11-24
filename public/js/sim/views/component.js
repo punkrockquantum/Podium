@@ -5,8 +5,9 @@ import { costCapCHF } from "../../customer.js"
 import { el, clear, fmt } from "../dom.js"
 import { gauge, bar, badge, flagRow, stat } from "../widgets.js"
 import { computeScene, facilityScene, tracksideScene, sceneCard } from "../scenes.js"
-import { controlsSection, seasonCols, roleStrip } from "./common.js"
+import { controlsSection, seasonCols, roleStrip, SEASONS } from "./common.js"
 import { atpCalendar, shutdowns, fmtDate } from "../timeline.js"
+import { architecture, rackLayout } from "../diagrams.js"
 
 const COOLING_LABEL = { air: "air", reardoor: "rear-door", dlc: "direct liquid" }
 
@@ -31,6 +32,7 @@ export const COMPONENTS = {
       dr: "Power and cooling for the density chosen, cross-connects to the fabric, Remote Hands for swaps inside a period.",
       hpe: "The cluster itself: delivery (4–8 weeks GreenLake, 10–18 weeks purchase), buffer nodes, Tech Care support, refresh cadence.",
     },
+    diagram: { id: "architecture", title: "Architecture", subtitle: "What runs where in the chosen season: nodes, GPU partition, fabric, storage, the fibre to Hinwil and the campus services around the cage.", render: (sim, year) => architecture(sim, { year }) },
     outputs: computeOutputs,
   },
   facility: {
@@ -42,6 +44,7 @@ export const COMPONENTS = {
       dr: "Suite or cage, power whips, rear-door or liquid rows, 2N UPS / N+2 cooling, PUE, renewable supply and heat reuse.",
       hpe: "Rack density and cooling requirements of the configuration; CDUs for a liquid partition.",
     },
+    diagram: { id: "racks", title: "Rack layout", subtitle: "The room in the chosen season: cluster racks filled to their load, cooling per rack, A/B feeds, the rest of the estate and the expansion rows.", render: (sim, year) => rackLayout(sim, { year }) },
     outputs: facilityOutputs,
   },
   connectivity: {
@@ -62,17 +65,42 @@ export function componentView(id, ctx) {
   const cfg = COMPONENTS[id]
   const controls = controlsSection(cfg.groups, ctx, { title: `${cfg.title} · controls`, subtitle: "2027 on the left of each row; 2028 follows 2027 until you change it for 2028." })
   const outputs = el("div", { class: "outputs", id: `outputs-${id}`, "aria-live": "polite" })
+  const diagram = cfg.diagram ? diagramCard(cfg.diagram) : null
   const node = el("div", { class: `view view-${id}` },
     el("div", { class: "view-head" }, el("h2", {}, cfg.title), el("p", { class: "card-sub" }, cfg.subtitle)),
     roleStrip(cfg.strip),
+    diagram ? diagram.node : null,
     el("div", { class: "view-layout" }, controls.node, outputs))
   return {
     node,
     update(state) {
       controls.sync(state)
+      diagram?.update(state)
       clear(outputs).append(...[cfg.outputs(state.result, ctx)].flat())
     },
   }
+}
+
+/** A full-width card with one SVG diagram and a 2027 | 2028 switch; the chosen season sticks while the page is open. */
+function diagramCard({ id, title, subtitle, render }) {
+  let season = 2027
+  let last = null
+  const host = el("div", { class: "diagram-host", id: `diagram-${id}` })
+  const note = el("span", { class: "muted small", id: `diagram-${id}-note` })
+  const toggle = el("div", { class: "segmented diagram-seasons", role: "group", "aria-label": `${title}: season shown` },
+    ...SEASONS.map((y) => el("button", { type: "button", class: "seg", dataset: { season: String(y) }, "aria-pressed": y === season ? "true" : "false", onclick: () => { season = y; if (last) draw(last) } }, String(y))))
+  const node = el("section", { class: "card diagram-card", id: `card-${id}` },
+    el("div", { class: "card-head row" }, el("div", {}, el("h3", {}, title), el("p", { class: "card-sub" }, subtitle)), el("div", { class: "diagram-controls" }, note, toggle)))
+  node.append(host)
+  function draw(state) {
+    last = state
+    for (const b of toggle.children) b.setAttribute("aria-pressed", Number(b.dataset.season) === season ? "true" : "false")
+    const sim = state.result.seasons[season].sim
+    clear(host).append(render(sim, season))
+    const changed = state.result.deltas.changed.length
+    note.textContent = changed ? `${changed} control${changed === 1 ? "" : "s"} differ in 2028` : "2028 inherits 2027"
+  }
+  return { node, update: draw }
 }
 
 // ---------------------------------------------------------------------------------------------
