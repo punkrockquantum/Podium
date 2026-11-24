@@ -1,11 +1,11 @@
 import * as C from "/js/catalog.js"
-import { LAPS, RACE_POINT_MULT, RACE_SECONDS } from "/js/race.js"
-import { readoutFor } from "/js/report.js"
+import { LAPS, RACE_SECONDS } from "/js/race.js"
+import { readoutFor, finaleSummary } from "/js/report.js"
 import { readoutCard } from "/js/readoutview.js"
 import { miniFit } from "/js/board.js"
-import { podiumGraphic } from "/js/podium.js"
-import { approvedStations } from "/js/approval.js"
-import { raceSeconds } from "/js/model.js"
+import { finaleGraphic } from "/js/podium.js"
+import { designStatus, STATUS_LABEL } from "/js/approval.js"
+import { raceSeconds, boardFor } from "/js/model.js"
 import { CAR_PATH, CAR_VIEWBOX } from "/js/scene.js"
 import { phaseOf, phaseInfo, phaseRemainingMs, playOpen } from "/js/session.js"
 import { COTA_PATH_D, COTA_VIEWBOX, COTA_TURNS, COTA_FACTS } from "/js/cota.js"
@@ -18,7 +18,6 @@ const lapBox = document.getElementById("lap")
 const sub = document.getElementById("sub")
 const params = new URLSearchParams(location.search)
 const FACT_EVERY_S = 6
-const CYCLE_MS = 20_000
 /** Where the pit lane leaves the track (fraction of the lap); it rejoins at the start/finish line. */
 const PIT_IN = 0.955
 const teamParam = params.get("team")
@@ -31,9 +30,6 @@ let anim = null
 let shownSeed = null
 let viewKey = ""
 let gameId = null
-let held = null
-let cycleIndex = 0
-let cycleAt = Date.now()
 
 watchState((next, off) => {
   state = next
@@ -43,17 +39,14 @@ watchState((next, off) => {
     sub.textContent = "Reconnecting to the game server"
     return
   }
-  /* A restarted game: stay on the projector and start again from the empty ladder. */
-  if (gameId && state.id !== gameId) {
-    held = null
-    cycleIndex = 0
-    viewKey = ""
-  }
+  /* A restarted game: stay on the projector and start again from the ladder at 0.00 s. */
+  if (gameId && state.id !== gameId) viewKey = ""
   gameId = state.id
   render()
 }, 1500)
 
-const shortLabel = (name) => (name.length > 12 ? `${name.slice(0, 11)}…` : name)
+/** The one participant: the customer's team, created by the server. */
+const customer = () => state?.teams?.find((t) => t.id === C.CUSTOMER_TEAM.id) || state?.teams?.[0] || null
 
 function toast(text) {
   const node = el("div", { class: "toast" }, text)
@@ -71,7 +64,7 @@ function render() {
       if (animatable) return startRace()
     }
     if (anim) return
-    return phase === "readout" ? renderReadouts() : renderResults()
+    return phase === "readout" ? renderReadout() : renderResults()
   }
   shownSeed = null
   if (anim) cancelAnimationFrame(anim.frame)
@@ -96,33 +89,39 @@ setInterval(() => {
     const info = phaseHeader()
     const big = document.getElementById("phaseClock")
     if (big) big.textContent = lapBox.textContent
-    if (!teamParam && phaseOf(state) === "readout" && !held && Date.now() - cycleAt > CYCLE_MS) {
-      cycleIndex += 1
-      cycleAt = Date.now()
-      viewKey = ""
-      renderReadouts()
-    }
     if (info && sub.dataset.phase !== info.id) render()
   } catch (err) {
     console.error("[podium] race clock", err)
   }
 }, 250)
 
-/* ------------------------------------------------------------ before the race: phase, countdown, standings */
+/* ------------------------------------------------------------ before the race: phase, countdown, the ladder */
 
-function liveRows() {
+/**
+ * The lap-time ladder before the race: the customer's 2027 plan (the approved tables added up),
+ * then each of the four tables on its own, then today's Hinwil setup at 0.00 s. A table's car
+ * only moves off the line once its SA has approved the design.
+ */
+function ladderRows() {
   const ids = state.settings.stations
-  return state.teams.map((t) => {
-    const approved = approvedStations(t, ids)
-    const points = approved.reduce((sum, id) => sum + (t.pitch?.[id] || 0), 0)
-    const waiting = ids.filter((id) => t.plans?.[id] && !approved.includes(id)).length
-    const fits = ids.map((id) => ({ id, approved: approved.includes(id), fit: t.plans?.[id]?.fit, status: t.plans?.[id]?.status }))
-    const seconds = raceSeconds(t, state.settings.budget, ids)
-    return { t, approved: approved.length, waiting, points, fits, seconds }
-  }).sort((a, b) => b.seconds - a.seconds || b.points - a.points || a.t.name.localeCompare(b.t.name))
+  const team = customer()
+  const budget = state.settings.budget
+  const tables = ids.map((id) => {
+    const station = C.byId(C.STATIONS, id)
+    const d = designStatus(state, team, id)
+    const approved = d.status === "approved"
+    const plan = d.plan
+    const seconds = approved && plan ? (Number.isFinite(plan.board?.seconds) ? plan.board.seconds : boardFor(id, plan.choices, plan.budget || budget).seconds) : 0
+    const label = d.attempts ? `${STATUS_LABEL[d.status]} · ${WORDS.attempt(d.attempts).toLowerCase()}` : STATUS_LABEL[d.status]
+    return { id, name: station.name, color: station.color, seconds, approved, label, fits: [{ id, approved, fit: plan?.fit, status: plan?.status }] }
+  })
+  const approved = tables.filter((t) => t.approved).length
+  const plan = { id: "plan", name: `${team?.name || C.CUSTOMER_TEAM.name} · ${WORDS.plan2027}`, color: team?.color || C.CUSTOMER_TEAM.color, seconds: team ? raceSeconds(team, budget, ids) : 0, approved: approved > 0, label: `${approved} of ${ids.length} tables approved`, fits: tables.map((t) => t.fits[0]), total: true }
+  const today = { id: C.FINALE_ENTRANTS.today.id, name: WORDS.todayHinwil, color: C.FINALE_ENTRANTS.today.color, seconds: 0, approved: false, label: "The ghost car: 0.00 s at every table", fits: [], total: true }
+  return [plan, ...tables, today]
 }
 
-/* The lap-time ladder: one car per team, as far right as the seconds its approved tables found. */
+/* The lap-time ladder: one car per row, as far right as the seconds per lap it has found. */
 const LADDER_MAX = 1.4
 const LANE_PX = 46
 let ladder = null
@@ -139,17 +138,16 @@ function buildLadder(rows) {
   const body = el("div", { class: "ladder-body", style: `height:${rows.length * LANE_PX}px` })
   for (const r of rows) {
     const sec = el("b", { class: "lane-sec" })
-    const car = el("div", { class: "lane-car" }, carIcon(r.t.color))
-    const pos = el("span", { class: "lane-pos" })
-    const name = el("span", { class: "lane-name" })
-    const gauges = el("span", { class: "fits lane-gauges", "data-team": r.t.id })
-    const points = el("b", { class: "lane-pts" })
-    const lane = el("div", { class: "lane", "data-team": r.t.id, style: `--c:${r.t.color}` }, pos, name, el("div", { class: "lane-track" }, car), sec, gauges, points)
+    const car = el("div", { class: "lane-car" }, carIcon(r.color))
+    const name = el("span", { class: "lane-name" }, r.name)
+    const gauges = el("span", { class: "fits lane-gauges", "data-lane": r.id })
+    const status = el("span", { class: "lane-status small" })
+    const lane = el("div", { class: `lane${r.total ? " total" : ""}`, "data-lane": r.id, style: `--c:${r.color}` }, name, el("div", { class: "lane-track" }, car), sec, gauges, status)
     body.append(lane)
-    lanes.set(r.t.id, { lane, car, sec, pos, name, gauges, points, gaugeKey: "" })
+    lanes.set(r.id, { lane, car, sec, name, gauges, status, gaugeKey: "" })
   }
-  const axis = el("div", { class: "ladder-axis" }, el("span", {}), el("span", {}),
-    el("div", { class: "axis-track" }, [0, 0.35, 0.7, 1.05, 1.4].map((v) => el("span", { style: `--p:${v / LADDER_MAX}` }, `${v.toFixed(2)} s`))), el("span", {}, "Found"), el("span", {}, "Tables"), el("span", {}, "Pts"))
+  const axis = el("div", { class: "ladder-axis" }, el("span", {}),
+    el("div", { class: "axis-track" }, [0, 0.35, 0.7, 1.05, 1.4].map((v) => el("span", { style: `--p:${v / LADDER_MAX}` }, `${v.toFixed(2)} s`))), el("span", {}, "Found"), el("span", {}, "FIT"), el("span", {}, "Status"))
   const node = el("div", { class: "ladder", id: "lapLadder" }, axis, body)
   ladder = { node, lanes }
   updateLadder(rows)
@@ -158,11 +156,10 @@ function buildLadder(rows) {
 
 function updateLadder(rows) {
   rows.forEach((r, i) => {
-    const l = ladder.lanes.get(r.t.id)
+    const l = ladder.lanes.get(r.id)
     if (!l) return
     l.lane.style.transform = `translateY(${i * LANE_PX}px)`
-    l.pos.textContent = String(i + 1)
-    l.name.replaceChildren(r.t.name, r.waiting ? el("small", {}, ` +${r.waiting} waiting`) : "")
+    l.lane.classList.toggle("approved", r.approved)
     l.car.style.setProperty("--p", Math.min(1, r.seconds / LADDER_MAX).toFixed(3))
     l.car.dataset.seconds = r.seconds.toFixed(2)
     l.sec.textContent = r.seconds > 0 ? `−${r.seconds.toFixed(2)} s` : "0.00 s"
@@ -171,7 +168,7 @@ function updateLadder(rows) {
       l.gaugeKey = gaugeKey
       l.gauges.replaceChildren(...r.fits.map((f) => miniFit(f.fit, { status: f.status, grey: !f.approved, size: 30, title: `${C.byId(C.STATIONS, f.id).name}: ${Number.isFinite(f.fit) ? `FIT ${f.fit}` : "not all locked"}${f.approved ? "" : " · not approved"}` })))
     }
-    l.points.textContent = String(r.points)
+    l.status.textContent = r.label
   })
 }
 
@@ -179,7 +176,7 @@ function runRacePanel() {
   const password = el("input", { type: "password", id: "racePassword", placeholder: WORDS.racePassword, autocomplete: "off", maxlength: 64 })
   const go = async () => {
     if (!password.value) return toast(`Enter the ${WORDS.racePassword.toLowerCase()}`)
-    if (playOpen(state) && !(await confirmDialog("Run the race now? Play ends for every table, and tables not approved race on the customer's existing setup.", WORDS.runRace))) return
+    if (playOpen(state) && !(await confirmDialog("Run the race now? Play ends for every table, and tables not approved race on today's Hinwil setup.", WORDS.runRace))) return
     try {
       await post("/api/race/run", { password: password.value }, false)
     } catch (err) {
@@ -190,26 +187,26 @@ function runRacePanel() {
   password.addEventListener("keydown", (e) => e.key === "Enter" && go())
   return el("div", { class: "panel", id: "runRacePanel" }, el("h3", {}, WORDS.runRace),
     el("div", { class: "row" }, password, el("button", { class: "btn primary", id: "runRaceBtn", onclick: go }, WORDS.runRace),
-      el("span", { class: "small muted" }, "The race password is the host PIN. The race can run at any time, with or without a timer.")))
+      el("span", { class: "small muted" }, `The race password is the host PIN. ${C.FINALE.laps} laps: the ${WORDS.plan2027} against ${WORDS.vsToday}, at any time, with or without a timer.`)))
 }
 
 function renderWaiting() {
   const info = phaseHeader()
   sub.dataset.phase = info.id
   sub.textContent = info.line
-  const rows = liveRows()
-  const skeleton = JSON.stringify(["wait", info.id, state.teams.map((t) => [t.id, t.name, t.color])])
+  const team = customer()
+  const rows = ladderRows()
+  const skeleton = JSON.stringify(["wait", info.id, team && [team.id, team.name, team.color], state.settings.stations])
   if (skeleton === viewKey && ladder && document.getElementById("lapLadder")) return updateLadder(rows)
   if (document.activeElement?.id === "racePassword") return
   viewKey = skeleton
   ladder = null
-  const standings = rows.length ? buildLadder(rows) : null
   app.replaceChildren(el("div", { class: "projector" },
     el("div", { class: "panel phase-panel" }, el("div", { class: "phase-name" }, info.name),
       info.id === "open" ? null : el("div", { class: "phase-clock", id: "phaseClock" }, lapBox.textContent), el("p", { class: "muted" }, info.line)),
-    el("div", { class: "panel" }, el("h2", {}, "Lap-time ladder"), el("p", { class: "small muted" }, `Each car sits at the seconds per lap its approved tables have found (${WORDS.todaySetup.toLowerCase()} finds 0.00 s). Four FIT gauges per team, grey until approved. The race runs on these seconds plus incidents.`),
-      standings || el("div", { class: "empty-state", id: "noTeams" }, el("b", {}, "No teams yet"), el("p", { class: "muted" }, "Teams add themselves on the table iPads. Each one gets a car here the moment it joins."))),
-    rows.length ? runRacePanel() : null))
+    el("div", { class: "panel" }, el("h2", {}, `Lap-time ladder · ${team?.name || C.CUSTOMER_TEAM.name}`), el("p", { class: "small muted" }, `Each table's car sits at the seconds per lap its approved design found; the ${WORDS.plan2027} adds them up and races against ${WORDS.vsToday}, which finds 0.00 s. FIT gauges are grey until the SA approves. The race runs on these seconds plus incidents.`),
+      buildLadder(rows)),
+    runRacePanel()))
 }
 
 /* ------------------------------------------------------------ COTA */
@@ -278,7 +275,7 @@ function startRace() {
     const g = svgNode("g", { class: "car", "data-team": r.id })
     g.append(svgNode("circle", { r: 9, fill: r.color, stroke: "#000", "stroke-width": 3 }))
     const label = svgNode("text", { x: 13, y: -10, fill: "#fff", "font-size": 13, "font-weight": 800, stroke: "#000", "stroke-width": 3, "paint-order": "stroke" })
-    label.textContent = shortLabel(r.name)
+    label.textContent = r.short || r.name
     g.append(label)
     svg.append(g)
     return [r.id, g]
@@ -289,9 +286,9 @@ function startRace() {
   const progressBar = el("i", {})
   app.replaceChildren(el("div", { class: "race-wrap" },
     el("div", {}, el("div", { class: "panel track-panel", id: "trackPanel" }, svg, el("div", { class: "race-progress" }, progressBar)), el("div", { class: "panel", style: "margin-top:12px" }, el("h3", { style: "margin-bottom:6px" }, "Race control"), ticker)),
-    el("div", {}, el("div", { class: "panel" }, el("h3", { style: "margin-bottom:8px" }, "Timing"), tower), el("div", { class: "row", style: "margin-top:10px" }, button("Skip to the podium", () => finish())))))
+    el("div", {}, el("div", { class: "panel" }, el("h3", { style: "margin-bottom:8px" }, "Timing"), tower), el("div", { class: "row", style: "margin-top:10px" }, button("Skip to the result", () => finish())))))
   sub.dataset.phase = "race"
-  sub.textContent = `Lights out at the ${C.FINALE.race}!`
+  sub.textContent = `Lights out at the ${C.FINALE.race}: the ${WORDS.plan2027} against ${WORDS.vsToday}!`
   const raceEnd = Math.max(...rows.map((r) => r.total))
   const leaderEnd = rows[0].total
   const shown = new Set()
@@ -335,7 +332,7 @@ function startRace() {
       const key = order.map((x) => `${x.r.id}:${gapOf(x).toFixed(1)}:${x.at.pit}`).join("|")
       if (key !== towerKey) {
         towerKey = key
-        tower.replaceChildren(...order.map((x, i) => el("div", {}, el("span", {}, i + 1), el("i", { style: `background:${x.r.color}` }), el("span", { class: "tname" }, x.r.name), el("span", {}, x.at.pit ? "PIT" : i === 0 ? "Leader" : `+${Math.max(0, gapOf(x)).toFixed(1)}s`))))
+        tower.replaceChildren(...order.map((x, i) => el("div", {}, el("span", {}, i + 1), el("i", { style: `background:${x.r.color}` }), el("span", { class: "tname" }, x.r.short || x.r.name), el("span", {}, x.at.pit ? "PIT" : i === 0 ? "Leader" : `+${Math.max(0, gapOf(x)).toFixed(1)}s`))))
       }
       for (const [n, ev] of result.events.entries()) {
         if (shown.has(n) || ev.lap > lap || ev.lap === LAPS) continue
@@ -364,48 +361,49 @@ function finish() {
   render()
 }
 
-/* ------------------------------------------------------------ podium and classification */
+/* ------------------------------------------------------------ the result: plan against today, then the readout */
+
+/** The customer's readout card for the finished race (the team as it is now, the race as it ran). */
+function customerReadout() {
+  const team = customer()
+  return team ? readoutCard(readoutFor(team, state.race.result, state.settings.stations, state.race.budget || state.settings.budget)) : null
+}
 
 function renderResults() {
   const result = state.race.result
-  const key = `results-${state.race.seed}-${state.teams.length}`
+  const team = customer()
+  const key = `results-${state.race.seed}-${team?.id}`
   if (viewKey === key) return
   viewKey = key
   lapBox.textContent = "FLAG"
   sub.dataset.phase = "race"
-  sub.textContent = `Chequered flag at the ${C.FINALE.race}. Readouts are next.`
+  const finale = finaleSummary(result)
+  sub.textContent = `Chequered flag at the ${C.FINALE.race}: the ${WORDS.plan2027} ${finale.ahead ? `beats ${WORDS.vsToday} by ${finale.gap.toFixed(1)} s` : `finishes ${Math.abs(finale.gap).toFixed(1)} s behind ${WORDS.vsToday}`}.`
+  const ids = state.settings.stations
   const classification = el("table", { class: "grid", id: "classification" },
-    el("thead", {}, el("tr", {}, ["Pos", "Team", "Gap", "Tables", "Race", "Table pts", "Penalties", "Points"].map((h) => el("th", {}, h)))),
-    el("tbody", {}, result.results.map((r) => el("tr", {},
+    el("thead", {}, el("tr", {}, ["Pos", "Car", "Gap", "Tables approved", "Found per lap", "Best lap", "Pit stop", "Penalties"].map((h) => el("th", {}, h)))),
+    el("tbody", {}, result.results.map((r) => el("tr", { "data-car": r.id },
       el("td", {}, r.position), el("td", {}, el("b", { style: `color:${r.color}` }, r.name), r.id === result.fastestLap ? " ⏱" : ""),
-      el("td", {}, r.position === 1 ? "Winner" : `+${r.gap.toFixed(1)}s`),
-      el("td", {}, `${state.settings.stations.length - r.missed.length - r.notApproved.length}/${state.settings.stations.length}`),
-      el("td", {}, `${r.racePoints} × ${RACE_POINT_MULT}`), el("td", {}, r.pitch), el("td", {}, r.penaltyPoints ? `−${r.penaltyPoints}` : "—"), el("td", {}, el("b", {}, r.score))))))
-  app.replaceChildren(el("div", { class: "race-report" }, podiumGraphic(result),
-    el("div", { class: "panel" }, el("h2", { style: "margin-bottom:8px" }, `${C.FINALE.race} classification`), el("div", { class: "table-scroll" }, classification))))
+      el("td", {}, r.position === 1 ? `Winner · ${result.laps} laps` : `+${r.gap.toFixed(1)} s`),
+      el("td", {}, `${ids.length - r.missed.length - r.notApproved.length}/${ids.length}`),
+      el("td", {}, `${r.found.toFixed(2)} s`), el("td", {}, `${r.bestLap.toFixed(3)} s`), el("td", {}, r.pitLap ? `lap ${r.pitLap}` : "—"), el("td", {}, r.timePenalty ? `+${r.timePenalty.toFixed(1)} s` : "—")))))
+  app.replaceChildren(el("div", { class: "race-report" }, finaleGraphic(result),
+    el("div", { class: "panel" }, el("h2", { style: "margin-bottom:8px" }, `${C.FINALE.race} classification`), el("div", { class: "table-scroll" }, classification)),
+    customerReadout()))
 }
 
-/* ------------------------------------------------------------ readouts */
-
-function readoutChooser(active) {
-  return el("div", { class: "readout-chooser", id: "readoutChooser" },
-    state.race.result.standings.map((s) => el("button", { class: `chooser-chip${s.id === active ? " on" : ""}`, "data-team": s.id, style: `--c:${s.color}`, onclick: () => { held = s.id; viewKey = ""; renderReadouts() } }, s.name)),
-    held ? button("Cycle", () => { held = null; cycleAt = Date.now(); viewKey = ""; renderReadouts() }, { small: true }) : el("span", { class: "muted small" }, `Cycling every ${CYCLE_MS / 1000} s · tap a team to hold`))
-}
-
-function renderReadouts() {
-  const standings = state.race.result.standings
-  const id = held || standings[cycleIndex % standings.length]?.id
-  const team = state.teams.find((t) => t.id === id)
-  const key = `readout-${state.race.seed}-${id}-${Boolean(held)}`
+/** The readout phase: the customer's single readout, full screen, ready for a screenshot. */
+function renderReadout() {
+  const team = customer()
+  const key = `readout-${state.race.seed}-${team?.id}`
   if (!team || viewKey === key) return
   viewKey = key
   sub.dataset.phase = "readout"
-  sub.textContent = "Readouts: what went well and what to do differently"
-  app.replaceChildren(el("div", { class: "readout-page" }, readoutChooser(id), readoutCard(readoutFor(team, state.race.result, state.settings.stations, state.race.budget || state.settings.budget))))
+  sub.textContent = `${team.name} readout: what went well and what to do differently`
+  app.replaceChildren(el("div", { class: "readout-page single" }, customerReadout()))
 }
 
-/** race.html?team=<id>: one team's readout on one screen, for a screenshot. */
+/** race.html?team=t1: the customer's readout on one screen, for a screenshot (any other id says so). */
 function renderTeamReadout() {
   const team = state.teams.find((t) => t.id === teamParam)
   const phase = phaseOf(state)
@@ -416,11 +414,11 @@ function renderTeamReadout() {
   viewKey = key
   if (!team) {
     sub.textContent = "Readout"
-    return app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "state-banner info" }, "That team is not in this game.")))
+    return app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "state-banner info" }, `There is no team "${teamParam}" in this game: the readout is at /race.html?team=${C.CUSTOMER_TEAM.id}.`)))
   }
   if (!state.race) {
     sub.textContent = `${team.name} readout`
-    return app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "state-banner info" }, `${team.name}: your readout appears here after the race. Now: ${info.name}.`)))
+    return app.replaceChildren(el("div", { class: "workspace-single" }, el("div", { class: "state-banner info" }, `${team.name}: the readout appears here after the race. Now: ${info.name}.`)))
   }
   sub.textContent = `${team.name} readout · ${C.FINALE.race}`
   app.replaceChildren(el("div", { class: "readout-page single" }, readoutCard(readoutFor(team, state.race.result, state.settings.stations, state.race.budget || state.settings.budget))))

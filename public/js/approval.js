@@ -79,7 +79,7 @@ export function ghostsAt(team, stationId) {
   return team?.previous?.[stationId] || {}
 }
 
-/** Counts per status across every team and table in play, plus the per-team rows for the grid. */
+/** Counts per status across the customer's tables in play, plus one row per team in the state (one: the customer). */
 export function approvalGrid(state) {
   const stations = state?.settings?.stations || []
   const counts = Object.fromEntries(STATUS_ORDER.map((s) => [s, 0]))

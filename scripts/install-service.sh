@@ -1,6 +1,6 @@
 #!/bin/bash
 # Keep Podium running on this Mac: installs a per-user launchd LaunchAgent that starts the
-# server at login and restarts it within seconds if it stops. Localhost only, port 8080.
+# server at login and restarts it within seconds if it stops. Localhost only, port 8090.
 # Usage: sh scripts/install-service.sh        (re-run after moving the folder or changing Node)
 #
 # PINs: HOST_PIN, LEADER_PIN and RACE_PIN are written into the LaunchAgent's EnvironmentVariables.
@@ -12,7 +12,7 @@ set -euo pipefail
 LABEL="com.podium.server"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-PORT="${PORT:-8080}"
+PORT="${PORT:-8090}"
 LOGS="$ROOT/data/logs"
 DOMAIN="gui/$(id -u)"
 

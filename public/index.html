@@ -2,47 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta http-equiv="refresh" content="0; url=/sim.html" />
+  <title>Audi F1 Team × Digital Realty — Infrastructure performance simulator</title>
   <link rel="icon" href="data:," />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Podium · F1 Infrastructure Strategy</title>
-  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="stylesheet" href="/css/sim.css" />
 </head>
-<body>
-  <header class="topbar"><div class="brand"><b>PODIUM</b> 2027</div><div class="station-title"><h1>F1 Infrastructure Strategy</h1><span>FIA 2027 Infrastructure Specification · Issue 01</span></div></header>
-  <main class="home">
-    <section class="home-tables">
-      <h1>Pick your table</h1>
-      <p class="muted">Four tables, one customer problem each. Tap the table you are sitting at. Nothing to set up: the game is open.</p>
-      <div class="tiles" id="stations"></div>
-    </section>
-    <section>
-      <h2>How to play</h2>
-      <ol class="home-how" id="howToPlay">
-        <li><b>Add your team:</b> type a name, tap once. At every other table, tap your team in the list.</li>
-        <li><b>Brief:</b> read it together. It holds every number you need.</li>
-        <li><b>Tune:</b> three dials. Each choice locks the moment you tap it, so decide first.</li>
-        <li><b>Pitch:</b> Call the Solutions Architect. Approved tables find seconds per lap for the race.</li>
-      </ol>
-    </section>
-    <nav class="home-links" aria-label="Run the room">
-      <a href="/race.html" id="projectorLink">Projector</a>
-      <a href="/host.html" id="hostLink">Host controls and Solutions Architects</a>
-      <button class="btn small-btn" data-role="team">Full instructions</button>
-    </nav>
+<body class="sim-page">
+  <main class="loading" id="entry">
+    <p>Opening the <a href="/sim.html" id="sim-link">infrastructure performance simulator</a>…</p>
+    <p class="small"><a href="/case.html">Business case: Hinwil vs Digital Realty Zurich</a></p>
   </main>
   <script>
-    if (location.protocol === "file:") document.body.innerHTML = '<div style="font:18px/1.5 -apple-system,sans-serif;max-width:640px;margin:12vh auto;padding:24px;color:#eee;background:#15171c;border-radius:12px"><h1 style="margin-top:0">Podium needs its server</h1><p>This page was opened as a file, so the game cannot load.</p><p>In Finder, double-click <b>start.command</b> in the Podium folder (or run <code>npm start</code> in Terminal), then open <a style="color:#4cc9f0" href="http://localhost:8080/">http://localhost:8080/</a>.</p></div>'
-  </script>
-  <script type="module">
-    import { STATIONS } from "/js/catalog.js"
-    import { el, openInstructions, installErrorLogging } from "/js/ui.js"
-    installErrorLogging("home")
-    for (const b of document.querySelectorAll("[data-role]")) b.addEventListener("click", () => openInstructions(b.dataset.role))
-    const box = document.getElementById("stations")
-    for (const s of STATIONS) box.append(el("a", { class: "tile", href: `/station.html?station=${s.id}`, style: `--c:${s.color}`, "data-station": s.id }, el("b", {}, s.name), el("span", {}, s.problem)))
+    if (location.protocol === "file:") {
+      document.getElementById("entry").innerHTML = "<p>This page must be served by the local server. In Finder, double-click <b>start.command</b> in the Podium folder (or run <code>npm start</code> in Terminal), then open <a href=\"http://localhost:8090/\">http://localhost:8090/</a>.</p>"
+    } else {
+      location.replace("/sim.html" + location.hash)
+    }
   </script>
 </body>
 </html>

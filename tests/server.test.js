@@ -5,7 +5,8 @@ import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createApp, DEFAULT_PINS, PIN_NAMES, resolvePins, pinSummary } from "../server.mjs"
-import { TEAM_COLORS, TEAM_NAME_MAX, tablePoints, decisionsFor } from "../public/js/catalog.js"
+import { CUSTOMER_TEAM, FINALE_ENTRANTS, MAX_TEAMS, tablePoints, decisionsFor } from "../public/js/catalog.js"
+import { CUSTOMER } from "../public/js/customer.js"
 import { boardFor } from "../public/js/model.js"
 import { tableStory } from "../public/js/report.js"
 import { phaseOf } from "../public/js/session.js"
@@ -13,6 +14,8 @@ import { pick } from "./routes.js"
 
 const PINS = { host: "host-test", leader: "arch-test", race: "race-test" }
 const ENV = { HOST_PIN: PINS.host, LEADER_PIN: PINS.leader, RACE_PIN: PINS.race }
+/** The one participant, as every game must carry it. */
+const T1 = CUSTOMER_TEAM.id
 let server
 let base
 let dir
@@ -46,18 +49,12 @@ async function call(path, body, pin, station, ip) {
   return { status: res.status, json, text }
 }
 const host = (path, body) => call(path, body, PINS.host)
-const addTeam = (name, ip) => call("/api/teams", { name }, null, null, ip)
-/** A brand-new empty game (the host's Restart), then teams adding themselves with no PIN. Returns the teams. */
-async function newGame(...names) {
+/** A brand-new game (the host's Restart the experience). Returns the customer's team, which the server creates itself. */
+async function newGame() {
   const reset = await host("/api/host/reset", {})
   assert.equal(reset.status, 200)
-  const teams = []
-  for (const name of names) {
-    const made = await addTeam(name)
-    assert.equal(made.status, 201, JSON.stringify(made.json))
-    teams.push(made.json.team)
-  }
-  return teams
+  assert.deepEqual(reset.json.teams.map((t) => t.id), [T1], "a new game holds exactly the customer")
+  return reset.json.teams[0]
 }
 const readBrief = (teamId, station) => call(`/api/teams/${teamId}/brief`, { station })
 const tap = (teamId, station, choices) => call(`/api/teams/${teamId}/choices`, { station, choices })
@@ -70,8 +67,20 @@ async function lockAll(teamId, station) {
 const teamOf = (json, id) => json.teams.find((t) => t.id === id)
 const stateNow = async () => (await call("/api/state")).json
 const timer = (body) => host("/api/host/timer", body)
+/** The approved design at a table: lock, call the SA, pitch, approve. Returns the decide response. */
+async function approve(teamId, station) {
+  await readBrief(teamId, station)
+  await lockAll(teamId, station)
+  assert.equal((await call(`/api/teams/${teamId}/call`, { station })).status, 200)
+  assert.equal((await call("/api/architect/pitch", { station, action: "start", team: teamId }, PINS.leader, station)).status, 200)
+  const ok = await call("/api/architect/decide", { station, team: teamId, decision: "approve" }, PINS.leader, station)
+  assert.equal(ok.status, 200)
+  return ok
+}
+/** The two-car finale as a map id → classification row. */
+const rowsOf = (race) => Object.fromEntries(race.result.results.map((r) => [r.id, r]))
 
-test("a fresh game is open at once: with no host action a team adds itself, reads the brief and locks a dial", async () => {
+test("a fresh game holds the customer at once: with no host action the table reads the brief and locks a dial", async () => {
   const other = await mkdtemp(join(tmpdir(), "podium-fresh-"))
   const fresh = createApp({ dataDir: other, env: ENV })
   const srv = createServer(fresh.handle)
@@ -84,24 +93,25 @@ test("a fresh game is open at once: with no host action a team adds itself, read
   try {
     const health = await (await fetch(`${url}/api/health`)).json()
     assert.equal(health.phase, "open", "a new game is open, untimed play")
-    assert.equal(health.teams, 0)
+    assert.equal(health.teams, 1, "the customer is there before anyone does anything")
+    assert.equal(health.customer, CUSTOMER.team.name)
     const s = fresh.getState()
     assert.equal(s.clock.status, "open")
     assert.equal(s.clock.endsAt, null, "nothing expires")
     assert.equal(s.settings.budget, "standard", "the budget level is Standard with no action needed")
     assert.equal(s.brief, undefined, "the host-run brief phase is gone")
-    const made = await post("/api/teams", { name: "  Walk Ins  " })
-    assert.equal(made.status, 201)
-    assert.equal(made.json.team.name, "Walk Ins", "the name is trimmed")
-    assert.equal(made.json.team.id, "t1")
-    assert.equal(made.json.team.color, TEAM_COLORS[0])
-    for (const key of ["briefRead", "attempts", "previous", "plans", "reviews", "choices"]) assert.deepEqual(made.json.team[key], {}, `a new team has an empty ${key}`)
-    assert.equal((await post("/api/teams/t1/checkin", { station: "network" })).status, 200, "check-in needs no host")
-    const early = await post("/api/teams/t1/choices", { station: "network", choices: { link: "redundant" } })
-    assert.equal(early.status, 409, "the brief gate is the team's own and still server-enforced")
+    assert.equal(MAX_TEAMS, 1)
+    assert.equal(s.teamSeq, 1)
+    const [team] = s.teams
+    assert.deepEqual([team.id, team.name, team.color], [T1, CUSTOMER.team.name, CUSTOMER.team.color], "the customer's team comes from customer.js")
+    assert.deepEqual([CUSTOMER_TEAM.id, CUSTOMER_TEAM.name, CUSTOMER_TEAM.color], ["t1", CUSTOMER.team.name, CUSTOMER.team.color])
+    for (const key of ["briefRead", "attempts", "previous", "plans", "reviews", "choices"]) assert.deepEqual(team[key], {}, `the new customer has an empty ${key}`)
+    assert.equal((await post(`/api/teams/${T1}/checkin`, { station: "network" })).status, 200, "check-in needs no host")
+    const early = await post(`/api/teams/${T1}/choices`, { station: "network", choices: { link: "redundant" } })
+    assert.equal(early.status, 409, "the brief gate is the table's own and still server-enforced")
     assert.match(early.json.error, /Read the brief first/)
-    assert.equal((await post("/api/teams/t1/brief", { station: "network" })).status, 200)
-    assert.equal((await post("/api/teams/t1/choices", { station: "network", choices: { link: "redundant" } })).status, 200, "untimed play accepts choices")
+    assert.equal((await post(`/api/teams/${T1}/brief`, { station: "network" })).status, 200)
+    assert.equal((await post(`/api/teams/${T1}/choices`, { station: "network", choices: { link: "redundant" } })).status, 200, "untimed play accepts choices")
     assert.equal(fresh.getState().teams[0].choices.link, "redundant")
   } finally {
     fresh.close()
@@ -110,89 +120,49 @@ test("a fresh game is open at once: with no host action a team adds itself, read
   }
 })
 
-test("self-registration: names are validated and trimmed, duplicates refused whatever the case, colours in order, ten teams at most", async () => {
-  await newGame()
-  for (const bad of ["", "   ", "\u0000\u0007", null, 7, { name: "x" }, ["x"]]) {
-    const res = await addTeam(bad)
-    assert.equal(res.status, 400, `${JSON.stringify(bad)} is refused`)
-    assert.match(res.json.error, /Type a team name first/)
+test("there is no registration: adding, renaming or removing a team answers 410 with a clear message, whoever asks", async () => {
+  const team = await newGame()
+  for (const body of [{ name: "Walk Ins" }, { name: "Photon Racing" }, {}, null]) {
+    const res = await call("/api/teams", body || { name: "" })
+    assert.equal(res.status, 410, `POST /api/teams ${JSON.stringify(body)}`)
+    assert.match(res.json.error, /one participant, the Audi F1 Team: teams cannot be added, renamed or removed/)
   }
-  const long = await addTeam("x".repeat(TEAM_NAME_MAX + 1))
-  assert.equal(long.status, 400)
-  assert.match(long.json.error, /32 characters or fewer/)
-  assert.equal((await addTeam("y".repeat(TEAM_NAME_MAX))).status, 201, "the limit itself is allowed")
-  const odd = await addTeam("  <b>Rack</b>\u0000 &\tRoll\u200b ")
-  assert.equal(odd.status, 201)
-  assert.equal(odd.json.team.name, "<b>Rack</b> & Roll", "control and invisible characters are stripped, spaces collapsed")
-  const first = await addTeam("Photon Racing")
-  assert.equal(first.status, 201)
-  for (const same of ["Photon Racing", "photon racing", "  PHOTON   RACING "]) {
-    const dup = await addTeam(same)
-    assert.equal(dup.status, 409, `"${same}" is a duplicate`)
-    assert.match(dup.json.error, /already a team called .Photon Racing.\. Pick it from the list/)
+  for (const [body, pin] of [[{ team: T1, action: "rename", name: "Hijacked" }, PINS.host], [{ team: T1, action: "remove" }, PINS.host], [{ team: T1, action: "remove" }, null], [{ team: "t2", action: "rename", name: "X" }, PINS.host]]) {
+    const res = await call("/api/host/team", body, pin)
+    assert.equal(res.status, 410, `POST /api/host/team ${JSON.stringify(body)} with ${pin ? "the host PIN" : "no PIN"}`)
+    assert.match(res.json.error, /cannot be added, renamed or removed/)
   }
-  for (let i = 4; i <= 10; i++) assert.equal((await addTeam(`Team ${i}`)).status, 201)
   const s = await stateNow()
-  assert.equal(s.teams.length, 10)
-  assert.deepEqual(s.teams.map((t) => t.color), TEAM_COLORS, "the ten colours, in order")
-  assert.deepEqual(s.teams.map((t) => t.id), Array.from({ length: 10 }, (_, i) => `t${i + 1}`))
-  assert.ok(s.teams.every((t) => t.tier === undefined), "no per-team tiers")
-  const full = await addTeam("One Too Many")
-  assert.equal(full.status, 409)
-  assert.match(full.json.error, /All 10 team places are taken/)
-  assert.equal((await stateNow()).teams.length, 10)
-
-  /* The host can remove a team (PIN); the freed place and colour go to the next team, with a new id. */
-  assert.equal((await call("/api/host/team", { team: "t3", action: "remove" })).status, 403, "removing a team needs the host PIN")
-  assert.equal((await host("/api/host/team", { team: "t3", action: "remove" })).status, 200)
-  const next = await addTeam("Late Brakers")
-  assert.equal(next.status, 201)
-  assert.equal(next.json.team.id, "t11", "ids are never reused")
-  assert.equal(next.json.team.color, TEAM_COLORS[2], "the freed colour is reused")
+  assert.deepEqual(s.teams.map((t) => [t.id, t.name, t.color]), [[T1, team.name, team.color]], "nothing changed")
+  assert.equal(s.teamSeq, 1)
+  assert.equal((await tap("t2", "dc", { location: "colo" })).status, 404, "there is no second team")
 })
 
-test("team creation is capped per address, and a restart clears the count", async () => {
-  await newGame()
-  const ip = "198.51.100.9"
-  for (let i = 0; i < 30; i++) {
-    const made = await addTeam(`Churn ${i}`, ip)
-    assert.equal(made.status, 201, `team ${i}`)
-    assert.equal((await host("/api/host/team", { team: made.json.team.id, action: "remove" })).status, 200)
-  }
-  const capped = await addTeam("Churn 30", ip)
-  assert.equal(capped.status, 429)
-  assert.match(capped.json.error, /Too many new teams/)
-  assert.equal((await addTeam("Elsewhere", "198.51.100.10")).status, 201, "other addresses are unaffected")
-  await newGame()
-  assert.equal((await addTeam("After restart", ip)).status, 201)
-})
-
-test("host team controls: rename (validated like a new name) and remove (queue, seat and live pitch cleared)", async () => {
-  const [a, b] = await newGame("Alhpa", "Beta")
-  assert.equal((await host("/api/host/team", { team: a.id, action: "rename", name: "beta" })).status, 409, "a rename cannot take another team's name")
-  assert.equal((await host("/api/host/team", { team: a.id, action: "rename", name: " " })).status, 400)
-  assert.equal((await host("/api/host/team", { team: "t99", action: "rename", name: "X" })).status, 404)
-  assert.equal((await host("/api/host/team", { team: a.id, action: "explode" })).status, 400)
-  const renamed = await host("/api/host/team", { team: a.id, action: "rename", name: "  Alpha " })
-  assert.equal(teamOf(renamed.json, a.id).name, "Alpha")
-  assert.equal((await host("/api/host/team", { team: a.id, action: "rename", name: "ALPHA" })).status, 200, "a team may change the case of its own name")
-  await call(`/api/teams/${b.id}/checkin`, { station: "dc" })
-  await readBrief(b.id, "dc")
-  await lockAll(b.id, "dc")
-  await call(`/api/teams/${b.id}/call`, { station: "dc" })
-  assert.equal((await call("/api/architect/pitch", { station: "dc", action: "start", team: b.id }, PINS.leader, "dc")).status, 200)
-  const removed = await host("/api/host/team", { team: b.id, action: "remove" })
-  assert.equal(removed.status, 200)
-  assert.deepEqual(removed.json.teams.map((t) => t.id), [a.id])
-  assert.deepEqual(removed.json.queues.dc, [])
-  assert.equal(removed.json.tables.dc, undefined)
-  assert.equal(removed.json.pitches.dc, undefined)
-  assert.equal(removed.json.architects.dc.available, true)
-  assert.equal((await tap(b.id, "dc", { location: "colo" })).status, 404, "a removed team is gone")
+test("one customer on four iPads: a check-in at one table keeps the seats at the others, and presence is kept per table", async () => {
+  const team = await newGame()
+  for (const station of ["dc", "network", "oem", "compute"]) assert.equal((await call(`/api/teams/${team.id}/checkin`, { station })).status, 200)
+  const s = await stateNow()
+  assert.deepEqual(Object.keys(s.tables).sort(), ["compute", "dc", "network", "oem"], "every table keeps its seat")
+  assert.ok(Object.values(s.tables).every((seat) => seat.team === team.id))
+  assert.equal(teamOf(s, team.id).visits.dc.count, 1, "a repeated check-in is not another visit")
+  assert.equal((await call(`/api/teams/${team.id}/checkin`, { station: "dc" })).status, 200)
+  assert.equal(teamOf(await stateNow(), team.id).visits.dc.count, 1)
+  assert.equal((await call(`/api/teams/${team.id}/presence`, { station: "dc", step: "tune" })).status, 200)
+  assert.equal((await call(`/api/teams/${team.id}/presence`, { station: "oem", step: "brief" })).status, 200)
+  assert.equal((await call(`/api/teams/${team.id}/presence`, { station: "nope", step: "brief" })).status, 400)
+  const pres = (await call("/api/presence")).json.presence
+  assert.equal(pres.dc.step, "tune")
+  assert.equal(pres.oem.step, "brief")
+  assert.equal(pres.dc.team, team.id)
+  assert.equal((await call(`/api/teams/${team.id}/checkout`, { station: "oem" })).status, 200)
+  const after = await stateNow()
+  assert.equal(after.tables.oem, undefined, "checking out frees that table only")
+  assert.equal(after.tables.dc.team, team.id)
+  assert.equal((await call("/api/presence")).json.presence.oem, undefined)
 })
 
 test("the budget level: Standard by default, the host can change it until the first dial is locked", async () => {
-  const [a] = await newGame("Budget")
+  const a = await newGame()
   assert.equal((await stateNow()).settings.budget, "standard")
   assert.equal((await call("/api/host/budget", { budget: "tight" })).status, 403)
   assert.equal((await host("/api/host/budget", { budget: "infinite" })).status, 400)
@@ -202,12 +172,12 @@ test("the budget level: Standard by default, the host can change it until the fi
   await tap(a.id, "oem", { vendor: "tier1" })
   const late = await host("/api/host/budget", { budget: "standard" })
   assert.equal(late.status, 409)
-  assert.match(late.json.error, /already locked choices on the Tight budget/)
+  assert.match(late.json.error, /already locked on the Tight budget/)
   assert.equal((await host("/api/host/budget", { budget: "tight" })).status, 200, "setting the level it already has is fine")
 })
 
 test("the timer is optional: start, pause, resume, add and remove minutes, expiry locks the tables, reset reopens untimed play", async () => {
-  const [a] = await newGame("Timed")
+  const a = await newGame()
   await readBrief(a.id, "network")
   assert.equal(phaseOf(await stateNow()), "open")
   assert.equal((await timer({ action: "pause" })).status, 409, "nothing to pause without a timer")
@@ -257,9 +227,6 @@ test("the timer is optional: start, pause, resume, add and remove minutes, expir
   const locked = await tap(a.id, "network", { garage: pick("network").garage })
   assert.equal(locked.status, 409)
   assert.match(locked.json.error, /Time is up/)
-  const late = await addTeam("Too Late")
-  assert.equal(late.status, 409, "no new teams once time is up")
-  assert.match(late.json.error, /Time is up/)
   assert.equal((await timer({ action: "add", minutes: -1 })).status, 409)
   assert.equal((await timer({ action: "add", minutes: 2 })).json.clock.status, "running", "adding minutes reopens play")
   app.getState().clock.endsAt = Date.now() - 1
@@ -271,13 +238,12 @@ test("the timer is optional: start, pause, resume, add and remove minutes, expir
   assert.equal(reset.json.clock.endedAt, null)
   assert.equal(phaseOf(reset.json), "open")
   assert.equal((await tap(a.id, "network", { garage: pick("network").garage })).status, 200, "Reset timer reopens play, untimed")
-  assert.equal((await addTeam("In Time")).status, 201)
   app.getState().clock.endsAt = Date.now() - 1
   assert.equal((await stateNow()).clock.status, "open", "an open session never expires")
 })
 
-test("every host and SA route needs its PIN; team routes do not; a PIN never appears in a response", async () => {
-  const [a] = await newGame("Guarded")
+test("every host and SA route needs its PIN; the customer's table routes do not; a PIN never appears in a response", async () => {
+  const a = await newGame()
   const hostRoutes = [
     ["/api/host/timer", { action: "start", minutes: 5 }],
     ["/api/host/timer", { action: "reset" }],
@@ -286,8 +252,6 @@ test("every host and SA route needs its PIN; team routes do not; a PIN never app
     ["/api/host/unrace", {}],
     ["/api/host/reset", {}],
     ["/api/host/budget", { budget: "generous" }],
-    ["/api/host/team", { team: a.id, action: "rename", name: "Hijacked" }],
-    ["/api/host/team", { team: a.id, action: "remove" }],
     ["/api/host/queue", { station: "network", action: "clear" }],
   ]
   let n = 0
@@ -306,12 +270,12 @@ test("every host and SA route needs its PIN; team routes do not; a PIN never app
   assert.equal((await call("/api/race/run", { password: PINS.host }, null, null, `192.0.2.${++n}`)).status, 403, "the projector needs the race password")
   assert.equal((await call("/api/race/run", {}, null, null, `192.0.2.${++n}`)).status, 403)
   const after = await stateNow()
-  assert.deepEqual(after.teams.map((t) => t.name), ["Guarded"], "nothing changed")
+  assert.deepEqual(after.teams.map((t) => t.name), [a.name], "nothing changed")
   assert.equal(after.clock.status, "open")
   assert.equal(after.settings.budget, "standard")
   assert.equal(after.race, null)
 
-  /* Team actions carry no PIN at all. */
+  /* The customer's table actions carry no PIN at all. */
   assert.equal((await call(`/api/teams/${a.id}/checkin`, { station: "dc" })).status, 200)
   assert.equal((await readBrief(a.id, "dc")).status, 200)
   assert.equal((await lockAll(a.id, "dc")).status, 200)
@@ -326,8 +290,8 @@ test("every host and SA route needs its PIN; team routes do not; a PIN never app
   }
 })
 
-test("the brief gate: the server refuses choices at a table until that team has read that table's brief", async () => {
-  const [a] = await newGame("Gate")
+test("the brief gate: the server refuses choices at a table until that table's brief has been read", async () => {
+  const a = await newGame()
   const refused = await tap(a.id, "oem", { vendor: "tier1" })
   assert.equal(refused.status, 409)
   assert.match(refused.json.error, /Read the brief first/)
@@ -335,14 +299,14 @@ test("the brief gate: the server refuses choices at a table until that team has 
   const read = await readBrief(a.id, "oem")
   assert.equal(read.status, 200)
   assert.ok(read.json.team.briefRead.oem > 0)
-  assert.equal(read.json.team.briefRead.dc, undefined, "the flag is per team and per table")
+  assert.equal(read.json.team.briefRead.dc, undefined, "the flag is per table")
   assert.equal((await tap(a.id, "oem", { vendor: "tier1" })).status, 200, "the same tap is accepted once the brief is read")
   assert.equal((await tap(a.id, "dc", { location: "colo" })).status, 409, "another table still needs its own brief")
   assert.equal((await readBrief(a.id, "nope")).status, 400)
 })
 
 test("one-shot choices: the first tap locks a dial, the server refuses any change, three locks make the plan", async () => {
-  const [a] = await newGame("Alpha", "Beta")
+  const a = await newGame()
   await readBrief(a.id, "network")
   const first = await tap(a.id, "network", { link: "redundant" })
   assert.equal(first.status, 200)
@@ -377,15 +341,15 @@ test("one-shot choices: the first tap locks a dial, the server refuses any chang
   assert.equal((await tap(a.id, "network", { path: "public" })).status, 409, "nothing on a locked table changes")
 })
 
-test("pitch, rejection and approval: a rejection reopens only that team at that table and counts attempts; the race runs at any time", async () => {
-  const [a, b] = await newGame("Alpha", "Beta")
-  for (const t of [a, b]) for (const station of ["network", "oem"]) await readBrief(t.id, station)
+test("pitch, rejection and approval: a rejection reopens only that table and counts attempts; the race is the plan against today", async () => {
+  const a = await newGame()
+  for (const station of ["network", "oem"]) await readBrief(a.id, station)
   assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).status, 409, "lock all three before calling the SA")
   await lockAll(a.id, "network")
   await lockAll(a.id, "oem")
-  await lockAll(b.id, "network")
   assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).json.position, 1)
-  assert.equal((await call(`/api/teams/${b.id}/call`, { station: "network" })).json.position, 2)
+  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).json.position, 1, "calling again does not queue twice")
+  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "oem" })).json.position, 1, "each table has its own queue of one")
 
   assert.equal((await stateNow()).architects.network, undefined, "no SA has signed in yet")
   const login = await call("/api/login", { pin: PINS.leader, station: "network" })
@@ -412,11 +376,11 @@ test("pitch, rejection and approval: a rejection reopens only that team at that 
   assert.equal(ta.plans.network, undefined, "the rejected plan is gone")
   assert.deepEqual(ta.previous.network, pick("network"), "last time's picks are kept as ghosts")
   for (const d of decisionsFor("network")) assert.equal(ta.choices[d.id], undefined, `${d.id} is open again`)
-  assert.ok(ta.plans.oem, "the same team's other table is untouched")
+  assert.ok(ta.plans.oem, "the customer's other table is untouched")
   for (const d of decisionsFor("oem")) assert.equal(ta.choices[d.id], pick("oem")[d.id])
-  assert.ok(teamOf(rejected.json, b.id).plans.network, "the other team at this table is untouched")
+  assert.deepEqual(rejected.json.queues.oem.map((e) => e.team), [a.id], "the other table's queue is untouched")
   assert.equal(ta.attempts.network, 1, "the rejected design was attempt 1")
-  assert.deepEqual(rejected.json.queues.network.map((e) => e.team), [b.id], "the rejected team leaves the queue")
+  assert.deepEqual(rejected.json.queues.network, [], "the rejected table leaves the queue")
   assert.equal(rejected.json.architects.network.available, true)
 
   const retap = await tap(a.id, "network", { link: "redundant" })
@@ -425,7 +389,7 @@ test("pitch, rejection and approval: a rejection reopens only that team at that 
   const relocked = await lockAll(a.id, "network")
   assert.equal(relocked.json.attempts, 2, "three new locks make attempt 2")
   assert.ok(relocked.json.plan)
-  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).json.position, 2)
+  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).json.position, 1)
   const pitch2 = await arch("/api/architect/pitch", { action: "start", team: a.id })
   assert.equal(pitch2.json.pitches.network.attempt, 2)
   const ok = await arch("/api/architect/decide", { team: a.id, decision: "approve" })
@@ -443,55 +407,62 @@ test("pitch, rejection and approval: a rejection reopens only that team at that 
 
   await readBrief(a.id, "dc")
   await lockAll(a.id, "dc")
-  assert.equal((await host("/api/host/readout", {})).status, 409, "no readouts before the race")
+  assert.equal((await host("/api/host/readout", {})).status, 409, "no readout before the race")
   assert.equal(phaseOf(await stateNow()), "open", "no timer has run")
   const race = await host("/api/host/race", { seed: "gate" })
   assert.equal(race.status, 200, "the host runs the race at any time, with no timer")
   assert.equal(race.json.clock.status, "ended", "running the race ends play")
   assert.equal(race.json.clock.endedBy, "host")
-  const rows = Object.fromEntries(race.json.race.result.results.map((r) => [r.id, r]))
+  assert.deepEqual(race.json.pitches, {}, "a live pitch does not survive the start")
+  const rows = rowsOf(race.json.race)
+  assert.deepEqual(Object.keys(rows).sort(), [a.id, FINALE_ENTRANTS.today.id].sort(), "two cars: the 2027 plan and today's Hinwil setup")
+  assert.equal(rows[a.id].name, `${a.name} · 2027 plan`)
+  assert.equal(rows[a.id].short, "2027 plan")
+  assert.equal(rows[a.id].color, a.color)
+  assert.equal(rows.today.name, `${a.name} · today's Hinwil setup`)
   assert.equal(rows[a.id].pitch, approved.pitch.network, "only the approved table scores")
   assert.deepEqual(rows[a.id].notApproved.sort(), ["dc", "oem"], "locked but not approved tables race on today's setup")
-  assert.equal(rows[b.id].pitch, 0)
+  assert.ok(rows[a.id].found > 0, "the approved table's seconds are the plan's pace")
+  assert.equal(rows.today.pitch, 0)
+  assert.equal(rows.today.found, 0, "today's setup finds nothing: 0.00 s")
+  assert.deepEqual(rows.today.missed.sort(), ["compute", "dc", "network", "oem"])
   assert.equal((await host("/api/host/race", { seed: "again" })).status, 409, "the race runs once until it is cleared")
   assert.equal((await call("/api/race/run", { password: PINS.race })).status, 409)
-  assert.equal((await tap(b.id, "oem", { vendor: "tier1" })).status, 409, "the race locks every table")
-  assert.equal((await addTeam("After The Flag")).status, 409)
+  assert.equal((await tap(a.id, "oem", { vendor: "tier1" })).status, 409, "the race locks every table")
   assert.equal((await timer({ action: "start" })).status, 409, "no timer once the race has run")
   assert.equal((await timer({ action: "reset" })).status, 409)
-  assert.equal((await host("/api/host/team", { team: b.id, action: "remove" })).status, 409, "the result names the teams")
   assert.equal((await call("/api/health")).json.phase, "race")
   const readout = await host("/api/host/readout", {})
   assert.ok(readout.json.readout.startedAt > 0)
-  assert.equal(readout.json.readout.endsAt, undefined, "readouts have no countdown")
+  assert.equal(readout.json.readout.endsAt, undefined, "the readout has no countdown")
   assert.equal((await call("/api/health")).json.phase, "readout")
 
   const cleared = await host("/api/host/unrace", {})
   assert.equal(cleared.json.race, null)
   assert.equal(cleared.json.readout, null)
   assert.equal(cleared.json.clock.status, "open", "clearing the race reopens play, untimed")
-  assert.equal((await tap(b.id, "oem", { vendor: "tier1" })).status, 200)
+  assert.equal((await tap(a.id, "compute", { size: "medium" })).status, 409, "the brief gate still holds at an unread table")
   assert.equal(teamOf(await stateNow(), a.id).reviews.network.status, "approved", "approvals survive clearing the race")
 })
 
-test("the projector runs the race with the race password, during a running timer, and an empty game has nothing to race", async () => {
-  await newGame()
-  const empty = await call("/api/race/run", { password: PINS.race })
-  assert.equal(empty.status, 400)
-  assert.match(empty.json.error, /No teams yet/)
-  assert.equal((await host("/api/host/race", {})).status, 400)
-  assert.equal((await addTeam("Solo")).status, 201)
+test("the projector runs the race with the race password, during a running timer, and even with nothing approved it is still plan against today", async () => {
+  const a = await newGame()
   await timer({ action: "start", minutes: 15 })
   const race = await call("/api/race/run", { password: PINS.race, seed: "projector" })
-  assert.equal(race.status, 200)
+  assert.equal(race.status, 200, "the finale always has its two cars")
   assert.equal(race.json.race.ranBy, "race screen")
   assert.equal(race.json.clock.status, "ended")
-  assert.equal(race.json.race.result.results.length, 1)
+  assert.equal(race.json.race.result.results.length, 2)
+  const rows = rowsOf(race.json.race)
+  assert.equal(rows[a.id].found, 0, "nothing approved: the plan is today's setup too")
+  assert.deepEqual(rows[a.id].missed.sort(), ["compute", "dc", "network", "oem"])
+  assert.deepEqual(rows[a.id].notApproved, [])
+  assert.equal(rows.today.found, 0)
   await host("/api/host/unrace", {})
 })
 
 test("time up: a table still adjusting after a rejection races on today's setup, and the readout explains", async () => {
-  const [a] = await newGame("Late")
+  const a = await newGame()
   await readBrief(a.id, "dc")
   await lockAll(a.id, "dc")
   const arch = (path, body) => call(path, { station: "dc", ...body }, PINS.leader, "dc")
@@ -508,7 +479,7 @@ test("time up: a table still adjusting after a rejection races on today's setup,
   assert.equal(story.status, "rejected")
   assert.match(story.text, /Rejected on the first attempt \("No N\+1"\) and still adjusting when time ran out, so this table raced on today's setup/)
   const race = await host("/api/host/race", { seed: "late" })
-  const row = race.json.race.result.results.find((r) => r.id === a.id)
+  const row = rowsOf(race.json.race)[a.id]
   assert.ok(row.notApproved.includes("dc"), "the table was tried but not approved: it races on today's setup")
   assert.equal(row.pitch, 0)
   assert.equal(row.found, 0, "nothing found: today's setup at every table")
@@ -516,16 +487,16 @@ test("time up: a table still adjusting after a rejection races on today's setup,
 })
 
 test("a plan locked before time ran out can still be pitched and approved after it", async () => {
-  const [a, b] = await newGame("Just", "Missed")
+  const a = await newGame()
   await readBrief(a.id, "compute")
-  await readBrief(b.id, "compute")
+  await readBrief(a.id, "network")
   await lockAll(a.id, "compute")
-  await tap(b.id, "compute", { size: "medium" })
+  await tap(a.id, "network", { link: "redundant" })
   await timer({ action: "start", minutes: 1 })
   app.getState().clock.endsAt = Date.now() - 1
   assert.equal((await stateNow()).clock.status, "ended")
   assert.equal((await call(`/api/teams/${a.id}/call`, { station: "compute" })).status, 200, "the queue stays open for a plan locked in time")
-  assert.equal((await call(`/api/teams/${b.id}/call`, { station: "compute" })).status, 409, "a table that was not locked in time has nothing to pitch")
+  assert.equal((await call(`/api/teams/${a.id}/call`, { station: "network" })).status, 409, "a table that was not locked in time has nothing to pitch")
   const arch = (path, body) => call(path, { station: "compute", ...body }, PINS.leader, "compute")
   assert.equal((await arch("/api/architect/pitch", { action: "start", team: a.id })).status, 200)
   const ok = await arch("/api/architect/decide", { team: a.id, decision: "approve" })
@@ -533,29 +504,28 @@ test("a plan locked before time ran out can still be pitched and approved after 
 })
 
 test("the approval gate scores FIT: an approved over-cap board earns far less than an in-zone one; tuning is logged", async () => {
-  const [zone, over] = await newGame("Zone", "Over")
-  for (const t of [zone, over]) await readBrief(t.id, "oem")
-  await lockAll(zone.id, "oem")
-  for (const [k, v] of Object.entries({ vendor: "dgx", payment: "buy", support: "4h" })) await tap(over.id, "oem", { [k]: v })
-  const sim = await call(`/api/teams/${zone.id}/sim`, { station: "oem" })
-  assert.equal(sim.json.runs.inZone, true)
-  assert.ok(sim.json.runs.firstZoneAt > 0 && sim.json.runs.lastFit >= 80, "the host feed sees the latest FIT")
-  const arch = (path, body) => call(path, { station: "oem", ...body }, PINS.leader, "oem")
   const points = {}
-  for (const t of [zone, over]) {
+  for (const [label, choices] of [["zone", pick("oem")], ["over", { vendor: "dgx", payment: "buy", support: "4h" }]]) {
+    const t = await newGame()
+    await readBrief(t.id, "oem")
+    for (const [k, v] of Object.entries(choices)) await tap(t.id, "oem", { [k]: v })
+    const sim = await call(`/api/teams/${t.id}/sim`, { station: "oem" })
+    assert.equal(sim.json.runs.inZone, label === "zone")
+    if (label === "zone") assert.ok(sim.json.runs.firstZoneAt > 0 && sim.json.runs.lastFit >= 80, "the host feed sees the latest FIT")
+    const arch = (path, body) => call(path, { station: "oem", ...body }, PINS.leader, "oem")
     const plan = teamOf(await stateNow(), t.id).plans.oem
     await call(`/api/teams/${t.id}/call`, { station: "oem" })
     await arch("/api/architect/pitch", { action: "start", team: t.id })
     const res = await arch("/api/architect/decide", { team: t.id, decision: "approve" })
-    points[t.id] = { plan, pitch: teamOf(res.json, t.id).pitch.oem }
+    points[label] = { plan, pitch: teamOf(res.json, t.id).pitch.oem }
   }
-  assert.equal(points[over.id].plan.status, "over")
-  assert.ok(points[over.id].plan.fit <= 40)
-  assert.ok(points[zone.id].pitch >= points[over.id].pitch * 2, `in zone ${points[zone.id].pitch} vs over the cap ${points[over.id].pitch}`)
+  assert.equal(points.over.plan.status, "over")
+  assert.ok(points.over.plan.fit <= 40)
+  assert.ok(points.zone.pitch >= points.over.pitch * 2, `in zone ${points.zone.pitch} vs over the cap ${points.over.pitch}`)
 })
 
 test("removed routes and retired tables are gone", async () => {
-  await newGame("A")
+  await newGame()
   for (const path of ["/api/host/setup", "/api/host/phase", "/api/host/architect", "/api/leader/architect", "/api/teams/t1/architect", "/api/host/clock", "/api/teams/t1/submit"]) {
     assert.equal((await call(path, {}, PINS.host)).status, 404, path)
   }
@@ -585,6 +555,7 @@ test("PINs: one event PIN by default, the environment may override, and nothing 
     const post = (body) => fetch(`${url}/api/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
     try {
       assert.equal(fresh.getState().pins, undefined, "a pins key in the file is dropped")
+      assert.deepEqual(fresh.getState().teams.map((t) => t.id), [T1], "a save with no team gets the customer")
       assert.equal((await post({ pin: "evil" })).status, 403, "the saved file cannot set a PIN")
       assert.equal((await (await post({ pin: eventPin })).json()).role, "host", "the event PIN with no table signs the host in")
       assert.deepEqual(await (await post({ pin: eventPin, station: "dc" })).json(), { role: "architect", station: "dc" }, "the event PIN with a table signs the Solutions Architect in, scoped to that table")
@@ -592,7 +563,8 @@ test("PINs: one event PIN by default, the environment may override, and nothing 
       const sa = await fetch(`${url}/api/login`, { method: "POST", headers: { "content-type": "application/json", "x-pin": eventPin }, body: JSON.stringify({ pin: eventPin, station: "dc" }) })
       assert.equal((await sa.json()).role, "architect")
       const raced = await fetch(`${url}/api/race/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: eventPin }) })
-      assert.equal(raced.status, 400, "the race password is accepted (no teams yet is the only complaint)")
+      assert.equal(raced.status, 200, "the race password is accepted and the finale runs")
+      assert.equal((await raced.json()).race.result.results.length, 2)
       const text = await (await fetch(`${url}/api/state`)).text()
       assert.ok(!text.includes(eventPin) && !text.includes("evil"), "the state never carries a PIN")
     } finally {
@@ -605,17 +577,18 @@ test("PINs: one event PIN by default, the environment may override, and nothing 
 })
 
 test("PIN-protected routes rate limit repeated failed attempts per client IP", async () => {
+  await newGame()
   const ip = "203.0.113.77"
   for (let i = 0; i < 10; i++) assert.equal((await call("/api/login", { pin: `bad-${i}` }, null, null, ip)).status, 403)
   const limited = await call("/api/login", { pin: PINS.host }, null, null, ip)
   assert.equal(limited.status, 429)
   assert.equal((await call("/api/host/timer", { action: "start" }, PINS.host, null, ip)).status, 429, "the timer is behind the same limit")
   assert.equal((await call("/api/login", { pin: PINS.host }, null, null, "203.0.113.78")).status, 200, "other clients are unaffected")
-  assert.equal((await addTeam("Not Limited", ip)).status === 429, false, "joining as a team is not a PIN route")
+  assert.equal((await call(`/api/teams/${T1}/checkin`, { station: "dc" }, null, null, ip)).status, 200, "the customer's table routes are not PIN routes")
 })
 
 test("state survives a server restart", async () => {
-  const [a] = await newGame("Keep A", "Keep B")
+  const a = await newGame()
   await timer({ action: "start", minutes: 20 })
   await call(`/api/teams/${a.id}/checkin`, { station: "dc" })
   await readBrief(a.id, "dc")
@@ -626,8 +599,8 @@ test("state survives a server restart", async () => {
   try {
     const again = restarted.getState()
     assert.equal(again.id, before.id)
-    assert.deepEqual(again.teams.map((t) => [t.id, t.name, t.color]), before.teams.map((t) => [t.id, t.name, t.color]))
-    assert.equal(again.teamSeq, 2)
+    assert.deepEqual(again.teams.map((t) => [t.id, t.name, t.color]), [[T1, a.name, a.color]])
+    assert.equal(again.teamSeq, 1)
     assert.deepEqual(again.teams[0].choices, { location: "colo", cooling: "liquid" })
     assert.equal(again.teams[0].plans.dc, undefined, "two locks are not a plan")
     assert.ok(again.teams[0].briefRead.dc > 0)
@@ -639,16 +612,21 @@ test("state survives a server restart", async () => {
   }
 })
 
-test("an old save migrates: locked plans become three locks (attempt 1), sent back becomes rejected, pins are dropped", async () => {
+test("an old multi-team save migrates to the one customer: the first team's play is kept as t1, every other team is dropped", async () => {
   const other = await mkdtemp(join(tmpdir(), "podium-old-"))
   try {
     const plan = { id: "OLD01", station: "network", at: 1000, budget: "standard", choices: pick("network"), fit: 90, status: "zone", inZone: true, decisions: [], board: { seconds: 0.3, values: {} } }
     const endsAt = Date.now() + 60_000
     await writeFile(join(other, "state.json"), JSON.stringify({
       id: "old", version: 9, settings: { stations: ["compute", "ai", "storage", "network", "oem"], gameMinutes: 90, briefMinutes: 5, playMinutes: 35 }, clock: { status: "running", endsAt }, pins: { host: "x" },
+      /* The first team was t7 with an old colour and name; the other team is gone after the migration. */
+      tables: { network: { team: "t7", since: 900 }, oem: { team: "t8", since: 950 } },
+      queues: { network: [{ team: "t8", at: 1100 }, { team: "t7", at: 1200 }], oem: [{ team: "t8", at: 1300 }] },
+      architects: { network: { available: false, since: 1400, busyWith: "t8" }, oem: { available: true, since: 1 } },
+      pitches: { network: { team: "t8", startedAt: 1400, endsAt: 31_400, by: "Sam", attempt: 1 } },
       teams: [
-        { id: "t1", name: "Old", rank: 3, choices: { cpu: "grace", link: "redundant" }, architect: { enabled: true } },
-        { id: "t2", name: "Locked", choices: { ...pick("network"), ...pick("oem") }, plans: { network: plan }, submitted: { network: 1000 }, reviews: { network: { status: "approved", by: "A", at: 2000, points: 25 }, oem: { status: "sentBack", by: "B", at: 3000, reason: "Again" } }, pitch: { network: 25 } },
+        { id: "t7", name: "Locked", color: "#00a3ff", rank: 3, architect: { enabled: true }, choices: { cpu: "grace", size: "medium", ...pick("network"), ...pick("oem") }, plans: { network: plan }, submitted: { network: 1000 }, reviews: { network: { status: "approved", by: "A", at: 2000, points: 25 }, oem: { status: "sentBack", by: "B", at: 3000, reason: "Again" } }, pitch: { network: 25 } },
+        { id: "t8", name: "Gone", choices: { link: "single" }, plans: {}, reviews: {} },
       ],
     }))
     const old = createApp({ dataDir: other, env: {} })
@@ -658,35 +636,42 @@ test("an old save migrates: locked plans become three locks (attempt 1), sent ba
     assert.deepEqual(s.settings, { budget: "standard", stations: ["compute", "network", "oem"] }, "the session plan's minutes are gone")
     assert.equal(s.clock.status, "running", "a running timer carries on")
     assert.equal(s.clock.endsAt, endsAt)
-    assert.equal(s.teamSeq, 2)
-    const [t1, t2] = s.teams
-    assert.deepEqual(t1.choices, { link: "redundant" })
-    assert.equal(t1.color, TEAM_COLORS[0], "a team saved without a colour gets one")
+    assert.equal(s.teamSeq, 1)
+    assert.equal(s.teams.length, 1, "one participant")
+    const [t1] = s.teams
+    assert.deepEqual([t1.id, t1.name, t1.color], [T1, CUSTOMER.team.name, CUSTOMER.team.color], "the first team becomes the customer, with the customer's name and colour")
+    assert.deepEqual(t1.choices, { size: "medium", ...pick("network"), ...pick("oem") }, "a retired dial is dropped, the rest kept")
     assert.equal(t1.architect, undefined)
     assert.equal(t1.tier, undefined)
     assert.equal(t1.rank, undefined)
-    assert.equal(t1.attempts.network, undefined, "one lock is not an attempt")
-    assert.ok(t1.briefRead.network > 0, "a table already being played counts as a read brief")
-    assert.equal(t2.reviews.network.status, "approved")
-    assert.equal(t2.reviews.network.attempt, 1)
-    assert.equal(t2.attempts.network, 1)
-    assert.equal(t2.reviews.oem.status, "rejected", "sent back becomes rejected")
-    assert.ok(t2.plans.oem, "three old locks without a plan become attempt 2 after a rejection")
-    assert.equal(t2.attempts.oem, 2)
-    assert.equal(t2.reviews.oem.attempt, 1)
-    assert.ok(t2.briefRead.oem > 0)
+    assert.equal(t1.attempts.compute, undefined, "one lock is not an attempt")
+    assert.ok(t1.briefRead.compute > 0, "a table already being played counts as a read brief")
+    assert.equal(t1.reviews.network.status, "approved")
+    assert.equal(t1.reviews.network.attempt, 1)
+    assert.equal(t1.attempts.network, 1)
+    assert.equal(t1.reviews.oem.status, "rejected", "sent back becomes rejected")
+    assert.ok(t1.plans.oem, "three old locks without a plan become attempt 2 after a rejection")
+    assert.equal(t1.attempts.oem, 2)
+    assert.equal(t1.reviews.oem.attempt, 1)
+    assert.ok(t1.briefRead.oem > 0)
+    /* Seats, queues and the live pitch follow the kept team; the dropped team's are gone and its SA is free again. */
+    assert.deepEqual(s.tables, { network: { team: T1, since: 900 } })
+    assert.deepEqual(s.queues, { network: [{ team: T1, at: 1200 }], oem: [] })
+    assert.deepEqual(s.pitches, {})
+    assert.equal(s.architects.network.available, true)
+    assert.equal(s.architects.network.busyWith, undefined)
   } finally {
     await rm(other, { recursive: true, force: true })
   }
 })
 
-test("a save from the host-run game migrates: lobby, brief and brief-over become open untimed play, keeping teams, choices, plans, reviews, attempts and a finished race", async () => {
+test("a save from the host-run game migrates: lobby, brief and brief-over become open untimed play, keeping the customer's choices, plans, reviews and attempts", async () => {
   const other = await mkdtemp(join(tmpdir(), "podium-phases-"))
   const plan = { id: "KEEP1", station: "network", at: 1000, budget: "tight", choices: pick("network"), fit: 90, status: "zone", inZone: true, decisions: [], board: { seconds: 0.3, values: {} } }
   const teams = () => [
-    { id: "t1", name: "Scuderia Silicon", color: "#e10600", choices: { ...pick("network"), vendor: "tier1" }, touched: { network: 900, oem: 950 }, submitted: { network: 1000 }, scores: { network: { total: 25, at: 2000 } }, pitch: { network: 25 }, visits: {}, sims: {},
+    { id: "t1", name: "Scuderia Silicon", color: "#00a3ff", choices: { ...pick("network"), vendor: "tier1" }, touched: { network: 900, oem: 950 }, submitted: { network: 1000 }, scores: { network: { total: 25, at: 2000 } }, pitch: { network: 25 }, visits: {}, sims: {},
       plans: { network: plan }, reviews: { network: { status: "approved", by: "Sam", at: 2000, points: 25, attempt: 2 } }, briefRead: { network: 800, oem: 940 }, attempts: { network: 2 }, previous: { network: { link: "single" } } },
-    { id: "t2", name: "Photon Racing", color: "#00a3ff", choices: {}, touched: {}, submitted: {}, scores: {}, pitch: {}, visits: {}, sims: {}, plans: {}, reviews: {}, briefRead: {}, attempts: {}, previous: {} },
+    { id: "t2", name: "Photon Racing", color: "#ffb800", choices: {}, touched: {}, submitted: {}, scores: {}, pitch: {}, visits: {}, sims: {}, plans: {}, reviews: {}, briefRead: {}, attempts: {}, previous: {} },
   ]
   const settings = { briefMinutes: 5, playMinutes: 35, raceMinutes: 1, readoutMinutes: 9, budget: "tight", stations: ["network", "oem", "dc", "compute"] }
   const lobbyClock = { status: "lobby", totalMs: 35 * 60_000, endsAt: null, remainingMs: null, endedAt: null, endedBy: null }
@@ -707,9 +692,10 @@ test("a save from the host-run game migrates: lobby, brief and brief-over become
         assert.deepEqual(s.settings, { budget: "tight", stations: ["network", "oem", "dc", "compute"] }, "the budget level is kept")
         assert.equal(s.id, "host-run")
         assert.equal(s.version, 41)
-        assert.equal(s.teamSeq, 2, "the next team to add itself is t3")
-        const [t1, t2] = s.teams
-        assert.deepEqual([t1.id, t1.name, t1.color, t2.id, t2.name, t2.color], ["t1", "Scuderia Silicon", "#e10600", "t2", "Photon Racing", "#00a3ff"])
+        assert.equal(s.teamSeq, 1)
+        assert.equal(s.teams.length, 1, "the second team is dropped")
+        const [t1] = s.teams
+        assert.deepEqual([t1.id, t1.name, t1.color], [T1, CUSTOMER.team.name, CUSTOMER.team.color])
         assert.deepEqual(t1.choices, { ...pick("network"), vendor: "tier1" })
         assert.deepEqual(t1.plans.network, plan)
         assert.deepEqual(t1.reviews.network, { status: "approved", by: "Sam", at: 2000, points: 25, attempt: 2 })
@@ -722,7 +708,7 @@ test("a save from the host-run game migrates: lobby, brief and brief-over become
       }
     }
 
-    /* The migrated game is playable with no host action: the old team locks another dial, and a new team joins as t3. */
+    /* The migrated game is playable with no host action: the customer locks another dial; nobody can join. */
     const loaded = await load({ brief: old.brief, clock: lobbyClock })
     const srv = createServer(loaded.handle)
     await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve))
@@ -732,29 +718,40 @@ test("a save from the host-run game migrates: lobby, brief and brief-over become
       return { status: res.status, json: await res.json() }
     }
     try {
-      assert.equal((await post("/api/teams/t1/choices", { station: "oem", choices: { payment: "lease" } })).status, 200)
-      const joined = await post("/api/teams", { name: "Walk Ins" })
-      assert.equal(joined.status, 201)
-      assert.equal(joined.json.team.id, "t3")
-      assert.equal(joined.json.team.color, TEAM_COLORS[2])
+      assert.equal((await post(`/api/teams/${T1}/choices`, { station: "oem", choices: { payment: "lease" } })).status, 200)
+      assert.equal((await post("/api/teams", { name: "Walk Ins" })).status, 410)
+      assert.equal((await post("/api/teams/t2/choices", { station: "oem", choices: { payment: "lease" } })).status, 404, "the dropped team is gone")
     } finally {
       loaded.close()
       await new Promise((resolve) => srv.close(resolve))
     }
 
-    /* A finished race, mid-readout: the result and the readout survive, and play stays closed until the race is cleared. */
-    const race = { seed: "old-race", ranAt: 5000, ranBy: "host", budget: "tight", result: { results: [{ id: "t1", position: 1 }, { id: "t2", position: 2 }], standings: [{ id: "t1" }, { id: "t2" }], events: [] } }
-    const raced = await load({ brief: { status: "done", endsAt: 100 }, clock: { ...lobbyClock, status: "ended", remainingMs: 0, endedAt: 4000, endedBy: "host" }, race, readout: { startedAt: 6000, endsAt: 6000 + 9 * 60_000 } })
+    /* A finished race between several teams names cars that no longer exist: it is discarded and play reopens, untimed. */
+    const multi = { seed: "old-race", ranAt: 5000, ranBy: "host", budget: "tight", result: { results: [{ id: "t1", position: 1 }, { id: "t2", position: 2 }], standings: [{ id: "t1" }, { id: "t2" }], events: [] } }
+    const raced = await load({ brief: { status: "done", endsAt: 100 }, clock: { ...lobbyClock, status: "ended", remainingMs: 0, endedAt: 4000, endedBy: "host" }, race: multi, readout: { startedAt: 6000, endsAt: 6000 + 9 * 60_000 } })
     try {
       const s = raced.getState()
-      assert.deepEqual(s.race, race, "the finished race is kept as it was")
+      assert.equal(s.race, null, "a multi-team race is dropped")
+      assert.equal(s.readout, null)
+      assert.equal(phaseOf(s), "open")
+      assert.equal(s.clock.status, "open")
+      assert.deepEqual(s.teams[0].plans.network, plan, "the customer's play is untouched")
+    } finally {
+      raced.close()
+    }
+
+    /* A finished finale (the plan against today) is kept as it was, mid-readout. */
+    const finale = { seed: "finale", ranAt: 5000, ranBy: "host", budget: "tight", result: { results: [{ id: "t1", position: 1 }, { id: FINALE_ENTRANTS.today.id, position: 2 }], standings: [{ id: "t1" }, { id: FINALE_ENTRANTS.today.id }], events: [] } }
+    const kept = await load({ brief: { status: "done", endsAt: 100 }, clock: { ...lobbyClock, status: "ended", remainingMs: 0, endedAt: 4000, endedBy: "host" }, race: finale, readout: { startedAt: 6000, endsAt: 6000 + 9 * 60_000 } })
+    try {
+      const s = kept.getState()
+      assert.deepEqual(s.race, finale, "the finished finale is kept as it was")
       assert.deepEqual(s.readout, { startedAt: 6000 }, "the readout carries on, without its countdown")
       assert.equal(phaseOf(s), "readout")
       assert.equal(s.clock.status, "ended")
       assert.equal(s.clock.endedAt, 4000)
-      assert.deepEqual(s.teams[0].plans.network, plan)
     } finally {
-      raced.close()
+      kept.close()
     }
 
     /* Time was up but the race had not run: it stays "time is up" (a plan locked in time can still be pitched). */
@@ -779,13 +776,13 @@ test("a save from the host-run game migrates: lobby, brief and brief-over become
   }
 })
 
-test("a damaged state file is kept aside and a blank game starts", async () => {
+test("a damaged state file is kept aside and a blank game with the customer starts", async () => {
   const other = await mkdtemp(join(tmpdir(), "podium-bad-"))
   try {
     await writeFile(join(other, "state.json"), "{ not json")
     const fresh = createApp({ dataDir: other, env: ENV })
     fresh.close()
-    assert.equal(fresh.getState().teams.length, 0)
+    assert.deepEqual(fresh.getState().teams.map((t) => t.id), [T1])
     assert.equal(fresh.getState().clock.status, "open")
     assert.ok((await readdir(other)).some((name) => name.startsWith("state.json.damaged-")))
   } finally {
@@ -793,22 +790,24 @@ test("a damaged state file is kept aside and a blank game starts", async () => {
   }
 })
 
-test("reset returns to an empty, open game; static files are served; traversal is refused", async () => {
-  const [a] = await newGame("Soon Gone")
+test("Restart the experience returns to an open game with the customer and nothing played; static files are served; traversal is refused", async () => {
+  const a = await newGame()
   await host("/api/host/budget", { budget: "generous" })
   await timer({ action: "start", minutes: 5 })
+  await readBrief(a.id, "dc")
+  await tap(a.id, "dc", { location: "colo" })
   const beforeId = (await stateNow()).id
   assert.equal((await call("/api/host/reset", {}, "nope")).status, 403)
   const reset = await host("/api/host/reset", {})
-  assert.equal(reset.json.teams.length, 0)
+  assert.deepEqual(reset.json.teams.map((t) => [t.id, t.name, t.color]), [[T1, a.name, a.color]], "the customer is recreated at once")
+  assert.deepEqual(reset.json.teams[0].choices, {}, "with nothing played")
+  assert.deepEqual(reset.json.teams[0].briefRead, {})
   assert.equal(reset.json.clock.status, "open", "a reset game is open for play, untimed")
   assert.equal(reset.json.settings.budget, "standard")
-  assert.notEqual(reset.json.id, beforeId, "a new game id tells every iPad to forget its team")
+  assert.notEqual(reset.json.id, beforeId, "a new game id tells every iPad to start again on the brief")
   assert.equal((await call("/api/health")).json.phase, "open")
-  assert.equal((await tap(a.id, "dc", { location: "colo" })).status, 404)
-  const again = await addTeam("First Again")
-  assert.equal(again.json.team.id, "t1")
-  for (const page of ["/", "/station.html", "/host.html", "/race.html", "/js/station.js", "/css/app.css"]) {
+  assert.equal((await tap(a.id, "dc", { location: "colo" })).status, 409, "the brief must be read again")
+  for (const page of ["/", "/station.html", "/host.html", "/race.html", "/case.html", "/js/station.js", "/css/app.css"]) {
     const res = await fetch(base + page)
     assert.equal(res.status, 200, page)
     assert.equal(res.headers.get("x-content-type-options"), "nosniff")

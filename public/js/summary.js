@@ -7,7 +7,7 @@ import { boardFor, pickedOption } from "./model.js"
 
 export { millions } from "./model.js"
 
-/** "Paths to the factory: Two diverse paths. Two encrypted tunnels on two separate fibre routes." */
+/** "Paths Hinwil ↔ Zurich campus: Two diverse routes. Two dark-fibre pairs on separate routes into the campus." */
 export function choiceSentences(choices, stationId) {
   return C.decisionsFor(stationId).map((d) => {
     const o = pickedOption(d.id, choices)

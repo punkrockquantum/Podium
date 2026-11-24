@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as C from "../public/js/catalog.js"
+import { CUSTOMER } from "../public/js/customer.js"
 import { boardFor, evaluate, effectiveTeam, choicesOf, allBoards, FIT_ZONE, FIT_BREACH_MAX, secondsTotal, raceSeconds, SECONDS_MAX } from "../public/js/model.js"
 import { designSummary } from "../public/js/summary.js"
 import { buildPlan } from "../public/js/plandata.js"
@@ -33,10 +34,18 @@ test("four tables: a problem card, 2–3 targets, cap lines and three dials of t
   assert.equal(C.TIERS, undefined, "per-team tiers are gone")
 })
 
-test("ten distinct team colours, and an untimed session with a 35-minute timer on offer", () => {
-  assert.equal(new Set(C.TEAM_COLORS).size, 10)
-  assert.equal(C.MAX_TEAMS, 10)
-  assert.equal(C.MIN_TEAMS, undefined, "a game starts with no teams: they add themselves")
+test("one customer, two finale entrants, and an untimed session with a 35-minute timer on offer", () => {
+  assert.equal(C.MAX_TEAMS, 1)
+  assert.deepEqual(C.CUSTOMER_TEAM, { id: "t1", name: CUSTOMER.team.name, color: CUSTOMER.team.color }, "the one participant comes from customer.js")
+  assert.match(C.CUSTOMER_TEAM.color, /^#[0-9a-f]{6}$/i)
+  assert.equal(C.TEAM_COLORS, undefined, "no palette: there is one team")
+  assert.equal(C.TEAM_NAME_MAX, undefined, "no name to type")
+  assert.equal(C.MIN_TEAMS, undefined)
+  assert.equal(C.FINALE_ENTRANTS.plan.id, "t1")
+  assert.equal(C.FINALE_ENTRANTS.plan.name, `${CUSTOMER.team.name} · 2027 plan`)
+  assert.equal(C.FINALE_ENTRANTS.today.id, "today")
+  assert.equal(C.FINALE_ENTRANTS.today.name, `${CUSTOMER.team.name} · today's Hinwil setup`)
+  assert.notEqual(C.FINALE_ENTRANTS.plan.color, C.FINALE_ENTRANTS.today.color, "two cars the projector can tell apart")
   assert.equal(C.SESSION.timerMinutes, 35)
   assert.equal(C.sessionTotal, undefined, "the fixed session plan is gone")
 })
@@ -80,16 +89,16 @@ test("FIT: in the zone scores 80–100; crossing a cap or an FIA rule caps it at
   assert.ok(overCap.fit <= FIT_BREACH_MAX, `over the CapEx cap: FIT ${overCap.fit}`)
   const capex = overCap.caps.find((c) => c.id === "capex")
   assert.ok(capex.over > 0)
-  assert.match(capex.consequence, /Over the CapEx envelope by \$[\d.]+[kM]: the FIA would reject this budget\./)
+  assert.match(capex.consequence, /Over the 2027 capital envelope by CHF [\d.]+[kM]: the finance board would not sign it\./)
   assert.ok(capex.fix, "a cap breach names a one-dial fix")
   assert.match(capex.consequence, /would bring it back/)
   const fia = boardFor("network", { ...pick("network"), garage: "wifi" })
   assert.equal(fia.status, "fia")
   assert.ok(fia.fit <= FIT_BREACH_MAX)
-  assert.ok(fia.breaches.some((b) => b.kind === "fia" && b.rule === "5.2" && b.dial === "garage"))
-  assert.match(fia.hint, /^Breaks FIA 5\.2: .+ would fix that\.$/)
+  assert.ok(fia.breaches.some((b) => b.kind === "fia" && b.rule === "req-wired" && b.label === "Audi F1 requirement" && b.dial === "garage"))
+  assert.match(fia.hint, /^Breaks Audi F1 requirement: .+ would fix that\.$/)
   const power = boardFor("compute", { size: "large", chips: "gpu", storage: "cache" })
-  assert.ok(power.caps.find((c) => c.id === "power").over > 0, "28 GPU nodes trip the 400 kW hall")
+  assert.ok(power.caps.find((c) => c.id === "power").over > 0, "20 GPU nodes trip the 120 kW CFD allocation")
   assert.ok(power.fit <= FIT_BREACH_MAX)
   const off = boardFor("network", { link: "redundant", path: "public", garage: "umbilical" })
   assert.equal(off.status, "off")
@@ -167,7 +176,7 @@ test("seconds found per lap: 0.00 on today's setup, 0.25–0.35 in the zone, bre
         if (b.status === "over" || b.status === "fia") {
           assert.equal(b.allowed, false)
           assert.equal(b.seconds, 0, "a breach finds no time")
-          assert.match(b.outcome, /cap|limit|FIA/)
+          assert.match(b.outcome, /cap|limit|FIA|Audi F1 requirement/)
         } else if (b.inZone) {
           assert.ok(b.allowed && b.seconds >= 0.25 && b.seconds <= 0.35, `${s.id}: in-zone ${b.seconds}`)
           assert.match(b.outcome, /^You've found 0\.\d\d s per lap and you're inside (both|every) caps?\.$/)
@@ -180,7 +189,7 @@ test("seconds found per lap: 0.00 on today's setup, 0.25–0.35 in the zone, bre
   const ref = Object.fromEntries(IDS.map((id) => [id, boardFor(id, GOOD).seconds]))
   assert.ok(Object.values(ref).every((v) => v >= 0.25), "the reference build finds time at every table")
   assert.match(boardFor("network", { ...GOOD, path: "public" }).outcome, /strategy call arrives too late/)
-  assert.match(boardFor("compute", { ...GOOD, size: "large" }).outcome, /FIA 2\.4|cap/)
+  assert.match(boardFor("compute", { ...GOOD, size: "large" }).outcome, /FIA F4\.6\.1|cap/)
 })
 
 test("the team total adds up the boards the race sees", () => {

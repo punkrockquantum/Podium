@@ -14,6 +14,7 @@ const CANDIDATES = [
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
+  "/usr/local/bin/google-chrome",
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
 ].filter(Boolean)
@@ -24,6 +25,7 @@ export function findChrome() {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const KEY_CODES = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Space: 32, Enter: 13, Escape: 27, KeyP: 80, KeyR: 82, KeyM: 77, KeyW: 87, KeyA: 65, KeyS: 83, KeyD: 68 }
 
 /** Start headless Chrome and connect to its browser target. */
 export async function launchChrome({ width = 1024, height = 768 } = {}) {
@@ -118,6 +120,16 @@ export async function launchChrome({ width = 1024, height = 768 } = {}) {
       },
       async type(selector, text) {
         await evaluate(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) throw new Error("no element " + ${JSON.stringify(selector)}); n.focus(); n.value = ${JSON.stringify(text)}; n.dispatchEvent(new Event("input", { bubbles: true })); n.dispatchEvent(new Event("change", { bubbles: true })); return true })()`)
+      },
+      /** Render as if printing (`media: "print"`) or back to the screen (`media: ""`). */
+      async emulateMedia(media = "") {
+        await send("Emulation.setEmulatedMedia", { media }, sessionId)
+        await sleep(50)
+      },
+      /** A real key press via the input domain: `type` is "keyDown" | "keyUp", `code` e.g. "ArrowUp". */
+      async key(type, code) {
+        const key = code === "Space" ? " " : code.startsWith("Key") ? code.slice(3).toLowerCase() : code
+        await send("Input.dispatchKeyEvent", { type, code, key, windowsVirtualKeyCode: KEY_CODES[code] || 0 }, sessionId)
       },
       async screenshot(path) {
         const { data } = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId)
