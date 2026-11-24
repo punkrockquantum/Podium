@@ -11,24 +11,19 @@
  * values copied in for the drivers in S. The Shapley value averages each driver's marginal effect over every order
  * the drivers could be applied in, so the bars add up to the plan's total exactly and do not depend on who tells
  * the story first. Drivers whose inputs equal Today's are null players: their value is exactly zero, so they are
- * left out of the 2ⁿ enumeration and reported as `pruned`. Pace points are not attributed per driver; they are
- * allocated in proportion to seconds (brief 1.6 c). Above `maxExact` active drivers the sampled-permutation
- * estimate is used.
- *
- * The committed model has no `cpuArch`, `mlPartitionKW` or `mlPlacement` input yet. They are already mapped to
- * drivers here; `normalize()` passes unknown keys through untouched, so a plan may carry them and an injected
- * `evaluateFn` (strategies.js → `envelopeEvaluate`, later the merged model) can act on them.
+ * left out of the 2ⁿ enumeration and reported as `pruned`. Above `maxExact` active drivers the sampled-permutation
+ * estimate is used. Outcomes are seconds (and their aero / reinvestment parts), CHF saved inside the cap and
+ * allowance turned into work; there are no position or points outcomes.
  */
-import { evaluate, simulate, normalize, todayInputs, aeroSeconds, reinvestSeconds, CONTROLS } from "./model.js"
-import { K } from "./assumptions.js"
+import { evaluate, normalize, todayInputs, CONTROLS } from "./model.js"
 
 // ---------------------------------------------------------------------------------------------
 // Drivers (display order of brief 3.5; inputs per brief 1.1)
 // ---------------------------------------------------------------------------------------------
 
 export const DRIVERS = Object.freeze([
-  { id: "power", label: "Enough power for every server (the move)", inputs: ["location", "committedKW", "hinwilRetrofit", "expansionRight"], note: "expansionRight only while that control exists" },
-  { id: "cpuArch", label: "Big-cache processor architecture", inputs: ["cpuArch"], pending: true },
+  { id: "power", label: "Enough power for every server (the move)", inputs: ["location", "committedKW", "hinwilRetrofit"] },
+  { id: "cpuArch", label: "Processor architecture", inputs: ["cpuArch"] },
   { id: "processor", label: "Newer processor generation", inputs: ["refreshYears"] },
   { id: "clock", label: "More cores at a lower declared clock", inputs: ["nodes", "coresPerNode", "clockGHz"] },
   { id: "gpu", label: "Graphics processors on the solver", inputs: ["gpus", "solverGpus", "gpuModel", "gpuChargePct", "mlPartitionKW", "mlPlacement"], note: "the ML partition travels with the GPU step-up" },
@@ -43,11 +38,7 @@ export const DRIVERS = Object.freeze([
 
 export const DRIVER_ORDER = DRIVERS.map((d) => d.id)
 export const HELD = Object.freeze(["season", "position", "confidence", "venue"])
-export const OUTCOMES = Object.freeze(["sec", "aeroSec", "reinvestSec", "savedCHF", "effMauhDelta", "strategyPoints", "points"])
-
-/** Today's value of the inputs the committed model does not have yet (explain brief 2.5, strategies brief 5.3). */
-export const PENDING_BASE = Object.freeze({ cpuArch: "today", mlPartitionKW: 0, mlPlacement: "dr" })
-export const PENDING_INPUTS = Object.keys(PENDING_BASE)
+export const OUTCOMES = Object.freeze(["sec", "aeroSec", "reinvestSec", "savedCHF", "effMauhDelta"])
 
 /** Inputs that cannot move the result unless a sibling input in the same driver enables them. */
 const RELEVANT = {
@@ -60,14 +51,14 @@ const RELEVANT = {
   mlPlacement: (p) => (Number(p.mlPartitionKW) || 0) > 0,
 }
 
-/** Every control is in exactly one driver or held; pending inputs are listed so the integrator sees them. */
+/** Every control is in exactly one driver or held; `unknown` lists driver inputs that are not controls. */
 export function checkCoverage(drivers = DRIVERS) {
   const all = drivers.flatMap((d) => d.inputs)
   const covered = new Set([...HELD, ...all])
   const missing = Object.keys(CONTROLS).filter((id) => !covered.has(id))
   const duplicates = all.filter((id, i) => all.indexOf(id) !== i)
-  const pending = all.filter((id) => !CONTROLS[id] && !HELD.includes(id))
-  return { missing, duplicates, pending }
+  const unknown = all.filter((id) => !CONTROLS[id] && !HELD.includes(id))
+  return { missing, duplicates, unknown }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -86,38 +77,13 @@ export function outcomesOf(result) {
     reinvestSec: perf.reinvestSec * conf,
     savedCHF: perf.savedCHF,
     effMauhDelta: perf.effectiveMauhDelta,
-    strategyPoints: perf.strategyPoints,
-    points: perf.points,
   }
 }
 
-/** Replicates `evaluate()`'s performance block for a (scenario, today) pair: used when Today carries the venue. */
-function perfFor(scenario, today) {
-  const x = scenario.inputs
-  const conf = x.confidence / 100
-  const aero = aeroSeconds(scenario.comp.effectiveMauh) - aeroSeconds(today.comp.effectiveMauh)
-  const saved = today.money.capCharge - scenario.money.capCharge
-  const reinvest = reinvestSeconds(saved)
-  const sec = (aero + reinvest) * conf
-  const perf = K.performance
-  const [lo, hi] = perf.midfield
-  const scenarioPosition = Math.min(Math.max(x.position - sec / perf.secPerPosition, Math.min(lo, x.position)), Math.max(hi, x.position))
-  return {
-    sec, aeroSec: aero * conf, reinvestSec: reinvest * conf, savedCHF: saved,
-    effMauhDelta: scenario.comp.effectiveMauh - today.comp.effectiveMauh,
-    strategyPoints: (scenario.net.quality - today.net.quality) * K.trackside.strategyPointsSwing * conf,
-    points: (x.position - scenarioPosition) * perf.pointsPerPosition,
-  }
-}
-
-function makeValueFn({ evaluateFn, valueFn, venueInBaseline }) {
+function makeValueFn({ evaluateFn, valueFn }) {
   if (valueFn) return valueFn
-  if (!venueInBaseline) return (inputs) => outcomesOf(evaluateFn(inputs))
-  return (inputs) => {
-    const r = evaluateFn(inputs)
-    const today = simulate({ ...r.today.inputs, venue: r.scenario.inputs.venue })
-    return perfFor(r.scenario, today)
-  }
+  // evaluate() already compares the plan with Today at the plan's own venue, so the baseline is zero in every column
+  return (inputs) => outcomesOf(evaluateFn(inputs))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -154,18 +120,10 @@ export function clearAttributionCache() {
 // Coalitions
 // ---------------------------------------------------------------------------------------------
 
-function normalisePlan(planInputs) {
-  const p = normalize(planInputs)
-  if (p.mlPartitionKW !== undefined) p.mlPartitionKW = Math.max(0, Number(p.mlPartitionKW) || 0)
-  return p
-}
+const normalisePlan = (planInputs) => normalize(planInputs)
 
-function baseFor(p) {
-  const base = todayInputs(p.season, p.position, p.confidence)
-  base.venue = p.venue
-  for (const k of PENDING_INPUTS) if (p[k] !== undefined) base[k] = PENDING_BASE[k]
-  return base
-}
+/** Today's setup in the plan's season, at the plan's position, confidence and venue (the held inputs). */
+const baseFor = (p) => todayInputs(p.season, p.position, p.confidence, p.venue)
 
 function differs(p, base, id) {
   if (p[id] === undefined || p[id] === base[id]) return false
@@ -268,18 +226,18 @@ function orderedWaterfall(value, base, p, active, order) {
 /**
  * Attribute a plan's advantage over Today to the drivers.
  *
- * @param planInputs   the plan (raw inputs; normalised here, unknown keys such as `cpuArch` pass through)
+ * @param planInputs   the plan (raw inputs; normalised here)
  * @param options.method        "shapley" (default) or "waterfall"
  * @param options.order         driver ids for the waterfall method (default: display order)
  * @param options.evaluateFn    `evaluate`-shaped model function (default: the committed `evaluate`)
  * @param options.valueFn       alternative: returns the outcome vector directly
  * @param options.drivers       driver table (default DRIVERS; any order gives the same Shapley values)
- * @param options.venueInBaseline  evaluate Today at the plan's venue too (model limitation b); default false
+ * @param options.venueInBaseline  kept for compatibility: evaluate() now always holds Today at the plan's venue
  *                               keeps the bars consistent with the committed headline tile
  * @param options.maxExact      above this many active drivers use the sampled estimate (default 12)
  * @param options.samples, options.seed   sampled estimate: permutations (default 200) and PRNG seed
  * @param options.cache         memoise evaluations and results (default true)
- * @returns { drivers: [{ id, label, sec, aeroSec, reinvestSec, savedCHF, effMauhDelta, strategyPoints, points, share, pruned }],
+ * @returns { drivers: [{ id, label, sec, aeroSec, reinvestSec, savedCHF, effMauhDelta, share, pruned }],
  *            total, baseline, plan, evaluations, ms, method, exact, active, n, inputs }
  *          `total` is what the bars add up to (plan minus baseline); `baseline` is Today vs Today (zero unless
  *          `evaluateFn` carries a venue effect); `plan` is the plan's own outcome vector.
@@ -312,7 +270,6 @@ export function attribute(planInputs, options = {}) {
   const rows = drivers.map((d) => {
     const i = active.indexOf(d)
     const row = { id: d.id, label: d.label, ...(i >= 0 ? core.phi[i] : zeroVector()), pruned: i < 0 }
-    row.points = total.sec !== 0 ? (total.points * row.sec) / total.sec : 0
     row.share = total.sec !== 0 ? row.sec / total.sec : 0
     return row
   })

@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import {
-  DRIVERS, DRIVER_ORDER, HELD, OUTCOMES, PENDING_BASE, attribute, waterfallSteps, checkCoverage, sumError, outcomesOf, clearAttributionCache,
+  DRIVERS, DRIVER_ORDER, HELD, OUTCOMES, attribute, waterfallSteps, checkCoverage, sumError, outcomesOf, clearAttributionCache,
 } from "../public/js/sim/attribution.js"
 import { CONTROLS, PRESET_ORDER, presetInputs, todayInputs, evaluate, normalize } from "../public/js/sim/model.js"
 import { EXPLAIN } from "../public/js/sim/explain.js"
@@ -24,10 +24,11 @@ test("attribution: twelve drivers in the display order, every control covered ex
   const cov = checkCoverage()
   assert.deepEqual(cov.missing, [], `controls not in any driver: ${cov.missing}`)
   assert.deepEqual(cov.duplicates, [], `controls in two drivers: ${cov.duplicates}`)
-  assert.deepEqual(cov.pending.sort(), ["cpuArch", "mlPartitionKW", "mlPlacement"])
-  assert.deepEqual(Object.keys(PENDING_BASE).sort(), cov.pending.sort())
+  assert.deepEqual(cov.unknown, [], `driver inputs that are not controls: ${cov.unknown}`)
   assert.ok(DRIVERS.find((d) => d.id === "gpu").inputs.includes("mlPartitionKW"), "the ML partition travels with the GPU step-up")
-  assert.ok(DRIVERS.find((d) => d.id === "power").inputs.includes("expansionRight"), "expansionRight stays in the power driver while the control exists")
+  assert.ok(!DRIVERS.some((d) => d.inputs.includes("expansionRight")), "the expansion right is gone")
+  assert.deepEqual(DRIVERS.find((d) => d.id === "cpuArch").inputs, ["cpuArch"])
+  assert.deepEqual(OUTCOMES, ["sec", "aeroSec", "reinvestSec", "savedCHF", "effMauhDelta"], "no points or strategy-points column")
   for (const d of DRIVERS) assert.equal(d.label, EXPLAIN[`driver.${d.id}`].title, `${d.id}: bar label and explainer title agree`)
   for (const id of Object.keys(CONTROLS)) assert.ok(HELD.includes(id) || DRIVERS.some((d) => d.inputs.includes(id)), id)
 })
@@ -46,15 +47,14 @@ test("attribution: Σ drivers == total per column (1e-9), no NaN, for all preset
     assert.deepEqual(r.drivers.map((d) => d.id), DRIVER_ORDER)
     const shareSum = r.drivers.reduce((s, d) => s + d.share, 0)
     if (r.total.sec !== 0) assert.ok(Math.abs(shareSum - 1) < 1e-9, `${preset} ${season} shares sum to ${shareSum}`)
-    const pointsSum = r.drivers.reduce((s, d) => s + d.points, 0)
-    assert.ok(Math.abs(pointsSum - r.total.points) < 1e-9, "points are allocated in proportion to seconds and still add up")
+    for (const d of r.drivers) assert.ok(!("points" in d) && !("strategyPoints" in d), "no points on a bar")
     for (const d of r.drivers) if (d.pruned) for (const o of OUTCOMES) assert.equal(d[o], 0, `${d.id} pruned but non-zero ${o}`)
     assert.equal(r.method, "shapley")
     assert.equal(r.evaluations, 2 ** r.n)
   }
 })
 
-test("attribution: reproduces the brief's preset tables (dr2027 +0.137 over 8 drivers, gl2028 +0.390 over 11)", () => {
+test("attribution: reproduces the brief's preset tables (dr2027 +0.137 over 8 drivers; gl2028 re-based to +0.425 over 11)", () => {
   const a = attribute(presetInputs("dr2027"), { cache: false })
   assert.equal(a.n, 8)
   assert.equal(a.evaluations, 256)
@@ -63,12 +63,14 @@ test("attribution: reproduces the brief's preset tables (dr2027 +0.137 over 8 dr
   assert.ok(Math.abs(row(a, "power").sec - 0.084) < 0.002, "the move is the biggest bar")
   assert.ok(Math.abs(row(a, "data").sec - 0.035) < 0.002)
   assert.ok(Math.abs(row(a, "processor").sec - 0.030) < 0.002)
-  assert.ok(row(a, "connectivity").sec < 0 && row(a, "connectivity").strategyPoints > 1, "trackside costs lap time and earns strategy points")
+  assert.ok(row(a, "connectivity").sec < 0 && row(a, "connectivity").savedCHF < 0, "trackside costs lap time and money; its value is read in seconds to decide, not points")
   assert.ok(row(a, "clock").pruned && row(a, "gpu").pruned && row(a, "cpuArch").pruned && row(a, "commercial").pruned)
   const b = attribute(presetInputs("gl2028"), { cache: false })
   assert.equal(b.n, 11)
-  assert.ok(Math.abs(b.total.sec - 0.390) < 0.0015)
-  assert.ok(row(b, "power").sec > 0.25 && row(b, "gpu").sec > 0.05 && row(b, "clock").sec < 0)
+  assert.ok(Math.abs(b.total.sec - 0.425) < 0.0015, `gl2028 inside the 500 kW envelope: ${b.total.sec}`)
+  assert.ok(Math.abs(row(b, "power").sec - 0.321) < 0.002 && Math.abs(row(b, "gpu").sec - 0.073) < 0.002 && Math.abs(row(b, "clock").sec + 0.060) < 0.002)
+  assert.ok(Math.abs(row(b, "data").sec - 0.047) < 0.002 && Math.abs(row(b, "processor").sec - 0.036) < 0.002 && Math.abs(row(b, "cooling").sec - 0.036) < 0.002)
+  assert.ok(row(b, "power").share > 0.7, "the move is three quarters of the 2028 gain")
 })
 
 test("attribution: order invariance — a shuffled driver table gives the same values", () => {
@@ -151,25 +153,24 @@ test("attribution: the 2028 preset attributes in under 150 ms", () => {
   assert.ok(hit.ms < 5, `cache hit took ${hit.ms} ms`)
 })
 
-test("attribution: venue is carried into Today, and venueInBaseline removes the committed model's venue distortion", () => {
+test("attribution: the venue is carried into Today, so the baseline is exactly zero in every column", () => {
   const plan = { ...presetInputs("dr2027"), venue: "melbourne" }
   const a = attribute(plan, { cache: false })
-  assert.ok(Math.abs(a.baseline.sec) < EPS, "seconds never depend on the venue")
-  assert.ok(Math.abs(a.baseline.strategyPoints) > 0.01, "the committed evaluate() compares a Melbourne plan with a Singapore Today (limitation b)")
-  assert.ok(Math.abs(a.total.strategyPoints - (evaluate(plan).perf.strategyPoints - a.baseline.strategyPoints)) < 0.051)
+  for (const o of OUTCOMES) assert.ok(Math.abs(a.baseline[o]) < EPS, `baseline ${o} = ${a.baseline[o]}`)
+  assert.ok(Math.abs(a.total.sec - evaluate(plan).perf.sec) < EPS)
   const b = attribute(plan, { venueInBaseline: true, cache: false })
-  assert.ok(Math.abs(b.baseline.strategyPoints) < EPS, `baseline strategy points ${b.baseline.strategyPoints}`)
-  assert.ok(Math.abs(b.total.sec - a.total.sec) < 0.001, "unrounded vs rounded perf agree to the model's 3 decimals")
-  assert.ok(Math.abs(b.total.strategyPoints - 1.3) < 0.1, "Melbourne plan vs Melbourne Today keeps the +1.3 strategy points")
+  assert.deepEqual(b.drivers.map((d) => d.sec), a.drivers.map((d) => d.sec), "the option is a no-op now that Today follows the plan's venue")
   for (const o of OUTCOMES) assert.ok(sumError(b)[o] < 1e-6)
 })
 
-test("attribution: pending inputs pass through, an injected evaluateFn is honoured, sampling kicks in above maxExact", () => {
+test("attribution: cpuArch and the ML partition are real drivers, an injected evaluateFn is honoured, sampling kicks in above maxExact", () => {
   const base = presetInputs("gl2028")
   const pending = attribute({ ...base, cpuArch: "bigcache", mlPartitionKW: 50, mlPlacement: "dr" }, { cache: false })
   assert.equal(pending.n, 12, "cpuArch and the ML partition count as changes")
   assert.equal(pending.evaluations, 4096)
-  assert.equal(pending.drivers.find((d) => d.id === "cpuArch").sec, 0, "the committed model ignores cpuArch, so its bar is exactly zero")
+  const arch = pending.drivers.find((d) => d.id === "cpuArch")
+  assert.ok(arch.sec > 0.05 && arch.sec < 0.09, `big-cache parts earn their own bar: ${arch.sec}`)
+  assert.equal(arch.label, "Processor architecture")
   const sampled = attribute({ ...base, cpuArch: "bigcache" }, { maxExact: 6, samples: 60, seed: 3, cache: false })
   assert.equal(sampled.method, "shapley-sampled")
   assert.ok(sampled.evaluations < 4096)
@@ -178,12 +179,16 @@ test("attribution: pending inputs pass through, an injected evaluateFn is honour
   const again = attribute({ ...base, cpuArch: "bigcache" }, { maxExact: 6, samples: 60, seed: 3, cache: false })
   assert.deepEqual(again.drivers.map((d) => d.sec), sampled.drivers.map((d) => d.sec), "sampling is seeded")
 
-  // the strategies' envelope model as evaluateFn: the ML partition now moves the GPU bar
+  // strategy B 2028 (the brief's table): the four solver GPUs are the biggest technology bar, the CPU cut takes time back
   const plan = planInputs(STRATEGIES.B, 2028)
   const viaEnvelope = attribute(plan, { evaluateFn: envelopeEvaluate, cache: false })
   assert.ok(Math.abs(viaEnvelope.total.sec - envelopeEvaluate(plan).perf.sec) < 0.0011)
-  assert.ok(viaEnvelope.drivers.find((d) => d.id === "gpu").sec > 0.15, "B's four solver GPUs are the biggest technology bar")
-  assert.ok(viaEnvelope.drivers.find((d) => d.id === "clock").sec < -0.1, "the CPU cut to three nodes takes lap time back")
+  assert.ok(Math.abs(viaEnvelope.total.sec - 0.467) < 0.0015)
+  const bar = (id) => viaEnvelope.drivers.find((d) => d.id === id).sec
+  assert.ok(Math.abs(bar("gpu") - 0.180) < 0.002, "B's four solver GPUs are the biggest technology bar")
+  assert.ok(Math.abs(bar("clock") + 0.134) < 0.002, "the CPU cut to three nodes takes lap time back")
+  assert.ok(Math.abs(bar("power") - 0.313) < 0.002 && Math.abs(bar("cooling") - 0.058) < 0.002)
+  assert.deepEqual(viaEnvelope.drivers.map((d) => d.sec), attribute(plan, { cache: false }).drivers.map((d) => d.sec), "the default evaluate() is the same model")
   for (const k of STRATEGY_ORDER) for (const season of [2027, 2028]) {
     const r = attribute(planInputs(STRATEGIES[k], season), { evaluateFn: envelopeEvaluate, cache: false })
     for (const o of OUTCOMES) assert.ok(sumError(r)[o] < 1e-6, `${k} ${season} ${o}`)

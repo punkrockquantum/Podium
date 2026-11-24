@@ -38,7 +38,10 @@ const TIMELINE_FLAGS = ["slip", "late27", "midatp", "shutdown", "boundary", "ear
 
 test("explain: every current control, tile, flag, driver, strategy and term has an entry", () => {
   for (const id of Object.keys(CONTROLS)) assert.ok(EXPLAIN[`control.${id}`], `control.${id} missing`)
-  for (const id of ["cpuArch", "mlPartitionKW", "mlPlacement", "expansionRight"]) assert.ok(EXPLAIN[`control.${id}`], `control.${id} missing (pending control)`)
+  for (const id of ["cpuArch", "mlPartitionKW", "mlPlacement"]) assert.ok(EXPLAIN[`control.${id}`], `control.${id} missing`)
+  for (const id of ["control.expansionRight", "tile.stat-points", "tile.ladder", "tile.stat-strategy"]) assert.equal(EXPLAIN[id], undefined, `${id} was removed with the expansion right and the points outcomes`)
+  assert.deepEqual(PENDING_IDS, [], "nothing is pending: every entry explains a real control or tile")
+  for (const id of ["stat-decision", "stat-weekends"]) assert.ok(EXPLAIN[`tile.${id}`], `tile.${id} explains trackside value in its own units`)
 
   // tile ids declared by the UI (stat-*, gauge-*, bar-*, headline-sec; headline-sub/-alert are text lines) plus the tiles the briefs add
   const appTileIds = [...uiSource.matchAll(/id:\s*"((?:stat|gauge|bar)-[a-z0-9-]+|headline-sec)"/g)].map((m) => m[1])
@@ -63,14 +66,14 @@ test("explain: every current control, tile, flag, driver, strategy and term has 
   for (const x of probes) for (const f of simulate(x).flags) seen.add(f.id)
   assert.ok(seen.size >= 8, `expected at least 8 distinct flag ids, saw ${[...seen]}`)
   for (const id of seen) assert.ok(EXPLAIN[`flag.${id}`], `flag.${id} missing`)
-  for (const id of ["arch", "armport"]) assert.ok(EXPLAIN[`flag.${id}`], `flag.${id} missing (pending flag)`)
+  for (const id of ["arch", "armport", "expansion", "racks"]) assert.ok(EXPLAIN[`flag.${id}`], `flag.${id} missing`)
 
   for (const d of DRIVERS) assert.ok(EXPLAIN[`driver.${d.id}`], `driver.${d.id} missing`)
   assert.deepEqual(DRIVER_IDS, DRIVERS.map((d) => d.id), "driver entries follow the attribution display order")
   for (const k of STRATEGY_ORDER) assert.ok(EXPLAIN[`strategy.${k}`], `strategy.${k} missing`)
   for (const [, e] of Object.entries(EXPLAIN)) for (const t of e.terms || []) assert.ok(EXPLAIN[t], `${e.kind}.${e.id} links to unknown ${t}`)
   assert.ok(TERM_IDS.length >= 25)
-  assert.ok(PENDING_IDS.includes("control.cpuArch") && PENDING_IDS.includes("driver.cpuArch"))
+  assert.ok(EXPLAIN["control.cpuArch"] && EXPLAIN["driver.cpuArch"] && !EXPLAIN["control.cpuArch"].pending)
 })
 
 test("explain: copy rules — shape, one-liner length, no unexpanded acronym, British spelling", () => {
@@ -137,7 +140,7 @@ test("explain: plan-level tiles and timeline flags fill from a plan.js result, a
         2028: { changes: true, goLive: Date.UTC(2027, 11, 6), earlyDays: 26, earlyCostCHF: 48_000, shareOld: 0, periodLoss: 0, slipDays: 0, orderBy: Date.UTC(2027, 8, 27) },
       },
     },
-    totals: { cash: 7_800_000, todayCash: 6_100_000, cashDelta: 1_700_000, tco3: 10_200_000, todayTco3: 8_900_000, sec: 0.51, points: 23.4 },
+    totals: { cash: 7_800_000, todayCash: 6_100_000, cashDelta: 1_700_000, tco3: 10_200_000, todayTco3: 8_900_000, sec: 0.51 },
   }
   const ctx = explainContext({ result, plan: planShaped, fmt })
   assert.equal(ctx.d.plan.goLiveLabel, "Live 8 Mar 2027")
@@ -155,7 +158,7 @@ test("explain: plan-level tiles and timeline flags fill from a plan.js result, a
   assert.equal(fillTemplate(EXPLAIN["tile.stat-loss"], ctx), "1.8 % of the period, 0.30 % of the season: 1 solver days.")
   assert.equal(fillTemplate(EXPLAIN["tile.stat-critical"], ctx), "The fibre route: 15 weeks from contract to the earliest switch.")
   assert.equal(fillTemplate(EXPLAIN["tile.stat-cash-total"], ctx), "CHF 7.8 M over both seasons, +CHF 1.7 M vs staying as today (CHF 6.1 M).")
-  assert.equal(fillTemplate(EXPLAIN["tile.stat-sec-total"], ctx), "+0.51 s over two seasons, worth about +23 points at 60 % confidence.")
+  assert.equal(fillTemplate(EXPLAIN["tile.stat-sec-total"], ctx), "+0.51 s over two seasons at 60 % confidence.")
   assert.equal(fillTemplate(EXPLAIN["flag.order28"], ctx), "Order by 27 Sep 2027; 2028 step-up 6 Dec 2027.")
   // a string date and a late 2028 landing
   const late = explainContext({ result, fmt, plan: { timeline: { seasons: { 2028: { changes: true, goLive: "2028-02-14", shareOld: 0.12 } } } } })
@@ -223,7 +226,7 @@ test("explain: explainContext derives the plain-English facts the templates need
   assert.equal(ctx.d.option.cpuArch, CPU_ARCH.today.label)
   assert.equal(ctx.d.ml.kW, 0)
   assert.equal(ctx.d.envelope.offerKW, 500)
-  assert.ok(ctx.d.envelope.drIT > 500, "the committed gl2028 estate is over the 500 kW offer until it is re-based")
+  assert.ok(ctx.d.envelope.drIT > 395 && ctx.d.envelope.drIT <= 450 && ctx.d.envelope.fits, `the re-based gl2028 estate sits inside the 500 kW offer: ${ctx.d.envelope.drIT}`)
   assert.equal(ctx.d.sec2028, result.perf.sec)
   assert.equal(ctx.d.leadLabel, "6 wk early")
   assert.ok(Math.abs(ctx.d.aeroSec + ctx.d.reinvestSec - result.perf.sec) < 0.0021)

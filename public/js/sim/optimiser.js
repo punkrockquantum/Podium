@@ -4,7 +4,7 @@
  *
  *   optimise({ start, objective, evaluatePlan, fits, locked, restarts, maxSweeps, maxPlans, seed, fill, onProgress, shouldStop })
  *     → { best, score, result, evaluations, candidates, ms, trace, stopped, diff }
- *   OBJECTIVES      the four scores of strategies brief 3.1 (exact formulas and side-conditions)
+ *   OBJECTIVES      the three scores (strategies brief 3.1 without the points objective: fastest 2028, cap headroom, balanced)
  *   SEARCH_SPACE    every control the optimiser may move, its allowed values and whether it is locked by default (3.2)
  *   fillNodes()     the analytic fill move of 3.4 (nodes derived from the allowance)
  *   diffPlans(a, b) the changed controls between two plans, for the result table
@@ -17,8 +17,8 @@
  * without exceeding it. Candidates that do not fit both seasons score −∞. Evaluations are memoised per plan, the
  * PRNG is seeded (mulberry32), so the same inputs give the same proposal.
  *
- * `evaluatePlan(plan)` and `fits(result)` are injected; they default to the transitional helpers in strategies.js
- * and will take the merged model's `evaluate` through `evaluatePlan(plan, { evaluateFn: evaluate })`.
+ * `evaluatePlan(plan)` and `fits(result)` are injected; they default to strategies.js's `evaluatePlan` over the
+ * model's `evaluate` (single-season, steady-state figures: the optimiser ranks estates, plan.js blends the season).
  */
 import { K } from "./assumptions.js"
 import { ENVELOPE, SEASONS, evaluatePlan as evaluatePlanDefault, sharedOf } from "./strategies.js"
@@ -27,10 +27,11 @@ import { ENVELOPE, SEASONS, evaluatePlan as evaluatePlanDefault, sharedOf } from
 // Objectives (3.1)
 // ---------------------------------------------------------------------------------------------
 
-const MIN_SEC = (K.optimiser && K.optimiser.minSec) ?? 0.10
+const MIN_SEC = K.optimiser.minSec
 const secOf = (r, y) => r[y].perf.secExact ?? r[y].perf.sec
-const pointsOf = (r, y) => r[y].perf.pointsExact ?? r[y].perf.points
 const capOf = (r, y) => r[y].scenario.money.capCharge
+const availOf = (r, y) => r[y].scenario.comp.availabilityPct / 100
+const decisionOf = (r, y) => r[y].scenario.net.venue.decisionSec
 
 export const OBJECTIVES = Object.freeze({
   fastest2028: {
@@ -39,13 +40,6 @@ export const OBJECTIVES = Object.freeze({
     formula: "sec2028 + 0.1 · sec2027",
     sideCondition: `sec2027 ≥ +${MIN_SEC.toFixed(2)} s (else score = −1 + sec2027)`,
     score: (r) => (secOf(r, 2027) >= MIN_SEC ? secOf(r, 2028) + 0.1 * secOf(r, 2027) : -1 + secOf(r, 2027)),
-  },
-  points: {
-    id: "points",
-    label: "Most points over both seasons",
-    formula: "pts2027 + strategyPts2027 + pts2028 + strategyPts2028 + 10 · (sec2027 + sec2028)",
-    sideCondition: null,
-    score: (r) => pointsOf(r, 2027) + r[2027].perf.strategyPoints + pointsOf(r, 2028) + r[2028].perf.strategyPoints + 10 * (secOf(r, 2027) + secOf(r, 2028)),
   },
   headroom: {
     id: "headroom",
@@ -56,19 +50,19 @@ export const OBJECTIVES = Object.freeze({
   },
   balanced: {
     id: "balanced",
-    label: "Balanced: lap time, cap headroom, resilience, trackside",
-    formula: "mean(sec) − 0.03 · mean(capM) + 0.5 · (mean(avail) − 0.99) + 0.01 · mean(strategyPts)",
+    label: "Balanced: lap time, cap headroom, availability, data-to-decision",
+    formula: "mean(sec) − 0.03 · mean(capM) + 0.5 · (mean(avail) − 0.99) + 0.01 · (5 − mean(decisionSec))",
     sideCondition: null,
     score: (r) => {
       const sec = (secOf(r, 2027) + secOf(r, 2028)) / 2
       const cap = (capOf(r, 2027) + capOf(r, 2028)) / 2 / 1e6
-      const avail = (r[2027].scenario.comp.availabilityPct + r[2028].scenario.comp.availabilityPct) / 200
-      const pts = (r[2027].perf.strategyPoints + r[2028].perf.strategyPoints) / 2
-      return sec - 0.03 * cap + 0.5 * (avail - 0.99) + 0.01 * pts
+      const avail = (availOf(r, 2027) + availOf(r, 2028)) / 2
+      const decision = (decisionOf(r, 2027) + decisionOf(r, 2028)) / 2
+      return sec - 0.03 * cap + 0.5 * (avail - 0.99) + 0.01 * (K.trackside.decisionTargetSec - decision)
     },
   },
 })
-export const OBJECTIVE_ORDER = Object.freeze(["fastest2028", "points", "headroom", "balanced"])
+export const OBJECTIVE_ORDER = Object.freeze(["fastest2028", "headroom", "balanced"])
 
 // ---------------------------------------------------------------------------------------------
 // Search space (3.2)
@@ -96,7 +90,8 @@ export const SEARCH_SPACE = Object.freeze({
   season: Object.freeze({
     nodes: { values: range(41), lockedByDefault: false, derived: true, note: "derived by the fill move when fill is on" },
     coresPerNode: { values: [64, 96, 128, 192], lockedByDefault: false, note: "re-clamps clockGHz to the CCF floor" },
-    clockGHz: { values: [2.3, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.7, 4.0], lockedByDefault: false, note: "≥ CCF floor of the core count" },
+    clockGHz: { values: [2.3, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.7, 4.0], lockedByDefault: false, note: "≥ CCF floor of the core count and the processor family's base clock" },
+    cpuArch: { values: Object.keys(K.compute.cpuArch), lockedByDefault: true, why: "policy: the processor family is the sales lead's call (A-f)" },
     memoryGB: { values: [384, 768, 1536], lockedByDefault: false },
     interconnect: { values: ["eth100", "eth200", "ibndr", "slingshot"], lockedByDefault: false },
     storage: { values: ["nas", "pfs", "flash"], lockedByDefault: false },
@@ -121,11 +116,12 @@ export const LOCKED_BY_DEFAULT = Object.freeze({
 })
 
 export const DEFAULTS = Object.freeze({
-  restarts: (K.optimiser && K.optimiser.restarts) ?? 8,
-  maxSweeps: (K.optimiser && K.optimiser.maxSweeps) ?? 12,
-  maxPlans: (K.optimiser && K.optimiser.maxPlans) ?? 6000,
-  thoroughMaxPlans: (K.optimiser && K.optimiser.thoroughMaxPlans) ?? 20000,
-  seed: (K.optimiser && K.optimiser.seed) ?? 2027,
+  restarts: K.optimiser.restarts,
+  thoroughRestarts: K.optimiser.thoroughRestarts,
+  maxSweeps: K.optimiser.maxSweeps,
+  maxPlans: K.optimiser.maxPlans,
+  thoroughMaxPlans: K.optimiser.thoroughMaxPlans,
+  seed: K.optimiser.seed,
   capGuardRailCHF: ENVELOPE.capChargeMaxCHF,
 })
 
@@ -135,7 +131,7 @@ const META_KEYS = new Set(["key", "id", "name", "tagline", "story", "timeline", 
 export function canonicalPlan(plan) {
   const shared = { ...FIXED }
   for (const [k, v] of Object.entries(sharedOf(plan))) if (!META_KEYS.has(k) && !SEASONS.includes(Number(k))) shared[k] = v
-  shared.expansionRight = false
+  delete shared.expansionRight
   const out = { shared }
   for (const y of SEASONS) {
     const s = { ...(plan[y] || plan[SEASONS[0]] || {}) }
@@ -171,7 +167,13 @@ const CLOCKS = SEARCH_SPACE.season.clockGHz.values
 const RACKS = SEARCH_SPACE.shared.rackKW.values
 const GPUS = SEARCH_SPACE.season.gpus.values
 
-export function ccfFloor(coresPerNode) { return ENVELOPE.ccfFloorGHz[coresPerNode] ?? 2.0 }
+/** The CCF floor: the core count's base clock (H3) or the processor family's base clock for the season, whichever is higher. */
+export function ccfFloor(coresPerNode, cpuArch = K.compute.cpuArchToday, season = 2027) {
+  const arch = K.compute.cpuArch[cpuArch] || K.compute.cpuArch[K.compute.cpuArchToday]
+  return Math.max(ENVELOPE.ccfFloorGHz[coresPerNode] ?? 2.0, (arch.baseGHz && arch.baseGHz[season]) ?? 0)
+}
+
+const archOf = (plan, y) => plan[y].cpuArch ?? plan.shared.cpuArch ?? K.compute.cpuArchToday
 
 /** Keep a plan's dependent controls legal: CCF ≥ floor, rackKW ≤ cooling ceiling, solverGpus ≤ gpus, none in 2027. */
 export function clampPlan(plan) {
@@ -179,7 +181,7 @@ export function clampPlan(plan) {
   if (ceiling && plan.shared.rackKW > ceiling) plan.shared.rackKW = [...RACKS].reverse().find((v) => v <= ceiling) ?? ceiling
   for (const y of SEASONS) {
     const s = plan[y]
-    const floor = ccfFloor(s.coresPerNode)
+    const floor = ccfFloor(s.coresPerNode, archOf(plan, y), y)
     if (s.clockGHz < floor - 1e-9) s.clockGHz = CLOCKS.find((v) => v >= floor - 1e-9) ?? floor
     if (y < K.fia.gpuAllowedFrom) s.solverGpus = 0
     if (s.solverGpus > s.gpus) s.gpus = GPUS.find((g) => g >= s.solverGpus) ?? s.solverGpus
@@ -194,7 +196,7 @@ function allowedValues(plan, scope, id) {
   const spec = scope === "shared" ? SEARCH_SPACE.shared[id] : SEARCH_SPACE.season[id]
   let values = spec.values
   if (scope !== "shared" && spec.seasons && !spec.seasons.includes(scope)) return []
-  if (id === "clockGHz") values = values.filter((v) => v >= ccfFloor(plan[scope].coresPerNode) - 1e-9)
+  if (id === "clockGHz") values = values.filter((v) => v >= ccfFloor(plan[scope].coresPerNode, archOf(plan, scope), scope) - 1e-9)
   if (id === "rackKW") values = values.filter((v) => v <= (ENVELOPE.coolingMaxKWPerRack[plan.shared.cooling] ?? Infinity))
   return values
 }
@@ -222,7 +224,7 @@ export function defaultFits(result, { capGuardRailCHF = DEFAULTS.capGuardRailCHF
     if (r.scenario.comp.usage > ENVELOPE.usageMax + 1e-9) return false
     if (r.scenario.money.capCharge > capGuardRailCHF) return false
     if (y < K.fia.gpuAllowedFrom && r.scenario.inputs.solverGpus > 0) return false
-    if (r.scenario.inputs.nodes > 0 && r.scenario.inputs.clockGHz < ccfFloor(r.scenario.inputs.coresPerNode) - 1e-9) return false
+    if (r.scenario.inputs.nodes > 0 && r.scenario.inputs.clockGHz < ccfFloor(r.scenario.inputs.coresPerNode, r.scenario.inputs.cpuArch, y) - 1e-9) return false
   }
   return true
 }

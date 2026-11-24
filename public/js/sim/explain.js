@@ -8,9 +8,8 @@
  *   explainContext({ result, attribution, both, fmt }) → the ctx the templates expect
  *
  * Copy follows the explain brief (section 3): British English, reading age 12–14, no unexpanded acronym in the
- * one-liner, one analogy per entry, every entry tagged with FIA rule ids and fact-pack rows. Entries exist for the
- * controls the model does not have yet (`cpuArch`, `mlPartitionKW`, `mlPlacement`) and for `expansionRight`,
- * which the strategies brief removes: the integrator deletes that entry if the control goes.
+ * one-liner, one analogy per entry, every entry tagged with FIA rule ids and fact-pack rows. There are no
+ * position or points entries: trackside value is data-to-decision seconds, link availability and race weekends.
  *
  * Template grammar: `{expr}` where expr is a dotted path into the ctx (`x.nodes`, `s.comp.usage`, `a.power.sec`,
  * `d.option.cooling`), a number, a 'string', arithmetic (+ − × ÷ with the usual precedence, unary minus) or a
@@ -25,19 +24,13 @@ import { costCapCHF } from "../customer.js"
 // Small tables the copy and the context need
 // ---------------------------------------------------------------------------------------------
 
-/** The proposed processor-family control (explain brief 2.5). Mirrors the future K.compute.cpuArch. */
-export const CPU_ARCH = {
-  today: { label: "Today's processors (standard cache)", bar: "Today's processors", workPerAuh: { 2027: 1.0, 2028: 1.0 }, kwFactor: { 2027: 1.0, 2028: 1.0 } },
-  std: { label: "Standard cache, newest generation", bar: "Newest standard processor", workPerAuh: { 2027: 1.05, 2028: 1.12 }, kwFactor: { 2027: 1.0, 2028: 1.05 } },
-  bigcache: { label: "Big cache (3D V-Cache)", bar: "Big-cache processor", workPerAuh: { 2027: 1.2, 2028: 1.3 }, kwFactor: { 2027: 1.08, 2028: 1.1 } },
-  xeon: { label: "Intel Xeon, fast memory", bar: "Fast-memory processor", workPerAuh: { 2027: 1.08, 2028: 1.15 }, kwFactor: { 2027: 1.15, 2028: 1.15 } },
-  arm: { label: "Arm (NVIDIA Grace → Vera)", bar: "Arm processor", workPerAuh: { 2027: 1.0, 2028: 1.07 }, kwFactor: { 2027: 0.85, 2028: 0.9 } },
-}
+/** The processor-family table (K.compute.cpuArch, explain brief 2.5) with the plain labels the bars and copy use. */
+export const CPU_ARCH = Object.fromEntries(Object.entries(K.compute.cpuArch).map(([id, o]) => [id, { label: o.label, bar: o.bar, workPerAuh: o.workPerAuh, kwFactor: o.kwFactor }]))
 
 const ML_PLACEMENT = { dr: "the campus", hinwil: "the Hinwil room", cloud: "the cloud" }
 const COOLING_WORD = { air: "Air cooling", reardoor: "Rear-door cooling", dlc: "Direct liquid cooling" }
 const SITE_WORD = { hinwil: "Hinwil room", dr: "Digital Realty Zurich" }
-const ENVELOPE_KW = 500
+const ENVELOPE_KW = K.facility.envelopeKW
 
 /** Plain words for the model's units when the Plain English toggle is on. */
 const UNIT_WORDS = {
@@ -89,7 +82,7 @@ const CONTROL_ENTRIES = {
     more: [
       "The model turns computing into lap time with a curve fitted to public statements, not measurements from this team.",
       "The confidence slider scales every modelled gain. 60 % is the default; 100 % is \"the curve is exactly right\".",
-      "It never changes costs or the allowance, only the seconds and points.",
+      "It never changes costs or the allowance, only the seconds.",
     ],
     analogy: "A weather forecast's \"60 % chance of rain\".",
     inPlan: "At {x.confidence} %: every modelled gain is multiplied by {x.confidence / 100}.",
@@ -145,7 +138,6 @@ const CONTROL_ENTRIES = {
     inPlan: "{d.archLabel}: {fmt.num(d.archFactor, 2)}× the useful work per unit vs Today's processors, at {fmt.pct(d.archPowerDelta)} more power per server.",
     source: "K2 · K3 · K4 · K-b · A15",
     terms: ["term.vcache", "term.bandwidth", "term.ipc"],
-    pending: true,
   },
   memoryGB: {
     title: "Memory per server",
@@ -337,19 +329,6 @@ const CONTROL_ENTRIES = {
     source: "G-c · D-d",
     terms: ["term.capcharge"],
   },
-  expansionRight: {
-    title: "2028 expansion right",
-    one: "A guarantee that the campus will have 1,000 kW ready for the team in 2028.",
-    more: [
-      "The graphics-processor step in 2028 roughly doubles the power. The right reserves it now; actual use is billed at the same rate.",
-      "There is a one-off fit-out for liquid rows if it is used. The strategies brief replaces this right with a fixed 500 kW envelope; this entry goes if the control goes.",
-    ],
-    analogy: "Reserving the bigger room for next year's party.",
-    inPlan: "{d.expansionNote}.",
-    source: "B-b · G-c · model",
-    terms: ["term.capcharge"],
-    pending: true,
-  },
   mlPartitionKW: {
     title: "Machine-learning partition",
     one: "Power set aside for machine-learning and other unrestricted graphics processors.",
@@ -361,7 +340,6 @@ const CONTROL_ENTRIES = {
     inPlan: "{d.ml.kW} kW for machine learning at {d.ml.placementLabel}: {fmt.num(d.envelope.drIT, 0)} of {d.envelope.offerKW} kW used at the campus.",
     source: "G-h · J-g",
     terms: ["term.gpu", "term.onramp"],
-    pending: true,
   },
   mlPlacement: {
     title: "Where the machine-learning partition lives",
@@ -374,7 +352,6 @@ const CONTROL_ENTRIES = {
     inPlan: "{d.ml.placementLabel}: {d.ml.note}.",
     source: "G-h · J-g · model",
     terms: ["term.onramp", "term.capcharge"],
-    pending: true,
   },
   rackKW: {
     title: "Power per cabinet",
@@ -577,7 +554,7 @@ const CONTROL_ENTRIES = {
     one: "Which race the latency readout is shown for.",
     more: [
       "Round-trip time to Hinwil differs by venue.",
-      "The venue changes the readout only, not the plan's totals (the strategy points use the season average).",
+      "The venue changes the data-to-decision readout; Today is read at the same venue, so the seconds per lap never move.",
     ],
     analogy: "Checking the signal at different stadiums.",
     inPlan: "{s.net.venue.name}: {fmt.num(s.net.venue.rttMs, 0)} ms round trip.",
@@ -626,17 +603,30 @@ const TILE_ENTRIES = {
     source: "J-b · C1",
     terms: ["term.costcap", "term.capcharge"],
   },
-  "stat-points": {
-    title: "Places and points",
-    term: "Position swing",
-    one: "Championship places and points the lap-time swing is worth.",
+  "stat-decision": {
+    title: "Data to decision",
+    term: "Data-to-decision seconds",
+    one: "How long it takes for a reading at the track to become a call on the pit wall, in seconds.",
     more: [
-      "About a tenth of a second a lap moves a team one place in the midfield. Points use the sliding-scale reading of the table: 25 a place.",
-      "Capped at fifth, because above that the midfield curve stops applying.",
+      "Telemetry goes from the garage to Hinwil and back: a base of 6 s plus two round trips, minus 1.5 s when edge compute in the garage pre-digests it.",
+      "Under about 5 s the engineers decide inside the same lap; the venue slider picks the circuit the readout is shown for.",
     ],
-    analogy: "Climbing the league table.",
-    inPlan: "P{x.position} → P{p.scenarioPosition}: {fmt.signed(p.points, 0)} points from pace, {fmt.signed(p.strategyPoints, 1)} from race-day decisions.",
-    source: "J-e · I-e",
+    analogy: "The delay between a question and the answer on a long-distance call.",
+    inPlan: "{fmt.num(s.net.venue.decisionSec, 1)} s at {s.net.venue.name} vs {fmt.num(t.net.venue.decisionSec, 1)} s Today ({fmt.signed(-p.decisionDeltaSec, 1)} s).",
+    source: "I-a · I-d",
+    terms: ["term.rtt", "term.edge"],
+  },
+  "stat-weekends": {
+    title: "Race weekends at risk",
+    term: "Race weekends at risk",
+    one: "How many of the season's race weekends the model expects to run without the factory link.",
+    more: [
+      "Link availability times the 24 race weekends: a 99.9 % link loses about 0.02 weekends a season, a public-internet link ten times that.",
+      "A second route or a satellite back-up moves this, not lap time.",
+    ],
+    analogy: "The number of matches the TV broadcast drops out for.",
+    inPlan: "{fmt.num(s.net.weekendsLost, 2)} of {s.net.raceWeekends} weekends vs {fmt.num(t.net.weekendsLost, 2)} Today, link {fmt.availability(s.net.linkAvailability)}.",
+    source: "I-b · C7",
     terms: [],
   },
   "season-strip": {
@@ -647,19 +637,6 @@ const TILE_ENTRIES = {
     analogy: "The two halves of a season.",
     inPlan: "2027: {fmt.sec(d.sec2027)} · 2028: {fmt.sec(d.sec2028)}.",
     source: "model",
-    terms: [],
-  },
-  ladder: {
-    title: "Lap-time ladder",
-    term: "Lap-time ladder",
-    one: "Where the plan lands in the constructors' table.",
-    more: [
-      "Each rung is a tenth of a second.",
-      "The position fed to the sliding scale stays as set; this is the model's estimate of where the pace would land.",
-    ],
-    analogy: "The podium steps.",
-    inPlan: "From P{x.position} to P{p.scenarioPosition}.",
-    source: "J-e",
     terms: [],
   },
   "gauge-mauh": {
@@ -883,16 +860,6 @@ const TILE_ENTRIES = {
     source: "I-b",
     terms: [],
   },
-  "stat-strategy": {
-    title: "Points from race-day calls",
-    term: "Strategy points",
-    one: "Points a season from quicker, safer race-day calls.",
-    more: ["The model gives up to ±6 points for latency, headroom and resilience together. Independent of the pace points."],
-    analogy: "Getting the pit stop call right.",
-    inPlan: "{fmt.signed(p.strategyPoints, 1)} points a season vs Today.",
-    source: "I-e",
-    terms: ["term.edge", "term.rtt"],
-  },
   envelope: {
     title: "Share of the 500 kW offer",
     term: "kW at Digital Realty of 500",
@@ -1000,10 +967,10 @@ const TILE_ENTRIES = {
   "stat-sec-total": {
     title: "Lap time over both seasons",
     term: "Lap time, both seasons",
-    one: "The 2027 and 2028 lap-time gains added together, with the points they are worth.",
+    one: "The 2027 and 2028 lap-time gains added together.",
     more: ["Each season is measured against today's setup in that season, at the confidence you set."],
     analogy: "Two race results added into a championship score.",
-    inPlan: "{fmt.sec(d.plan.secTotal)} over two seasons, worth about {fmt.signed(d.plan.pointsTotal, 0)} points at {x.confidence} % confidence.",
+    inPlan: "{fmt.sec(d.plan.secTotal)} over two seasons at {x.confidence} % confidence.",
     source: "J-a · J-c",
     terms: [],
     plan: true,
@@ -1046,6 +1013,30 @@ const FLAG_ENTRIES = {
     inPlan: "{fmt.num(d.sitePowerKW, 0)} kW against {d.siteCapKW} kW at {d.siteName}: {d.powerFit}.",
     source: "A-a · D-d",
     terms: [],
+  },
+  racks: {
+    title: "Rack positions in the cage",
+    one: "Whether the rows fit the 60 rack positions of the Digital Realty cage.",
+    more: [
+      "The rest of the estate is counted at 8 kW per rack position; the cluster and any ML partition at the rack density you chose.",
+      "Denser racks need fewer positions, which is one reason to choose rear-door or direct-liquid cooling.",
+    ],
+    analogy: "Shelf space, not just the electricity bill.",
+    inPlan: "{d.envelope.racks} of {d.envelope.cageRackPositions} rack positions used at {d.siteName}.",
+    source: "G-g · G-h",
+    terms: ["term.rackdensity"],
+  },
+  expansion: {
+    title: "No expansion right in the offer",
+    one: "The 500 kW offer has no expansion right; a plan saved with one is read without it.",
+    more: [
+      "More kW is a separate commercial conversation: ZUR4 adds 15 MW on the campus in 2028.",
+      "The figures in this tool are unchanged by the old setting; only this note remains.",
+    ],
+    analogy: "A lease with no option on the flat next door.",
+    inPlan: "{d.expansionNote}",
+    source: "G11 · G-g",
+    terms: ["term.envelope"],
   },
   hybridpower: {
     title: "Power at Hinwil in a hybrid plan",
@@ -1100,7 +1091,6 @@ const FLAG_ENTRIES = {
     inPlan: "{d.archLabel} for {x.season}: {d.leadLabel}.",
     source: "K7 · K9",
     terms: ["term.vcache"],
-    pending: true,
   },
   armport: {
     title: "Arm processors need the code re-tested",
@@ -1110,7 +1100,6 @@ const FLAG_ENTRIES = {
     inPlan: "{d.archLabel}: {d.leadLabel}.",
     source: "K-d",
     terms: ["term.cfd"],
-    pending: true,
   },
   // Timeline flags raised by the deployment schedule (timeline.js on the customer branch); read explainContext({ plan }).
   slip: {
@@ -1222,7 +1211,7 @@ const DRIVER_ENTRIES = {
     one: "Today's room cannot power the whole cluster; the campus can, so every server runs.",
     more: [
       "Today's Hinwil room has about 300 kW for servers. The modelled estate needs more: in 2027 about 94 kW more, in 2028 about 480 kW more, so a share of the cluster never switches on while the allowance ticks away.",
-      "At the campus every server has power, two independent feeds and spare cooling. This bar also carries the campus fee, cross-connects and the fit-out, and anything that only works at the campus (heat reuse, the expansion right).",
+      "At the campus every server has power, two independent feeds and spare cooling. This bar also carries the campus fee, cross-connects and the fit-out, and anything that only works at the campus (heat reuse).",
       "Caveat: the room's 300 kW is an assumption to confirm with the team; the bar moves with it.",
     ],
     analogy: "Twelve heaters, sockets for nine.",
@@ -1232,7 +1221,7 @@ const DRIVER_ENTRIES = {
     terms: ["term.redundancy", "term.capcharge"],
   },
   cpuArch: {
-    title: "Big-cache processor architecture",
+    title: "Processor architecture",
     term: "architecture factor on work per AUh",
     one: "Processors with a very large on-chip store finish the airflow maths sooner at the same declared clock, and the FIA does not charge for that.",
     more: [
@@ -1245,7 +1234,6 @@ const DRIVER_ENTRIES = {
     zero: "Same processor family as Today.",
     source: "K2 · K3 · K4 · K-b · C9",
     terms: ["term.vcache", "term.bandwidth", "term.auh"],
-    pending: true,
   },
   processor: {
     title: "Newer processor generation",
@@ -1381,21 +1369,21 @@ const DRIVER_ENTRIES = {
   },
   connectivity: {
     title: "Faster decisions at the track",
-    term: "fibre availability, trackside quality → strategy points",
+    term: "fibre availability, trackside quality → data-to-decision seconds",
     one: "Better links to the track and the campus mean quicker, safer race-day calls; they cost money inside the cap.",
     more: [
       "A carrier or satellite-backed link cuts the round trip and keeps sessions online; edge compute in the garage pre-digests telemetry; two fibre routes keep the wind tunnel connected to its cluster.",
-      "The model pays these back as strategy points, not lap time, so this bar is usually negative on the lap-time chart and positive on the points line.",
+      "The model pays these back in data-to-decision seconds and race weekends kept online, not lap time, so this bar is usually negative on the lap-time chart.",
     ],
     analogy: "A private phone line to the pit wall.",
-    inPlan: "{d.tracksideLabel}{d.edgeSuffix}, {d.fibreLabel}: decision in {fmt.num(s.net.venue.decisionSec, 1)} s vs {fmt.num(t.net.venue.decisionSec, 1)} s, link {fmt.availability(s.net.linkAvailability)}. {fmt.signed(a.connectivity.strategyPoints, 1)} points a season; {fmt.chfDelta(a.connectivity.savedCHF)} a year inside the cap = {fmt.sec(a.connectivity.sec)} per lap.",
+    inPlan: "{d.tracksideLabel}{d.edgeSuffix}, {d.fibreLabel}: decision in {fmt.num(s.net.venue.decisionSec, 1)} s vs {fmt.num(t.net.venue.decisionSec, 1)} s, link {fmt.availability(s.net.linkAvailability)}. {fmt.chfDelta(a.connectivity.savedCHF)} a year inside the cap = {fmt.sec(a.connectivity.sec)} per lap.",
     zero: "Same links as Today.",
     source: "I-a · I-b · I-d · I-e · B-e · G6",
     terms: ["term.rtt", "term.edge", "term.darkfibre", "term.onramp"],
   },
 }
 
-const STRATEGY_INPLAN = "{a.n} parts explain {fmt.sec(a.total.sec)} in {x.season}: the move {fmt.sec(a.power.sec)} ({fmt.pct(a.power.share)}), data {fmt.sec(a.data.sec)}, processors {fmt.sec(a.processor.sec)}, clock {fmt.sec(a.clock.sec)}, graphics processors {fmt.sec(a.gpu.sec)}, cooling {fmt.sec(a.cooling.sec)}; trackside {fmt.sec(a.connectivity.sec)} for {fmt.signed(a.connectivity.strategyPoints, 1)} points."
+const STRATEGY_INPLAN = "{a.n} parts explain {fmt.sec(a.total.sec)} in {x.season}: the move {fmt.sec(a.power.sec)} ({fmt.pct(a.power.share)}), data {fmt.sec(a.data.sec)}, processors {fmt.sec(a.processor.sec)}, clock {fmt.sec(a.clock.sec)}, graphics processors {fmt.sec(a.gpu.sec)}, cooling {fmt.sec(a.cooling.sec)}; trackside {fmt.sec(a.connectivity.sec)} for a decision in {fmt.num(s.net.venue.decisionSec, 1)} s."
 
 const STRATEGY_ENTRIES = {
   A: {
@@ -1406,7 +1394,7 @@ const STRATEGY_ENTRIES = {
       "Nearly all of the gain is the move: Today's room is 94 kW short in 2027 and 479 kW short in 2028, so a quarter to two thirds of the cluster never runs. At the campus everything runs: +0.084 s (61 %) in 2027, +0.329 s (89 %) in 2028.",
       "Parallel storage and InfiniBand stop cores waiting for data: +0.035 s / +0.047 s. A four-year instead of five-year fleet does 8 % more work per charged hour: +0.030 s / +0.024 s.",
       "It leaves the cluster size and declared clock alone, so there is no clock gain and no 2028 solver step for graphics processors; the four unrestricted graphics processors cost a little (−0.019 s) through power and cap money.",
-      "It adds the least to the cost inside the cap of the three strategies (+CHF 0.95 M a year in 2027, +0.29 M in 2028 vs Today), and the trackside package costs −0.016 s for +1.3 strategy points.",
+      "It adds the least to the cost inside the cap of the three strategies (+CHF 0.95 M a year in 2027, +0.29 M in 2028 vs Today); the trackside package costs −0.016 s and takes the pit-wall decision from 8.6 s to 5.1 s at Singapore.",
     ],
     analogy: "Moving the whole workshop into a bigger building before buying new tools.",
     inPlan: STRATEGY_INPLAN,
@@ -1436,7 +1424,7 @@ const STRATEGY_ENTRIES = {
       "The same 2027 clock/width effect as B (+0.042 s, 22 %) on cheaper rear-door rows and InfiniBand; a four-year fleet (+0.032 s).",
       "In 2028 a two-GPU step (+0.080 s, 17 %) with eleven CPU servers kept, so the clock bar stays nearly neutral (−0.024 s) and the plan does not depend on the GPU charge rule.",
       "The move: +0.088 s (46 %) / +0.330 s (71 %). Storage and network: +0.049 s / +0.051 s. Rear-door cooling: +0.003 s / +0.030 s.",
-      "Cap spend sits between A and B (+CHF 1.19 M / +0.36 M a year vs Today); its trackside and cloud on-ramp package costs the most lap time of the three (−0.025 s / −0.028 s) for the same +1.3 strategy points.",
+      "Cap spend sits between A and B (+CHF 1.19 M / +0.36 M a year vs Today); its trackside and cloud on-ramp package costs the most lap time of the three (−0.025 s / −0.028 s) for the same 5.1 s pit-wall decision.",
     ],
     analogy: "Renting the extra kitchen only on the days you need it.",
     inPlan: STRATEGY_INPLAN,
@@ -1474,6 +1462,9 @@ const TERM_ENTRIES = {
   capcharge: { title: "Inside the cap / outside the cap", one: "Costs the FIA counts against the money cap (servers, electricity, support, links) versus costs it does not (property: space, fit-out, building plant).", analogy: "Pocket money vs rent paid by someone else.", source: "C3" },
   rtt: { title: "Round-trip time", one: "How long a message takes to go to the factory and back. Light in fibre: about 5 ms per 1,000 km.", analogy: "The echo delay on a long phone call.", source: "I-a" },
   edge: { title: "Edge compute", one: "Small computers at the track that pre-digest data before sending it home.", analogy: "Sorting the post before it goes to head office.", source: "I-d" },
+  envelope: { title: "The 500 kW envelope", one: "Digital Realty's offer: 500 kW of critical power for the servers in both seasons, a hard ceiling with no expansion right.", analogy: "A fuse box rated for the whole house.", source: "G11 · G-g" },
+  rackdensity: { title: "Rack density", one: "How many kilowatts of servers go into one rack; the cooling choice sets the ceiling (air 20, rear-door 70, direct liquid 150 kW).", analogy: "How many hobs you can run on one kitchen circuit.", source: "G-h · G5" },
+  mlpartition: { title: "ML partition", one: "Servers for machine learning and other work the FIA does not meter; they still draw power wherever they stand.", analogy: "The office next to the workshop: no production, same electricity bill.", source: "D11 · J-g" },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1498,7 +1489,7 @@ export const FLAG_IDS = Object.keys(FLAG_ENTRIES)
 export const DRIVER_IDS = Object.keys(DRIVER_ENTRIES)
 export const STRATEGY_IDS = Object.keys(STRATEGY_ENTRIES)
 export const TERM_IDS = Object.keys(TERM_ENTRIES)
-/** Entries for controls or flags the committed model does not have yet (explain brief 2.5, strategies brief 5.3). */
+/** Entries for controls or flags the model does not have yet (none since the integration pass; kept for the tests). */
 export const PENDING_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.pending).map(([id]) => id)
 /** Entries for the two-season planning tool's tiles and timeline flags; their templates read explainContext({ plan }). */
 export const PLAN_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.plan).map(([id]) => id)
@@ -1693,12 +1684,8 @@ export function labels(plainEnglish = true) {
 
 function optionLabel(id, value) {
   const c = CONTROLS[id]
-  if (!c) {
-    if (id === "cpuArch") return (CPU_ARCH[value] || CPU_ARCH.today).label
-    if (id === "mlPartitionKW") return `${Number(value) || 0} kW`
-    if (id === "mlPlacement") return ML_PLACEMENT[value] || ML_PLACEMENT.dr
-    return String(value)
-  }
+  if (!c) return String(value)
+  if (id === "cpuArch") return (CPU_ARCH[value] || CPU_ARCH.today).label
   if (c.type === "toggle") return value ? "On" : "Off"
   if (c.type === "range") {
     if (c.format) return c.format(value)
@@ -1716,7 +1703,7 @@ const dateLabel = (ms) => {
   const dt = new Date(n)
   return `${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`
 }
-const PATH_WORD = { fibre: "The fibre route", fitout: "The campus fit-out", hardware: "Hardware delivery", hinwil: "The Hinwil works", expansion: "The 2028 power step-up", parallel: "Parallel running", burnin: "Burn-in" }
+const PATH_WORD = { fibre: "The fibre route", fitout: "The campus fit-out", hardware: "Hardware delivery", hinwil: "The Hinwil works", works: "The Hinwil works", expansion: "The 2028 step-up fit-out", parallel: "Parallel running", burnin: "Burn-in" }
 
 /**
  * Facts for the plan-level tiles and timeline flags from a plan.js `evaluatePlan()` result
@@ -1756,7 +1743,6 @@ function planFacts(plan, x) {
     tco3: num(totals.tco3),
     todayTco3: num(totals.todayTco3),
     secTotal: num(totals.sec),
-    pointsTotal: num(totals.points),
     confidence: x.confidence,
   }
 }
@@ -1776,7 +1762,7 @@ export function explainContext({ result, attribution = null, both = null, plan =
   const season = x.season
 
   const option = {}
-  for (const id of [...Object.keys(CONTROLS), "cpuArch", "mlPartitionKW", "mlPlacement"]) option[id] = optionLabel(id, x[id])
+  for (const id of Object.keys(CONTROLS)) option[id] = optionLabel(id, x[id])
 
   const lineIds = ["it", "support", "software", "power", "fee", "cross", "fibre", "trackside", "edge", "cloud", "plant"]
   const lines = Object.fromEntries(lineIds.map((id) => [id, { id, label: "—", chf: 0, cap: 0 }]))
@@ -1786,16 +1772,16 @@ export function explainContext({ result, attribution = null, both = null, plan =
   const siteKey = s.fac.clusterSite
   const sitePowerKW = siteKey === "hinwil" ? s.fac.hinwilIT : s.fac.drIT
   const siteCapKW = siteKey === "hinwil" ? s.fac.hinwilCapacity : s.fac.drCapacity
-  const arch = x.cpuArch && CPU_ARCH[x.cpuArch] ? x.cpuArch : "today"
-  const archTable = (K.compute && K.compute.cpuArch && K.compute.cpuArch[arch]) || CPU_ARCH[arch]
-  const archFactor = s.comp.eff && typeof s.comp.eff.arch === "number" ? s.comp.eff.arch : archTable.workPerAuh[season] ?? 1
-  const archPowerDelta = (archTable.kwFactor ? archTable.kwFactor[season] ?? 1 : 1) - 1
-  const mlKW = Number(x.mlPartitionKW) || 0
+  const arch = CPU_ARCH[x.cpuArch] ? x.cpuArch : K.compute.cpuArchToday
+  const archTable = K.compute.cpuArch[arch]
+  const archFactor = s.comp.eff.arch ?? archTable.workPerAuh[season] ?? 1
+  const archPowerDelta = (archTable.kwFactor[season] ?? 1) - 1
+  const mlKW = x.mlPartitionKW
   const mlPlacement = ML_PLACEMENT[x.mlPlacement] ? x.mlPlacement : "dr"
-  const envelope = s.envelope || {}
-  const drIT = typeof envelope.drIT === "number" ? envelope.drIT : s.fac.drIT + (mlPlacement === "dr" && !s.envelope ? mlKW : 0)
-  const offerKW = (K.facility && K.facility.envelopeKW) || ENVELOPE_KW
-  const headroomKW = typeof envelope.headroomKW === "number" ? envelope.headroomKW : offerKW - drIT
+  const envelope = s.envelope
+  const drIT = envelope.drIT
+  const offerKW = envelope.offerKW ?? ENVELOPE_KW
+  const headroomKW = envelope.headroomKW ?? (drIT > 0 ? offerKW - drIT : offerKW)
 
   const d = {
     option,
@@ -1821,7 +1807,7 @@ export function explainContext({ result, attribution = null, both = null, plan =
     edgeNote: x.edge ? "Edge on: 1.5 s less from data to decision" : "No edge compute in the garage",
     edgeSuffix: x.edge ? " with edge compute" : "",
     cloudNote: x.cloudOnRamp ? `On: ${fmt && fmt.chf ? fmt.chf(lines.cloud.chf) : `CHF ${lines.cloud.chf}`} a year inside the cap` : "Off: no private cloud connections",
-    expansionNote: x.expansionRight ? "Reserved: up to 1,000 kW in 2028 at the same fee" : "Not reserved: the plan is capped at the committed kW",
+    expansionNote: "The 500 kW offer has no expansion right; ZUR4 adds 15 MW on the campus in 2028 (a separate conversation)",
     retrofitNote: x.hinwilRetrofit ? `retrofit to ${K.prices.hinwilRetrofitKW} kW, one-off CHF ${(K.prices.hinwilRetrofitCHF / 1e6).toFixed(1)} M outside the cap` : "no retrofit, the room stays as it is",
     ml: {
       kW: mlKW,
@@ -1829,7 +1815,8 @@ export function explainContext({ result, attribution = null, both = null, plan =
       placementLabel: ML_PLACEMENT[mlPlacement],
       note: mlPlacement === "cloud" ? `${mlKW} kW rented by the hour inside the cap, no campus power` : `${mlKW} kW drawn from ${ML_PLACEMENT[mlPlacement]}`,
     },
-    envelope: { drIT, headroomKW, offerKW, share: offerKW > 0 ? drIT / offerKW : 0 },
+    envelope: { drIT, headroomKW, offerKW, share: envelope.share ?? (offerKW > 0 ? drIT / offerKW : 0), fits: envelope.fits, reasons: envelope.reasons, racks: envelope.racks?.total ?? 0, cageRackPositions: envelope.cageRackPositions ?? K.facility.cageRackPositions },
+    envelopeNote: envelope.fits ? `fits: ${Math.round(drIT)} of ${offerKW} kW` : `not possible: ${(envelope.reasons || []).join("; ")}`,
     leadLabel: CONTROLS.leadWeeks.format(x.leadWeeks),
     migrationLabel: x.migrationTiming === "midperiod" ? "mid-period" : "at a period boundary",
     archLabel: CPU_ARCH[arch].label,

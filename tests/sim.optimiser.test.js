@@ -10,21 +10,24 @@ import { CONTROLS } from "../public/js/sim/model.js"
 const nodesOf = (plan) => SEASONS.map((y) => plan[y].nodes)
 
 test("optimiser: objectives and search space match brief 3.1–3.2, locked-by-default controls are policy", () => {
-  assert.deepEqual(OBJECTIVE_ORDER, ["fastest2028", "points", "headroom", "balanced"])
+  assert.deepEqual(OBJECTIVE_ORDER, ["fastest2028", "headroom", "balanced"], "no points objective")
+  assert.match(OBJECTIVES.balanced.formula, /avail/)
+  assert.match(OBJECTIVES.balanced.formula, /decisionSec/)
+  assert.ok(!/points/i.test(OBJECTIVES.balanced.formula), "the balanced score uses availability and data-to-decision, not strategy points")
   for (const id of OBJECTIVE_ORDER) {
     const o = OBJECTIVES[id]
     assert.equal(o.id, id)
     assert.ok(o.label && o.formula && typeof o.score === "function", id)
   }
   assert.ok(OBJECTIVES.fastest2028.sideCondition.includes("0.10 s"))
-  // every searched control is a committed control or a pending one, and every value is legal for it
+  // every searched control is a real control, and every value is legal for it
   for (const [scope, table] of Object.entries(SEARCH_SPACE)) {
     for (const [id, spec] of Object.entries(table)) {
       assert.ok(Array.isArray(spec.values) && spec.values.length >= 2, `${scope}.${id} has values`)
       assert.equal(typeof spec.lockedByDefault, "boolean", `${scope}.${id}.lockedByDefault`)
       if (spec.lockedByDefault) assert.ok(spec.why, `${scope}.${id} says why it is locked`)
       const c = CONTROLS[id]
-      if (!c) { assert.equal(id, "mlPartitionKW"); continue }
+      assert.ok(c, `${scope}.${id} is a control`)
       for (const v of spec.values) {
         if (c.type === "toggle") assert.equal(typeof v, "boolean")
         else if (c.type === "range") assert.ok(v >= c.min && v <= c.max && Number.isInteger(Math.round((v - c.min) / c.step * 1e6) / 1e6), `${id} = ${v}`)
@@ -33,17 +36,21 @@ test("optimiser: objectives and search space match brief 3.1–3.2, locked-by-de
     }
   }
   assert.deepEqual(LOCKED_BY_DEFAULT.shared, ["support", "fibrePairs", "fibreGbps", "trackside", "edge", "cloudOnRamp", "committedKW"])
-  assert.deepEqual(LOCKED_BY_DEFAULT.season, ["gpuModel", "leadWeeks", "mlPartitionKW"])
+  assert.deepEqual(LOCKED_BY_DEFAULT.season, ["cpuArch", "gpuModel", "leadWeeks", "mlPartitionKW"])
+  assert.match(SEARCH_SPACE.season.cpuArch.why, /A-f/, "the processor family is the sales lead's call")
   assert.equal(SEARCH_SPACE.season.nodes.derived, true)
   assert.deepEqual(SEARCH_SPACE.season.solverGpus.seasons, [2028])
-  assert.equal(FIXED.expansionRight, undefined, "expansionRight is forced false by canonicalPlan, not a fixed value")
+  assert.equal(FIXED.expansionRight, undefined, "there is no expansion-right control any more")
   assert.deepEqual([DEFAULTS.restarts, DEFAULTS.maxSweeps, DEFAULTS.maxPlans, DEFAULTS.seed], [8, 12, 6000, 2027])
+  assert.ok(DEFAULTS.thoroughRestarts > DEFAULTS.restarts && DEFAULTS.thoroughMaxPlans > DEFAULTS.maxPlans, "the Thorough toggle has a bigger budget")
   assert.equal(DEFAULTS.capGuardRailCHF, ENVELOPE.capChargeMaxCHF)
 })
 
 test("optimiser: canonicalPlan, clampPlan and fillNodes reproduce the strategies' node counts", () => {
   const a = canonicalPlan(STRATEGIES.A)
-  assert.equal(a.shared.expansionRight, false)
+  assert.ok(!("expansionRight" in a.shared), "a legacy expansion right is dropped")
+  assert.equal(canonicalPlan({ ...STRATEGIES.A, shared: { ...STRATEGIES.A.shared, expansionRight: true } }).shared.expansionRight, undefined)
+  assert.equal(a.shared.cpuArch, "today")
   assert.equal(a.shared.position, 8)
   assert.equal(a.shared.name, undefined, "metadata stripped")
   assert.equal(a[2027].mlPartitionKW, 0)
@@ -62,9 +69,14 @@ test("optimiser: canonicalPlan, clampPlan and fillNodes reproduce the strategies
   assert.equal(p.shared.rackKW, 20)
   assert.equal(p[2027].clockGHz, 2.4)
   assert.equal(p[2027].solverGpus, 0)
-  assert.equal(p[2028].clockGHz, 2.3, "192-core parts may run 2.3 GHz")
+  assert.equal(p[2028].clockGHz, 2.4, "today's parts floor at their 2.4 GHz base clock even at 192 cores")
   assert.equal(p[2028].gpus, 6, "gpus raised to carry the solver GPUs")
-  assert.deepEqual([ccfFloor(64), ccfFloor(96), ccfFloor(128), ccfFloor(192), ccfFloor(32)], [2.4, 2.3, 2.4, 2.25, 2.0])
+  const std28 = clampPlan({ shared: { cpuArch: "std" }, 2027: {}, 2028: { coresPerNode: 192, clockGHz: 2.3 } })
+  assert.equal(std28[2028].clockGHz, 2.3, "a 2028 Venice part (1.7 GHz base) lets a 192-core node declare 2.3 GHz")
+  // the floor is max(core-count base clock H3, the processor family's base clock for the season)
+  assert.deepEqual([ccfFloor(64), ccfFloor(96), ccfFloor(128), ccfFloor(192), ccfFloor(32)], [2.4, 2.4, 2.4, 2.4, 2.4])
+  assert.deepEqual([ccfFloor(96, "std", 2028), ccfFloor(192, "std", 2028), ccfFloor(32, "std", 2028)], [2.3, 2.25, 2.0])
+  assert.deepEqual([ccfFloor(128, "arm", 2027), ccfFloor(128, "arm", 2028), ccfFloor(128, "bigcache", 2027)], [3.1, 3.0, 2.55])
 })
 
 test("optimiser: mulberry32 is deterministic and uniform enough; randomPlan respects locks", () => {
@@ -100,7 +112,7 @@ test("optimiser: defaultFits and scorePlan agree with the strategies' envelope r
     const s = scorePlan(STRATEGIES[k], "fastest2028")
     assert.equal(s.fits, true)
     assert.ok(Math.abs(s.score - (r[2028].perf.sec + 0.1 * r[2027].perf.sec)) < 0.002, `${k} score ${s.score}`)
-    assert.ok(Number.isFinite(scorePlan(STRATEGIES[k], "points").score))
+    assert.throws(() => scorePlan(STRATEGIES[k], "points"), /unknown objective/)
     assert.ok(scorePlan(STRATEGIES[k], "headroom").score < 0 && scorePlan(STRATEGIES[k], "headroom").score > -10)
     assert.ok(Number.isFinite(scorePlan(STRATEGIES[k], "balanced").score))
   }
@@ -116,16 +128,18 @@ test("optimiser: defaultFits and scorePlan agree with the strategies' envelope r
   assert.equal(scorePlan(STRATEGIES.A, "fastest2028", { fits: () => false }).score, -Infinity)
 })
 
-test("optimiser: fastest2028 from A reaches ≥ +0.45 s in 2028 within the default budget, deterministically", () => {
+test("optimiser: fastest2028 from A reaches ≥ +0.50 s in 2028 within the default budget, deterministically (brief 3.4: +0.511 s)", () => {
   const t0 = performance.now()
   const r = optimise({ start: STRATEGIES.A, objective: "fastest2028" })
   const ms = performance.now() - t0
   assert.equal(r.objective, "fastest2028")
   assert.ok(r.fits, "the best plan fits")
-  assert.ok(r.result[2028].perf.sec >= 0.45, `2028 ${r.result[2028].perf.sec}`)
+  assert.ok(r.result[2028].perf.sec >= 0.50, `2028 ${r.result[2028].perf.sec}`)
   assert.ok(r.result[2027].perf.sec >= 0.10, `2027 side condition ${r.result[2027].perf.sec}`)
   assert.ok(r.score > r.startScore)
   assert.ok(Math.abs(r.startScore - (0.369 + 0.0137)) < 0.003, `start score ${r.startScore}`)
+  assert.ok(r.result[2028].envelope.drIT <= 500 && r.result[2027].envelope.drIT <= 500)
+  assert.equal(r.best.shared.cpuArch, "today", "the locked processor family is not searched")
   assert.ok(r.evaluations <= DEFAULTS.maxPlans && r.evaluations > 100, `evaluations ${r.evaluations}`)
   assert.equal(r.stopped, false)
   assert.ok(ms < 4000, `${ms} ms`)
@@ -141,7 +155,7 @@ test("optimiser: fastest2028 from A reaches ≥ +0.45 s in 2028 within the defau
   // the returned plan is canonical and keeps the locked policy controls
   for (const id of LOCKED_BY_DEFAULT.shared) assert.equal(r.best.shared[id], STRATEGIES.A.shared[id], `locked ${id}`)
   for (const y of SEASONS) for (const id of LOCKED_BY_DEFAULT.season) assert.equal(r.best[y][id], canonicalPlan(STRATEGIES.A)[y][id], `locked ${y}.${id}`)
-  assert.equal(r.best.shared.expansionRight, false)
+  assert.ok(!("expansionRight" in r.best.shared))
   assert.equal(r.best[2027].solverGpus, 0)
 })
 
@@ -165,16 +179,17 @@ test("optimiser: every returned plan fits both seasons for every objective from 
   }
 })
 
-test("optimiser: the headroom objective lowers the cap charge and points/balanced lift both seasons", () => {
+test("optimiser: the headroom objective lowers the cap charge and balanced lifts both seasons", () => {
   const a = evaluateStrategy("A")
   const head = optimise({ start: STRATEGIES.A, objective: "headroom", restarts: 3, maxPlans: 2000 })
   assert.ok(head.result[2027].scenario.money.capCharge < a[2027].scenario.money.capCharge)
   assert.ok(head.result[2028].scenario.money.capCharge < a[2028].scenario.money.capCharge)
   for (const y of SEASONS) assert.ok(head.result[y].perf.sec >= 0.10)
-  const pts = optimise({ start: STRATEGIES.A, objective: "points", restarts: 3, maxPlans: 2000 })
-  assert.ok(pts.result[2027].perf.sec > a[2027].perf.sec && pts.result[2028].perf.sec > a[2028].perf.sec)
   const bal = optimise({ start: STRATEGIES.A, objective: "balanced", restarts: 3, maxPlans: 2000 })
   assert.ok(bal.score > bal.startScore)
+  assert.ok(bal.result[2027].perf.sec > a[2027].perf.sec && bal.result[2028].perf.sec > a[2028].perf.sec)
+  assert.ok(bal.result[2027].availabilityPct === undefined || bal.result[2027].availabilityPct >= 99, "availability is part of the balanced score")
+  assert.throws(() => optimise({ start: STRATEGIES.A, objective: "points" }), /unknown objective/)
 })
 
 test("optimiser: shouldStop, maxPlans and onProgress are honoured and the best so far is returned", () => {

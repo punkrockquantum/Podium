@@ -5,46 +5,41 @@
  *   STRATEGIES.A / .B / .C, STRATEGY_ORDER      the decision tables of strategies brief 2.1 with the stories of 2.3
  *   evaluateStrategy("B", { position, confidence, venue, evaluateFn })  → { 2027, 2028, fits, strategy }
  *   evaluatePlan(plan, options)                 any { shared, 2027, 2028 } plan, both seasons + fit
- *   envelopeCheck(scenario, { mlKW, mlPlacement }) → the fit test of brief 1.2 plus the optimiser guard-rails
+ *   envelopeCheck(scenario)                     the model's envelope plus the optimiser guard-rails (brief 3.3)
+ *   envelopeEvaluate(inputs)                    model.evaluate() with the guard-rails attached (the optimiser's evaluateFn)
+ *   toPlan(strategy)                            the strategy as a plan.js plan (meta, shared, seasons, timeline)
  *   summary(seasonResult)                       one flat row for a card or a comparison table
  *
- * TRANSITIONAL until model.js has the envelope (strategies brief 5.3; see docs/audi-f1-modules.md):
- *   envelopeEvaluate(inputs, { mlKW })  wraps the committed model without editing it. The committed `facility()`
- *   reads `K.facility.restOfEstateKW[season]` (375 / 760 kW) at call time and places it at the site that hosts the
- *   cluster; here it is set to `estateBaseKW + mlPartitionKW` for the scenario call and restored in `finally`, and
- *   `evaluate()`'s performance block is replicated so Today is still computed at the committed demand estate.
- *   Once `simulate()` returns `s.envelope` (and `K.facility.envelopeKW` exists) the wrapper simply delegates to
- *   the model's `evaluate`, so the integrator can delete `simulateWithEstate` / `envelopeEvaluate` and pass
- *   `evaluate` as `evaluateFn`.
+ * The envelope itself (fit test, ceilings, clamps) lives in model.js: `simulate()` returns `s.envelope` and
+ * `facility()` places the estate (375 kW base at the campus, today's 375 / 760 kW demand in the Hinwil room).
+ * Figures here are plan-level when evaluated through plan.js (part of a season on the old estate); the brief's
+ * steady-state numbers come out of `evaluateStrategy()` (one season, no blend).
  */
-import { evaluate, simulate, normalize, todayInputs, aeroSeconds, reinvestSeconds } from "./model.js"
+import { evaluate } from "./model.js"
 import { K } from "./assumptions.js"
-import { FIGURES } from "../customer.js"
+import { SHARED_IDS } from "./plan.js"
 
 // ---------------------------------------------------------------------------------------------
-// The envelope (brief 1.1); every constant falls back to the committed K until the additions of 5.2 land
+// The envelope (brief 1.1): the constants the model uses, re-exported for the cards and the optimiser
 // ---------------------------------------------------------------------------------------------
 
 const F = K.facility
 export const ENVELOPE = Object.freeze({
-  drOfferKW: F.envelopeKW ?? 500,
-  baseEstateKW: F.estateBaseKW ?? 375,
-  demandEstateKW: Object.freeze({ ...(F.estateDemandKW ?? F.restOfEstateKW ?? { 2027: 375, 2028: 760 }) }),
-  hybridHinwilKW: F.hybridHinwilKW ?? 150,
-  hinwilRoomKW: F.hinwilCapacityKW ?? 300,
-  hinwilRetrofitKW: K.prices.hinwilRetrofitKW ?? 450,
-  coolingMaxKWPerRack: Object.freeze({ ...(K.compute.coolingMaxKWPerRack ?? { air: 20, reardoor: 70, dlc: 150 }) }),
-  cageRackPositions: F.cageRackPositions ?? 60,
-  estateRackKW: F.estateRackKW ?? 8,
-  ccfFloorGHz: Object.freeze({ ...(K.compute.ccfFloorGHz ?? { 64: 2.4, 96: 2.3, 128: 2.4, 192: 2.25 }) }),
+  drOfferKW: F.envelopeKW,
+  baseEstateKW: F.estateBaseKW,
+  demandEstateKW: Object.freeze({ ...F.estateDemandKW }),
+  hybridHinwilKW: F.hybridHinwilKW,
+  hinwilRoomKW: F.hinwilCapacityKW,
+  hinwilRetrofitKW: K.prices.hinwilRetrofitKW,
+  coolingMaxKWPerRack: Object.freeze({ ...K.compute.coolingMaxKWPerRack }),
+  cageRackPositions: F.cageRackPositions,
+  estateRackKW: F.estateRackKW,
+  ccfFloorGHz: Object.freeze({ ...K.compute.ccfFloorGHz }),
   usageMax: 1.0,
-  capChargeMaxCHF: (K.optimiser && K.optimiser.capGuardRailCHF) ?? 4_000_000,
-  liquidRowsCHF: K.prices.drLiquidRowsCHF ?? (FIGURES.offer && FIGURES.offer.liquidLoopCHF) ?? 450_000,
+  capChargeMaxCHF: K.optimiser.capGuardRailCHF,
+  liquidRowsCHF: K.prices.drLiquidRowsCHF,
   mlPlacements: Object.freeze(["dr", "hinwil", "cloud"]),
 })
-
-/** True while the committed model has no envelope of its own (the wrapper below then does the estate placement). */
-export const TRANSITIONAL = !(F.envelopeKW && F.estateBaseKW)
 
 // ---------------------------------------------------------------------------------------------
 // The strategies (brief 2.1, 2.3)
@@ -53,8 +48,8 @@ export const TRANSITIONAL = !(F.envelopeKW && F.estateBaseKW)
 /** Shared assumptions of all three plans (COMMON in the prototype). */
 export const COMMON = Object.freeze({
   position: 8, confidence: 60, pueMode: "derived", tariffRp: 15, renewable: true, heatReuse: true,
-  expansionRight: false, hinwilRetrofit: false, fitOutCHF: 800_000, migrationCHF: 400_000, migrationTiming: "boundary",
-  propertySharePct: 50, venue: "singapore", gpuChargePct: 100, location: "dr", committedKW: 500,
+  hinwilRetrofit: false, fitOutCHF: 800_000, migrationCHF: 400_000, migrationTiming: "boundary",
+  propertySharePct: 50, venue: "singapore", gpuChargePct: 100, location: "dr", committedKW: 500, cpuArch: "today",
 })
 
 const CUTOVER_2027 = "Declaration and cutover at the P1/P2 boundary (8 Mar 2027), after the Bahrain test; the Hinwil cluster carries P1."
@@ -192,10 +187,10 @@ export function sharedOf(plan) {
   return out
 }
 
-/** Model inputs for one season of a plan. The expansion right is never part of the offer (E2). */
+/** Model inputs for one season of a plan (the 500 kW offer has no expansion right, E2: none is passed). */
 export function planInputs(plan, season) {
   const seasonSet = plan[season] || {}
-  const x = { ...sharedOf(plan), ...seasonSet, season, expansionRight: false }
+  const x = { ...sharedOf(plan), ...seasonSet, season }
   if (x.mlPartitionKW === undefined) x.mlPartitionKW = seasonSet.ml ?? (plan.ml && plan.ml[season]) ?? 0
   if (x.mlPlacement === undefined) x.mlPlacement = "dr"
   delete x.ml
@@ -215,155 +210,65 @@ export function planFromInputs(inputs) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Transitional envelope wrapper over the committed model
+// Envelope + guard-rails over the model
 // ---------------------------------------------------------------------------------------------
 
-const restoreEstate = F.restOfEstateKW ? { ...F.restOfEstateKW } : null
-
-/** Rest-of-estate kW the scenario places at the site hosting the cluster (hybrid: the model keeps 150 kW at Hinwil). */
-export function estateForScenario(x, mlKW = 0, mlPlacement = "dr") {
-  // Staying in Hinwil means trying to run the whole committed demand there (E9: the room keeps its own ceiling).
-  if (x.location === "hinwil") return ENVELOPE.demandEstateKW[x.season] + (mlPlacement === "hinwil" ? mlKW : 0)
-  return ENVELOPE.baseEstateKW + (mlPlacement === "dr" ? mlKW : 0)
-}
-
-/** simulate() with the scenario's estate placed, then the committed constant restored. */
-export function simulateWithEstate(raw, mlKW = 0, mlPlacement = "dr") {
-  const x = normalize(raw)
-  if (!restoreEstate || !TRANSITIONAL) return simulate(x)
-  F.restOfEstateKW[x.season] = estateForScenario(x, mlKW, mlPlacement)
-  try { return simulate(x) } finally { F.restOfEstateKW[x.season] = restoreEstate[x.season] }
-}
-
 const r1 = (v) => Math.round(v * 10) / 10
-const r2 = (v) => Math.round(v * 100) / 100
-const r3 = (v) => Math.round(v * 1000) / 1000
-
-function mlOf(inputs, mlKW) {
-  const kW = Math.max(0, Number(mlKW ?? inputs.mlPartitionKW ?? inputs.ml ?? 0) || 0)
-  const placement = ENVELOPE.mlPlacements.includes(inputs.mlPlacement) ? inputs.mlPlacement : "dr"
-  return { kW, placement }
-}
 
 /**
- * The fit test of brief 1.2 (`fits`, `reasons`) plus the optimiser guard-rails of 3.3 (`guardrails`, `ok`).
- * `s` is a simulate() result; the ML partition comes from `s.inputs` or the options.
+ * The model's envelope (`s.envelope`: fit test of brief 1.2) plus the optimiser guard-rails of 3.3
+ * (`guardrails`, `ok`). `s` is a simulate() result.
  */
-export function envelopeCheck(s, { mlKW, mlPlacement } = {}) {
-  const x = s.inputs
-  const ml = mlOf(x, mlKW)
-  if (mlPlacement) ml.placement = mlPlacement
-  const reasons = []
+export function envelopeCheck(s) {
+  const e = s.envelope
   const guardrails = []
-  const atDr = x.location !== "hinwil"
-  const atHinwil = x.location !== "dr"
-  const drIT = s.fac.drIT
-  const hinwilIT = s.fac.hinwilIT + (atHinwil && x.location === "hybrid" && ml.placement === "hinwil" ? ml.kW : 0)
-  const hinwilCap = x.hinwilRetrofit ? ENVELOPE.hinwilRetrofitKW : ENVELOPE.hinwilRoomKW
-  const coolingMax = ENVELOPE.coolingMaxKWPerRack[x.cooling]
-
-  if (atDr && drIT > ENVELOPE.drOfferKW + 1e-9) reasons.push(`Digital Realty: ${drIT.toFixed(0)} kW > ${ENVELOPE.drOfferKW} kW offer`)
-  if (x.location === "hybrid" && hinwilIT > hinwilCap + 1e-9) reasons.push(`Hinwil keeps ${hinwilIT.toFixed(0)} kW against ${hinwilCap} kW`)
-  if (atDr && x.rackKW > coolingMax) reasons.push(`${x.rackKW} kW racks exceed the ${coolingMax} kW ${x.cooling === "air" ? "air" : x.cooling === "reardoor" ? "rear-door" : "direct-liquid"} ceiling`)
-  const estateAtDr = atDr ? Math.max(0, drIT - s.hw.clusterKW - (ml.placement === "dr" ? ml.kW : 0)) : 0
-  const mlAtDr = atDr && ml.placement === "dr" ? ml.kW : 0
-  const racks = {
-    estate: atDr ? Math.ceil(estateAtDr / ENVELOPE.estateRackKW) : 0,
-    cluster: s.hw.racks,
-    ml: mlAtDr > 0 ? Math.ceil(mlAtDr / x.rackKW) : 0,
-  }
-  racks.total = racks.estate + racks.cluster + racks.ml
-  if (atDr && racks.total > ENVELOPE.cageRackPositions) reasons.push(`${racks.total} racks > ${ENVELOPE.cageRackPositions} cage positions`)
-  if (x.expansionRight) reasons.push("Expansion right is not part of the 500 kW offer (commercial note)")
-  if (x.season < K.fia.gpuAllowedFrom && x.solverGpus > 0) reasons.push(`GPU solver not allowed in ${x.season} (F4.4.1)`)
-  const floor = ENVELOPE.ccfFloorGHz[x.coresPerNode]
-  if (x.nodes > 0 && floor && x.clockGHz < floor - 1e-9) reasons.push(`CCF ${x.clockGHz} GHz below the ${floor} GHz base clock of a ${x.coresPerNode}-core part (F4.4.2)`)
-  if (ml.placement === "cloud" && ml.kW > 0 && !x.cloudOnRamp) reasons.push("ML partition in the cloud needs the cloud on-ramps")
-
   if (s.comp.usage > ENVELOPE.usageMax + 1e-9) guardrails.push(`allowance ${Math.round(s.comp.usage * 100)} % > 100 % (F4.6.10)`)
   if (s.money.capCharge > ENVELOPE.capChargeMaxCHF) guardrails.push(`cap charge CHF ${(s.money.capCharge / 1e6).toFixed(2)} M > CHF ${(ENVELOPE.capChargeMaxCHF / 1e6).toFixed(1)} M guard-rail`)
-  if (s.status === "bad") guardrails.push("model flags: " + s.flags.filter((f) => f.level === "bad").map((f) => f.title).join("; "))
-
-  const headroomKW = atDr ? r1(ENVELOPE.drOfferKW - drIT) : null
-  return {
-    fits: reasons.length === 0, reasons, guardrails, ok: reasons.length === 0 && guardrails.length === 0,
-    offerKW: ENVELOPE.drOfferKW, drIT, headroomKW, drHeadroomKW: headroomKW, share: atDr ? drIT / ENVELOPE.drOfferKW : 0,
-    hinwilIT: r1(hinwilIT), hinwilCap, estateAtDr: r1(estateAtDr), clusterKW: s.hw.clusterKW,
-    mlPartitionKW: ml.kW, mlPlacement: ml.placement, mlAtDr,
-    racks, facilityKW: r1(drIT * s.fac.pueDr),
-  }
+  const badFlags = s.flags.filter((f) => f.level === "bad")
+  if (badFlags.length) guardrails.push("model flags: " + badFlags.map((f) => f.title).join("; "))
+  return { ...e, guardrails, ok: e.fits && guardrails.length === 0, hinwilCap: e.hinwilCapacity, drHeadroomKW: e.headroomKW, facilityKW: r1(e.facilityKW) }
 }
 
-/** The CHF 0.45 M liquid-rows one-off at the campus the committed model does not charge yet (5.3 change 8, †). */
-function withLiquidRows(scenario) {
-  const x = scenario.inputs
-  if (!(x.location !== "hinwil" && x.cooling === "dlc" && scenario.fac.drIT > 0)) return scenario
-  if (scenario.money.oneOffs.some((o) => o.id === "liquidrows")) return scenario
-  const oneOff = { id: "liquidrows", label: "Liquid rows at Digital Realty (CDUs, manifolds) †", chf: ENVELOPE.liquidRowsCHF, cap: "excluded", why: "Leasehold improvement; the committed model does not charge it yet" }
-  const money = { ...scenario.money, oneOffs: [...scenario.money.oneOffs, oneOff], oneOffTotal: scenario.money.oneOffTotal + oneOff.chf, tco3: scenario.money.tco3 + oneOff.chf }
-  return { ...scenario, money }
-}
-
-/**
- * evaluate() replicated for the 500 kW envelope: the scenario with its estate placed, Today at the committed
- * demand estate, plus `envelope` (also attached as `scenario.envelope`) and the unrounded `perf.secExact` /
- * `perf.pointsExact` the optimiser scores with. Returns the same shape as model.evaluate().
- */
-export function envelopeEvaluate(raw, { mlKW, liquidRows = true } = {}) {
-  const x = normalize(raw)
-  const ml = mlOf({ ...x, ...(raw && raw.mlPartitionKW !== undefined ? { mlPartitionKW: raw.mlPartitionKW } : {}), ...(raw && raw.mlPlacement !== undefined ? { mlPlacement: raw.mlPlacement } : {}) }, mlKW)
-  x.mlPartitionKW = ml.kW
-  x.mlPlacement = ml.placement
-  if (!TRANSITIONAL) {
-    // the merged model owns the envelope: delegate, and only keep the exact fields the optimiser needs
-    const r = evaluate(x)
-    const envelope = r.scenario.envelope || envelopeCheck(r.scenario, { mlKW: ml.kW, mlPlacement: ml.placement })
-    const perf = { ...r.perf, secExact: r.perf.secExact ?? r.perf.sec, pointsExact: r.perf.pointsExact ?? r.perf.points }
-    return { ...r, envelope, perf }
-  }
-  let scenario = simulateWithEstate(x, ml.kW, ml.placement)
-  if (liquidRows) scenario = withLiquidRows(scenario)
-  const today = simulate(todayInputs(x.season, x.position, x.confidence))
-  const conf = x.confidence / 100
-  const aero = aeroSeconds(scenario.comp.effectiveMauh) - aeroSeconds(today.comp.effectiveMauh)
-  const saved = today.money.capCharge - scenario.money.capCharge
-  const reinvest = reinvestSeconds(saved)
-  const rawSec = aero + reinvest
-  const sec = rawSec * conf
-  const perf = K.performance
-  const positionsGained = sec / perf.secPerPosition
-  const [lo, hi] = perf.midfield
-  const scenarioPosition = Math.min(Math.max(x.position - positionsGained, Math.min(lo, x.position)), Math.max(hi, x.position))
-  const points = (x.position - scenarioPosition) * perf.pointsPerPosition
-  const strategyPoints = (scenario.net.quality - today.net.quality) * K.trackside.strategyPointsSwing * conf
-  const ladder = []
-  for (let p = Math.min(lo, x.position); p <= Math.max(hi, x.position); p++) ladder.push({ position: p, sec: r2((p - x.position) * perf.secPerPosition) })
-  const envelope = envelopeCheck(scenario, { mlKW: ml.kW, mlPlacement: ml.placement })
-  scenario = { ...scenario, inputs: { ...scenario.inputs, mlPartitionKW: ml.kW, mlPlacement: ml.placement }, envelope }
-  if (!envelope.fits && scenario.status !== "bad") scenario = { ...scenario, status: "bad" }
-  return {
-    scenario, today, envelope,
-    perf: {
-      aeroSec: r3(aero), reinvestSec: r3(reinvest), rawSec: r3(rawSec), sec: r3(sec), secExact: sec, pointsExact: points,
-      savedCHF: Math.round(saved), confidence: x.confidence,
-      aeroTodaySec: r3(aeroSeconds(today.comp.effectiveMauh)), aeroScenarioSec: r3(aeroSeconds(scenario.comp.effectiveMauh)),
-      positionsGained: r2(positionsGained), scenarioPosition: r2(scenarioPosition), points: r1(points),
-      strategyPoints: r1(strategyPoints), ladder,
-      effectiveMauhDelta: r3(scenario.comp.effectiveMauh - today.comp.effectiveMauh),
-      capChargeDelta: scenario.money.capCharge - today.money.capCharge,
-      yearlyDelta: scenario.money.yearly - today.money.yearly,
-      co2Delta: r1(scenario.money.co2MarketT - today.money.co2MarketT),
-    },
-  }
+/** model.evaluate() with the guard-rails attached to `envelope`; the optimiser scores `perf.secExact`. */
+export function envelopeEvaluate(raw) {
+  const r = evaluate(raw)
+  const envelope = envelopeCheck(r.scenario)
+  return { ...r, envelope, scenario: { ...r.scenario, envelope } }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Plans and strategies, both seasons
 // ---------------------------------------------------------------------------------------------
 
-/** A season result's envelope, whichever model produced it. */
+/** A season result's envelope (with guard-rails when the result came through envelopeEvaluate). */
 export function envelopeOf(result) {
-  return result.envelope || (result.scenario && result.scenario.envelope) || envelopeCheck(result.scenario)
+  const e = result.envelope || (result.scenario && result.scenario.envelope)
+  return e && e.guardrails ? e : envelopeCheck(result.scenario)
+}
+
+/** Strategy timeline: contract at the planning date, declaration and cutover targeted at the P1/P2 boundary (8 Mar 2027; plan.js shows the slip the lead times impose), GPU re-declaration for 1 Jan 2028. */
+export const STRATEGY_TIMELINE = Object.freeze({ contractDate: "2026-11-24", cutoverDate: "2027-03-08", parallelWeeks: 2, stepUpDate: "2028-01-01" })
+
+/**
+ * The strategy as a plan.js plan: plan-wide values (position, confidence, venue, one-offs) in `shared`, everything
+ * else in the 2027 season set, 2028 holding only what differs (detached), plus the timeline. Returns null for an
+ * unknown strategy.
+ */
+export function toPlan(idOrKey) {
+  const st = typeof idOrKey === "string" ? strategyByKey(idOrKey) : idOrKey
+  if (!st) return null
+  const shared = {}
+  const season27 = {}
+  for (const [k, v] of Object.entries(st.shared)) (SHARED_IDS.includes(k) ? shared : season27)[k] = v
+  Object.assign(season27, st[2027])
+  const season28 = {}
+  for (const [k, v] of Object.entries(st[2028])) if (season27[k] !== v) season28[k] = v
+  return {
+    meta: { name: st.name, preset: "custom", strategy: st.key },
+    shared,
+    seasons: { 2027: season27, 2028: season28 },
+    timeline: { ...STRATEGY_TIMELINE },
+  }
 }
 
 /**
@@ -413,7 +318,7 @@ export function summary(ev) {
   const s = ev.scenario, p = ev.perf, e = ev.envelope || envelopeOf(ev)
   return {
     season: s.inputs.season, fits: e.fits, ok: e.ok, reasons: e.reasons, guardrails: e.guardrails || [],
-    sec: p.sec, position: p.scenarioPosition, points: p.points, strategyPoints: p.strategyPoints,
+    sec: p.sec, decisionDeltaSec: p.decisionDeltaSec, weekendsAtRisk: s.net.weekendsLost,
     effMauh: s.comp.effectiveMauh, usedMauh: s.comp.usedMauh, usagePct: Math.round(s.comp.usage * 1000) / 10, allowance: s.fia.allowance.mauh,
     capCHF: s.money.capCharge, capDeltaCHF: p.capChargeDelta, yearlyCHF: s.money.yearly, tco3CHF: s.money.tco3, oneOffCHF: s.money.oneOffTotal,
     availabilityPct: s.comp.availabilityPct, pue: s.fac.pue, co2MarketT: s.money.co2MarketT, co2LocationT: s.money.co2LocationT, heatMWh: s.money.heatMWh,
