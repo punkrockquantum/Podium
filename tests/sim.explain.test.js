@@ -4,10 +4,12 @@ import { readFileSync, readdirSync, statSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
-  EXPLAIN, fillTemplate, labels, explainContext, explainText, CPU_ARCH,
+  EXPLAIN, fillTemplate, labels, explainContext, explainText, CPU_ARCH, TILE_BY_LABEL, tileIdFor,
   CONTROL_IDS, TILE_IDS, FLAG_IDS, DRIVER_IDS, STRATEGY_IDS, TERM_IDS, MILESTONE_IDS, PENDING_IDS, PLAN_IDS,
+  TASK_IDS, REQ_IDS, SERVICE_IDS, RISK_IDS, CHECK_IDS, ROLE_IDS, SA_IDS,
 } from "../public/js/sim/explain.js"
-import { presetPlan, normalizePlan, evaluatePlan as evaluateTwoSeasonPlan, seasonInputs } from "../public/js/sim/plan.js"
+import { presetPlan, normalizePlan, evaluatePlan as evaluateTwoSeasonPlan, seasonInputs, PLAN_PRESET_ORDER } from "../public/js/sim/plan.js"
+import { requirements, serviceMap, riskRegister, CHECKLIST, ROLES } from "../public/js/sim/sa.js"
 import { CONTROLS, PRESET_ORDER, presetInputs, evaluate, simulate, DEFAULTS } from "../public/js/sim/model.js"
 import { DRIVERS, attribute } from "../public/js/sim/attribution.js"
 import { STRATEGIES, STRATEGY_ORDER } from "../public/js/sim/strategies.js"
@@ -75,6 +77,115 @@ test("explain: every current control, tile, flag, driver, strategy and term has 
   for (const [, e] of Object.entries(EXPLAIN)) for (const t of e.terms || []) assert.ok(EXPLAIN[t], `${e.kind}.${e.id} links to unknown ${t}`)
   assert.ok(TERM_IDS.length >= 25)
   assert.ok(EXPLAIN["control.cpuArch"] && EXPLAIN["driver.cpuArch"] && !EXPLAIN["control.cpuArch"].pending)
+})
+
+/** The argument text of the call whose "(" is at `open`, with nested brackets, strings and template literals skipped. */
+function callArgs(src, open) {
+  let depth = 0
+  let quote = null
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]
+    if (quote) { if (c === "\\") i++; else if (c === quote) quote = null; continue }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue }
+    if ("({[".includes(c)) depth++
+    else if (")}]".includes(c)) { depth--; if (depth === 0) return src.slice(open + 1, i) }
+  }
+  return src.slice(open + 1)
+}
+/** Every stat(), gauge(), bar() and ribbonRow() call in the UI sources: { file, line, fn, args }. */
+function tileCalls() {
+  const out = []
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) { walk(path); continue }
+      if (!name.endsWith(".js") || (dir === simDir && OWN_MODULES.has(name))) continue
+      const src = readFileSync(path, "utf8")
+      for (const m of src.matchAll(/\b(stat|gauge|bar|ribbonRow)\(/g)) {
+        const before = src.slice(Math.max(0, m.index - 20), m.index)
+        if (/(function|const|let|var)\s+$|[.\w]$/.test(before)) continue // a definition or a method, not a call
+        out.push({ file: path.slice(simDir.length + 1), line: src.slice(0, m.index).split("\n").length, fn: m[1], args: callArgs(src, m.index + m[0].length - 1), before: src.slice(Math.max(0, m.index - 600), m.index) })
+      }
+    }
+  }
+  walk(simDir)
+  return out
+}
+
+test("explain: every tile, gauge, bar, ribbon row, Gantt task and Solutions Architect row the views render has an entry", () => {
+  // 1. Tiles: each call site resolves to an entry through an explicit `explain:`/`id:` or through its label (TILE_BY_LABEL / tileIdFor).
+  //    A dynamic label (template or ternary) must resolve for every string it can take; the raw template text counts for the prefix rules.
+  const calls = tileCalls()
+  assert.ok(calls.length >= 50, `expected the views to render tiles, found ${calls.length} call sites`)
+  for (const c of calls) {
+    const where = `${c.file}:${c.line} ${c.fn}(…)`
+    const explicit = /\bexplain:\s*"([^"]+)"/.exec(c.args) || /\bid:\s*"((?:stat|gauge|bar)-[a-z0-9-]+|headline-sec)"/.exec(c.args)
+    if (explicit) { assert.ok(EXPLAIN[`tile.${explicit[1]}`], `${where}: tile.${explicit[1]} missing`); continue }
+    const head = c.fn === "stat" || c.fn === "ribbonRow" ? c.args.replace(/^\s*/, "") : (/label:\s*([\s\S]*)/.exec(c.args) || [, ""])[1]
+    const first = head.startsWith('"') ? head.slice(0, head.indexOf('"', 1) + 1) : head.startsWith("`") ? head.slice(0, head.indexOf("`", 1) + 1) : head.split(/,(?![^(]*\))/)[0]
+    const branches = first.includes("?") ? first.slice(first.indexOf("?")) : first // a ternary: only the labels it can take, not the condition
+    // a template literal counts as one raw label (the prefix rules of tileIdFor see "kW kept at Hinwil of ${…}"); a shorthand `label` comes from
+    // the string table mapped just before the call (the efficiency bars); otherwise every string the expression can be
+    const shorthand = !head && /\blabel\s*[,}]/.test(c.args)
+    const candidates = first.startsWith("`") ? [first.slice(1, -1)] : shorthand ? [...c.before.matchAll(/\["([^"]+)",/g)].map((m) => m[1]) : [...branches.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+    assert.ok(candidates.length, `${where}: no label string and no explain id (${first.slice(0, 60)})`)
+    for (const label of candidates) {
+      const id = tileIdFor(label)
+      assert.ok(id && EXPLAIN[`tile.${id}`], `${where}: label "${label}" has no explainer (add it to TILE_BY_LABEL or pass explain:)`)
+    }
+  }
+  for (const label of Object.keys(TILE_BY_LABEL)) assert.ok(EXPLAIN[`tile.${TILE_BY_LABEL[label]}`], `TILE_BY_LABEL "${label}" → tile.${TILE_BY_LABEL[label]} missing`)
+
+  // 2. Gantt task rows: every task id timeline.js can emit, without its season prefix
+  const timelineSource = readFileSync(join(simDir, "timeline.js"), "utf8")
+  const taskKinds = new Set([...timelineSource.matchAll(/task\((?:"y\d\d-|`\$\{prefix\}-)([a-z0-9]+)/g)].map((m) => m[1]))
+  assert.ok(taskKinds.size >= 7, `expected the timeline to emit tasks, found ${[...taskKinds]}`)
+  for (const k of taskKinds) assert.ok(EXPLAIN[`task.${k}`], `task.${k} missing`)
+  assert.deepEqual([...TASK_IDS].sort(), [...taskKinds].sort(), "no stray task entries")
+
+  // 3. Solutions Architect rows: every requirement, service, risk, checklist and role id sa.js can emit, from the source and from the presets
+  const saSource = readFileSync(join(simDir, "sa.js"), "utf8")
+  const section = (from, to) => saSource.slice(saSource.indexOf(from), to ? saSource.indexOf(to) : undefined)
+  const reqIds = new Set([...section("export function requirements", "export function requirementDelta").matchAll(/\badd\("([a-z0-9-]+)"/g)].map((m) => m[1]))
+  const riskIds = new Set([...section("export function riskRegister", "export const HPE_FOOTNOTE").matchAll(/\badd\("([a-z0-9-]+)"/g)].map((m) => m[1]))
+  const serviceIds = new Set([...section("export function serviceMap", "export const CHECKLIST").matchAll(/\{ id: "([a-z0-9-]+)"/g)].map((m) => m[1]))
+  const plans = PLAN_PRESET_ORDER.map((p) => evaluateTwoSeasonPlan(normalizePlan(presetPlan(p))))
+  const hybrid = normalizePlan(presetPlan("gl2028")); hybrid.shared.location = "hybrid"; hybrid.seasons[2028].cooling = "dlc"; hybrid.seasons[2028].mlPartitionKW = 50
+  plans.push(evaluateTwoSeasonPlan(hybrid))
+  for (const r of plans) {
+    for (const y of [2027, 2028]) for (const q of requirements(r, y)) reqIds.add(q.id)
+    for (const k of riskRegister(r)) riskIds.add(k.id)
+    for (const s of serviceMap(r)) serviceIds.add(s.id)
+  }
+  assert.ok(reqIds.size >= 20 && riskIds.size >= 13 && serviceIds.size >= 10, `sa rows: ${reqIds.size} req, ${riskIds.size} risk, ${serviceIds.size} service`)
+  for (const id of reqIds) assert.ok(EXPLAIN[`req.${id}`], `req.${id} missing`)
+  for (const id of riskIds) assert.ok(EXPLAIN[`risk.${id}`], `risk.${id} missing`)
+  for (const id of serviceIds) assert.ok(EXPLAIN[`service.${id}`], `service.${id} missing`)
+  for (const c of CHECKLIST) assert.ok(EXPLAIN[`check.${c.id}`], `check.${c.id} missing`)
+  for (const r of ROLES) assert.ok(EXPLAIN[`role.${r.id}`], `role.${r.id} missing`)
+  assert.deepEqual([...REQ_IDS].sort(), [...reqIds].sort(), "no stray requirement entries")
+  assert.deepEqual([...RISK_IDS].sort(), [...riskIds].sort(), "no stray risk entries")
+  assert.deepEqual([...SERVICE_IDS].sort(), [...serviceIds].sort(), "no stray service entries")
+  assert.deepEqual([...CHECK_IDS].sort(), CHECKLIST.map((c) => c.id).sort())
+  assert.deepEqual([...ROLE_IDS].sort(), ROLES.map((r) => r.id).sort())
+
+  // 4. The SA and task templates fill from a real plan.js result with the row's live line, and degrade without one
+  for (const r of plans) for (const y of [2027, 2028]) {
+    const s = r.seasons[y]
+    const ctx = explainContext({ result: { scenario: s.sim, today: s.today, perf: s.perf }, plan: r, fmt })
+    for (const id of [...SA_IDS, ...TASK_IDS.map((t) => `task.${t}`)]) {
+      const out = fillTemplate(EXPLAIN[id], ctx, { onMissing: (w) => assert.fail(`${id}: unresolved ${w}`) })
+      assert.ok(!/[{}]|undefined|NaN|Infinity/.test(out), `${id}: ${out}`)
+    }
+    for (const q of requirements(r, y)) assert.ok(fillTemplate(EXPLAIN[`req.${q.id}`], ctx).startsWith(String(q.value)), `req.${q.id} repeats the row's value`)
+    for (const t of r.timeline.tasks.filter((t) => t.id.startsWith(`y${String(y).slice(2)}-`))) assert.match(fillTemplate(EXPLAIN[`task.${t.id.replace(/^y\d\d-/, "")}`], ctx), /\d{4}.*weeks/, `task ${t.id} line carries its dates`)
+    assert.match(fillTemplate(EXPLAIN["tile.stat-risks"], ctx), /^\d+ open, \d+ triggered by this plan\.$/)
+  }
+  const planless = explainContext({ result: evaluate(presetInputs("dr2027")), fmt })
+  assert.equal(fillTemplate(EXPLAIN["req.power"], planless), "Not needed in this season")
+  assert.equal(fillTemplate(EXPLAIN["risk.lead"], planless), "Not raised for this plan")
+  assert.equal(fillTemplate(EXPLAIN["task.fitout"], planless), "Not needed in this season.")
+  assert.equal(fillTemplate(EXPLAIN["tile.stat-ready"], planless), "No move in 2027; No move in 2027.")
 })
 
 test("explain: copy rules — shape, one-liner length, no unexpanded acronym, British spelling", () => {

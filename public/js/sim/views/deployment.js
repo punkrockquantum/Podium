@@ -1,8 +1,8 @@
 /** Deployment: the Nov 2026 – Dec 2028 timeline with tunable contract date, cutover target, parallel running and 2028 step-up date. */
 import { K } from "../assumptions.js"
 import { el, fmt, fill } from "../dom.js"
-import { badge, flagRow, stat, explainButton } from "../widgets.js"
-import { gantt, ganttLegend } from "../visuals.js"
+import { badge, flagRow, stat, explainButton, openExplainer } from "../widgets.js"
+import { gantt, ganttLegend, taskExplainId } from "../visuals.js"
 import { roleStrip } from "./common.js"
 import { cutoverOptions, fmtDate, parseDate, isoDate, TIMELINE_RANGE } from "../timeline.js"
 
@@ -68,7 +68,7 @@ export function deploymentView(ctx) {
     const t28 = tl.seasons[2028]
     fill(chart, 
       el("div", { class: "card-head row" }, el("h3", {}, "Gantt"), badge(tl.status === "ok" ? "ok" : tl.status, tl.status === "ok" ? "On plan" : tl.status === "warn" ? "Check" : "Late")),
-      gantt(tl, { compact: false }),
+      gantt(tl, { compact: false, onTask: openExplainer }),
       ganttLegend())
     fill(consequences, 
       el("h3", {}, "What the schedule does to the seasons"),
@@ -85,7 +85,7 @@ export function deploymentView(ctx) {
         el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "What"), el("th", {}, "Owner"), el("th", {}, "Status"))),
         el("tbody", {},
           ...tl.milestones.filter((m) => !m.offChart).sort((a, b) => a.date - b.date).map((m) => el("tr", {}, el("td", { class: "mono" }, isoDate(m.date)), el("td", {}, m.label, m.rule ? el("span", { class: "fia-badge" }, m.rule) : null, explainButton(`milestone.${m.id}`, m.label)), el("td", {}, OWNER[m.owner] || m.owner), el("td", {}, badge(m.status === "ok" ? "ok" : "warn", m.status === "ok" ? "OK" : "Check")))),
-          ...tl.tasks.map((t) => el("tr", { class: "muted" }, el("td", { class: "mono" }, `${isoDate(t.start)} → ${isoDate(t.end)}`), el("td", {}, t.label), el("td", {}, OWNER[t.owner] || t.owner), el("td", {}, `${t.weeks} wk`))),
+          ...tl.tasks.map((t) => el("tr", { class: "muted task-row", dataset: { task: t.id } }, el("td", { class: "mono" }, `${isoDate(t.start)} → ${isoDate(t.end)}`), el("td", {}, t.label, explainButton(taskExplainId(t), t.label)), el("td", {}, OWNER[t.owner] || t.owner), el("td", {}, `${t.weeks} wk`))),
           ...tl.milestones.filter((m) => m.offChart).map((m) => el("tr", { class: "muted" }, el("td", { class: "mono" }, isoDate(m.date)), el("td", {}, m.label), el("td", {}, OWNER[m.owner] || m.owner), el("td", {}, "beyond 2028")))))),
       el("p", { class: "muted small" }, `Lead times are planning assumptions (fact pack G-e, D-e, H-f): GreenLake ${K.timeline.leadWeeks.greenlake} wk, purchase ${K.timeline.leadWeeks.buy} wk, fit-out ${K.timeline.leadWeeks.fitOut}–${K.timeline.leadWeeks.fitOutLiquid} wk, dark fibre ${K.timeline.leadWeeks.fibre} wk (+${K.timeline.leadWeeks.fibreSecondRoute} for a second route), burn-in ${K.timeline.leadWeeks.burnIn} wk.`))
     fill(signBy, 

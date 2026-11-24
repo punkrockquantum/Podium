@@ -63,12 +63,17 @@ export function swissMap(result) {
 
 const OWNER_LABEL = { team: "Team", dr: "Digital Realty", hpe: "HPE GreenLake", carrier: "Carrier", fia: "FIA" }
 
+/** The explainer id of a task row: the task id without its season prefix (`y27-fitout` → `task.fitout`). */
+export const taskExplainId = (task) => `task.${String(task.id).replace(/^y\d\d-/, "")}`
+
 /**
  * `timeline` from evaluatePlan().timeline. `compact` draws bands, markers and milestones only (for the
- * Overview); the full chart adds a row per task with owner colours and the critical path.
+ * Overview); the full chart adds a row per task with owner colours and the critical path. With `onTask(id, g)`
+ * each task row carries a `?` and opens its explainer on click, Enter or Space.
  */
-export function gantt(timeline, { compact = false, width = 960 } = {}) {
+export function gantt(timeline, { compact = false, width = 960, onTask = null } = {}) {
   const labelW = compact ? 0 : 262
+  const helpW = onTask ? 18 : 0 // room for the `?` glyph between the label and the bars
   const left = labelW + 8
   const right = width - 12
   const { start, end } = timeline.range
@@ -139,9 +144,27 @@ export function gantt(timeline, { compact = false, width = 960 } = {}) {
     const y = rowsTop + i * rowH
     const x1 = xOf(t.start)
     const x2 = xOf(t.end)
-    node.append(svg("text", { class: "task-label", x: labelW, y: y + 15, "text-anchor": "end" }, svg("title", {}, t.label), t.label.length > 44 ? `${t.label.slice(0, 42).trimEnd()}…` : t.label))
-    node.append(svg("rect", { class: `task owner-${t.owner} path-${t.path} status-${t.status}`, x: x1.toFixed(1), y: y + 4, width: Math.max(3, x2 - x1).toFixed(1), height: rowH - 8, rx: 4 }))
-    node.append(svg("text", { class: "task-weeks", x: (x2 + 4).toFixed(1), y: y + 15 }, `${t.weeks} wk · ${OWNER_LABEL[t.owner] || t.owner}`))
+    const maxChars = onTask ? 41 : 44
+    const row = svg("g", { class: `task-row owner-${t.owner}`, dataset: { task: t.id } },
+      svg("text", { class: "task-label", x: labelW - helpW, y: y + 15, "text-anchor": "end" }, svg("title", {}, t.label), t.label.length > maxChars ? `${t.label.slice(0, maxChars - 2).trimEnd()}…` : t.label),
+      svg("rect", { class: `task owner-${t.owner} path-${t.path} status-${t.status}`, x: x1.toFixed(1), y: y + 4, width: Math.max(3, x2 - x1).toFixed(1), height: rowH - 8, rx: 4 }),
+      svg("text", { class: "task-weeks", x: (x2 + 4).toFixed(1), y: y + 15 }, `${t.weeks} wk · ${OWNER_LABEL[t.owner] || t.owner}`))
+    if (onTask) {
+      const id = taskExplainId(t)
+      row.append(svg("g", { class: "task-help", "aria-hidden": "true" },
+        svg("circle", { cx: labelW - 6, cy: y + 12, r: 6.5 }),
+        svg("text", { x: labelW - 6, y: y + 15.5, "text-anchor": "middle" }, "?")))
+      row.setAttribute("role", "button")
+      row.setAttribute("tabindex", "0")
+      row.setAttribute("aria-label", `Explain: ${t.label}`)
+      row.setAttribute("aria-haspopup", "dialog")
+      row.setAttribute("aria-expanded", "false")
+      row.dataset.explain = id
+      const act = (e) => { e.stopPropagation(); onTask(id, row) }
+      row.addEventListener("click", act)
+      row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(e) } })
+    }
+    node.append(row)
   })
   // Milestones
   // Diamonds sit on one row; every label hangs below it in its lane, joined by a short leader

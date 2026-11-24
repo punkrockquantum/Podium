@@ -19,6 +19,7 @@
 import { CONTROLS, DEFAULTS } from "./model.js"
 import { K } from "./assumptions.js"
 import { costCapCHF } from "../customer.js"
+import { requirements, serviceMap, riskRegister, ROLES, CHECKLIST } from "./sa.js"
 
 // ---------------------------------------------------------------------------------------------
 // Small tables the copy and the context need
@@ -31,6 +32,39 @@ const ML_PLACEMENT = { dr: "the campus", hinwil: "the Hinwil room", cloud: "the 
 const COOLING_WORD = { air: "Air cooling", reardoor: "Rear-door cooling", dlc: "Direct liquid cooling" }
 const SITE_WORD = { hinwil: "Hinwil room", dr: "Digital Realty Zurich" }
 const ENVELOPE_KW = K.facility.envelopeKW
+
+/**
+ * Tile ids by the label the views pass to stat(), gauge(), bar() and ribbonRow(), so every tile gets its `?`
+ * without touching each call site. Pure data: widgets.js reads it for the DOM, the coverage test for the audit.
+ */
+export const TILE_BY_LABEL = Object.freeze({
+  "Seconds per lap vs Today": "headline-sec", "Seconds a lap found": "headline-sec", "From more useful computing": "stat-aero", "From money kept inside the cap": "stat-reinvest",
+  "Turnaround per run": "stat-turnaround", "Design iterations": "stat-runs", "Availability": "stat-availability", "Work per metered AUh": "stat-work",
+  "PUE": "stat-pue", "PUE · CO₂": "stat-pue", "Run-rate": "stat-yearly", "Inside the cap": "stat-cap", "Inside the cost cap": "stat-cap", "Cap per effective MAUh": "stat-tco",
+  "CO₂ market-based": "stat-co2", "CO₂ (market-based)": "stat-co2", "Heat reused": "stat-heat", "Data-to-decision": "stat-decision", "Race weekends at risk": "stat-weekends", "Link availability": "stat-link",
+  "Bandwidth headroom": "stat-headroom", "Cost-cap charge": "gauge-cap", "Allowance turned into work": "gauge-eff", "Effective MAUh": "gauge-eff", "Effective MAUh (season)": "gauge-eff",
+  "Cash 2027 + 2028": "stat-cash-total", "3-year TCO (2028 estate)": "stat-tco3", "Lap time, both seasons": "stat-sec-total", "kW at Digital Realty of 500": "envelope",
+  "Go-live": "stat-golive", "Allowance lost at the switch": "stat-loss", "Critical path": "stat-critical", "2028 step-up": "stat-stepup", "Where the seconds come from": "waterfall",
+  "Interconnect": "eff-bars", "Storage I/O": "eff-bars", "Cooling": "eff-bars", "Schedule": "eff-bars", "Power": "eff-bars", "Cost lines": "money-lines", "Cost lines and one-offs": "money-lines",
+  // FIA, Compute, Facility and Connectivity drill-down tiles
+  "Allowance per period": "stat-allowance", "Wind tunnel": "stat-windtunnel", "GPU solver": "stat-gpusolver", "Cost cap": "stat-costcap",
+  "Cluster": "stat-cluster", "Cluster depreciation": "stat-itcharge", "HPE GreenLake charge": "stat-itcharge",
+  "Where": "stat-where", "Racks": "stat-racks", "Redundancy": "stat-redundancy", "Electricity": "stat-electricity", "Cage positions": "bar-cage",
+  "Hinwil ↔ campus": "stat-fibre", "Cloud on-ramps": "stat-onramps",
+  // Commercials and the Solutions Architect head
+  "Outside the cap": "gauge-outside",
+  "2027 IT load at the campus": "stat-campus-load", "2028 IT load at the campus": "stat-campus-load", "Suite ready by": "stat-ready", "Open risks": "stat-risks",
+})
+export function tileIdFor(label) {
+  if (typeof label !== "string") return null
+  if (TILE_BY_LABEL[label]) return TILE_BY_LABEL[label]
+  if (/^MAUh used/.test(label)) return "gauge-mauh"
+  if (/IT load vs/.test(label)) return "bar-power"
+  if (/^kW at Digital Realty of/.test(label)) return "envelope"
+  if (/^kW kept at Hinwil/.test(label)) return "hinwil-gauge"
+  if (/^Cash in /.test(label)) return "stat-cash-total"
+  return null
+}
 
 /** Plain words for the model's units when the Plain English toggle is on. */
 const UNIT_WORDS = {
@@ -975,6 +1009,242 @@ const TILE_ENTRIES = {
     terms: [],
     plan: true,
   },
+  // The FIA, Compute, Facility and Connectivity drill-down tiles
+  "stat-allowance": {
+    title: "Computing allowance per period",
+    term: "Allowance per period",
+    one: "How much metered computing the FIA lets the team use in each eight-week period, set by last season's finishing position.",
+    more: [
+      "The sliding scale: first place gets 70 % of the base amount, tenth or lower 115 %. Eighth place is 105 %: 6.3 million unit-hours per period.",
+      "Each period is counted on its own; unused allowance is lost.",
+    ],
+    analogy: "Pocket money that is higher for the children who did worse last term.",
+    inPlan: "Position P{x.position}: {s.fia.pct} % of the base amount, {fmt.num(s.fia.allowance.mauh, 2)} million unit-hours per period.",
+    source: "F4.6.1 · C5 · C9",
+    terms: ["term.atr", "term.auh", "term.atp"],
+  },
+  "stat-windtunnel": {
+    title: "Wind-tunnel allowance",
+    term: "Wind tunnel",
+    one: "The wind-tunnel runs and hours the same sliding scale allows per period; nothing in this plan changes them.",
+    more: [
+      "The tunnel and the computing share one scale: the same finishing position sets both.",
+      "Shown so the computing allowance is seen next to its sibling; the plan only moves the computing.",
+    ],
+    analogy: "The other half of the same ration book.",
+    inPlan: "{s.fia.allowance.runs} runs, {s.fia.allowance.windOn} wind-on hours and {s.fia.allowance.occupancy} hours of occupancy per period.",
+    source: "F4.6.1 · C5 · A10",
+    terms: ["term.atr"],
+  },
+  "stat-gpusolver": {
+    title: "Graphics processors on the solver",
+    term: "GPU solver",
+    one: "Whether graphics processors may run the restricted airflow solver this season: not before 1 January 2028.",
+    more: [
+      "In 2027 only ordinary processors count; graphics processors may still do preparation, review and machine learning.",
+      "From 2028 they may join the solver, but the FIA has not yet said how they will be charged against the allowance.",
+    ],
+    analogy: "A new player allowed on the pitch only from next season.",
+    inPlan: "{d.gpuSolverNote}.",
+    source: "F4.4.1 · C6 · C10",
+    terms: ["term.gpu", "term.fp64"],
+  },
+  "stat-costcap": {
+    title: "The money cap",
+    term: "Cost cap",
+    one: "The cap on what the team may spend on the car in a season, and the share of it this estate takes.",
+    more: [
+      "About USD 215 M a season; most IT costs count against it, property costs do not.",
+      "One to two percent for IT is normal; every tenth of a percent is about CHF 190k of car.",
+    ],
+    analogy: "The household budget, with the IT bill as one slice.",
+    inPlan: "{fmt.chf(d.costCap, 0)} a season; this estate takes {fmt.pct(s.money.capShare, 1)} of it ({fmt.chf(s.money.capCharge)}).",
+    source: "C1 · C2 · E-a",
+    terms: ["term.costcap", "term.capcharge"],
+  },
+  "stat-cluster": {
+    title: "The cluster",
+    term: "Cluster",
+    one: "The servers that do the metered airflow computing: how many, how many cores, at what declared clock, in how many racks.",
+    more: [
+      "Cores × seconds × declared clock is what the FIA charges, so the count and the clock are the two numbers that matter most.",
+      "Graphics processors are listed separately with how many of them sit on the solver.",
+    ],
+    analogy: "The engine: cylinders, revs and the size of the bay it sits in.",
+    inPlan: "{d.clusterLine}.",
+    source: "F4.4.4 · B-c · H2",
+    terms: ["term.auh", "term.declaredClock"],
+  },
+  "stat-itcharge": {
+    title: "Yearly cost of the servers",
+    term: "Cluster depreciation / HPE GreenLake charge",
+    one: "What the servers themselves cost a year: a bought cluster spread over its refresh years, or the monthly HPE GreenLake charge.",
+    more: [
+      "Bought: the hardware price divided by the years before the next refresh.",
+      "HPE GreenLake: a reserved share paid monthly over the term, buffer servers included; counted inside the money cap either way.",
+    ],
+    analogy: "Buying the car outright or leasing it by the month.",
+    inPlan: "{d.consumptionLabel}: {fmt.chf(d.lines.it.chf)} a year{d.itChargeNote}.",
+    source: "H-a · H-b · H1",
+    terms: ["term.greenlake", "term.capcharge"],
+  },
+  "stat-where": {
+    title: "Where the cluster lives",
+    term: "Where",
+    one: "Which room runs the metered cluster: today's Hinwil room, the Digital Realty Zurich campus, or a split with Mission Control left in Hinwil.",
+    more: [
+      "Hinwil's room is about 300 kW and power-short; the campus offer is 500 kW with two independent feeds.",
+      "Hybrid moves the solver estate and keeps the race-weekend operations room at the factory.",
+    ],
+    analogy: "The garage at home or a rented workshop.",
+    inPlan: "{d.siteName}: {d.locationNote}.",
+    source: "A-a · G1 · D-d",
+    terms: ["term.envelope"],
+  },
+  "stat-racks": {
+    title: "Racks and their density",
+    term: "Racks",
+    one: "How many racks the cluster takes and how many kilowatts go into each; the cooling choice sets the ceiling per rack.",
+    more: [
+      "Air to about 20 kW a rack, rear-door heat exchangers to 70, direct liquid to 150.",
+      "Denser racks need fewer cage positions but more cooling.",
+    ],
+    analogy: "How many hobs you can run on one kitchen circuit.",
+    inPlan: "{d.racksWord} at {x.rackKW} kW with {d.coolingLower}; limit about {s.fac.coolingMax} kW a rack.",
+    source: "G-g · G5 · D9",
+    terms: ["term.rackdensity", "term.reardoor", "term.dlc"],
+  },
+  "stat-redundancy": {
+    title: "Spare power and cooling",
+    term: "Redundancy",
+    one: "How many spares the power and cooling paths have, and the facility availability the model gives for it.",
+    more: [
+      "N has no spare, N+1 one spare, 2N a complete second set; ZUR2 runs 2N power and N+2 cooling.",
+      "An hour down inside a period is allowance that never comes back, which is why race teams buy spares.",
+    ],
+    analogy: "One spare tyre versus a second car.",
+    inPlan: "{d.redundancyLabel}: {fmt.availability(s.fac.availability)} facility availability.",
+    source: "G-d · D-d · A-c",
+    terms: ["term.redundancy"],
+  },
+  "stat-electricity": {
+    title: "Electricity",
+    term: "Electricity",
+    one: "The site's electricity for the year, servers plus cooling and losses, and what it costs at the tariff chosen.",
+    more: [
+      "Server power × hours × the power overhead of the site; the campus overhead is lower than the Hinwil room's.",
+      "Electricity counts inside the money cap whatever its colour; renewable supply changes the carbon, not the cap.",
+    ],
+    analogy: "The yearly power bill for the whole building.",
+    inPlan: "{fmt.num(s.fac.totalMWh, 0)} MWh a year: {fmt.chf(d.lines.power.chf)} at {x.tariffRp} rappen per kWh{d.renewableSuffix}.",
+    source: "D-a · D-b · G-b",
+    terms: ["term.pue"],
+  },
+  "bar-cage": {
+    title: "Cage positions used",
+    term: "Cage positions",
+    one: "How many of the 60 rack positions in the Digital Realty cage the estate takes.",
+    more: [
+      "Estate racks are counted at 8 kW each; the cluster and the machine-learning partition at the density you chose.",
+      "Over 60 means a bigger cage or denser rows.",
+    ],
+    analogy: "Parking spaces in a rented garage.",
+    inPlan: "{d.envelope.racks} of {d.envelope.cageRackPositions} positions: {d.cageBreakdown}.",
+    source: "G-h · G5",
+    terms: ["term.rackdensity"],
+  },
+  "stat-fibre": {
+    title: "Fibre between Hinwil and the campus",
+    term: "Hinwil ↔ campus",
+    one: "The private fibre that joins the factory to the campus: one route or two different ones, and the bandwidth on it.",
+    more: [
+      "About 40 km, under half a millisecond each way, so engineers in Hinwil work on the cluster as if it were next door.",
+      "Two routes on different paths turn a dug-up cable from a lost week into a non-event.",
+    ],
+    analogy: "Two different roads to the same town.",
+    inPlan: "{d.fibreLine}.",
+    source: "B-e · D10 · G-a · I-b",
+    terms: ["term.darkfibre"],
+  },
+  "stat-onramps": {
+    title: "Private doors into the clouds",
+    term: "Cloud on-ramps",
+    one: "Whether the plan buys private connections from the campus into AWS and Azure for the work the FIA does not meter.",
+    more: [
+      "Machine learning on the results and analytics bursts run there; the restricted solver never does.",
+      "Charged inside the money cap like any service.",
+    ],
+    analogy: "A side door straight into the warehouse.",
+    inPlan: "{d.cloudNote}.",
+    source: "G6 · G8",
+    terms: ["term.onramp"],
+  },
+  "gauge-outside": {
+    title: "Money outside the cap",
+    term: "Outside the cap",
+    one: "The part of the yearly cost the FIA does not count against the money cap: property costs such as space, fit-out and building plant.",
+    more: [
+      "The share of the campus fee treated as property costs sits here; power, support and links sit inside.",
+      "More outside the cap means more cap left for car parts.",
+    ],
+    analogy: "The rent someone else pays, next to your own pocket money.",
+    inPlan: "{fmt.chf(s.money.excludedYearly)} of {fmt.chf(s.money.yearly)} a year outside the cap ({fmt.pct(d.outsideShare)}).",
+    source: "C3 · G-c",
+    terms: ["term.capcharge", "term.costcap"],
+  },
+  "hinwil-gauge": {
+    title: "What stays in the Hinwil room",
+    term: "kW kept at Hinwil",
+    one: "In a hybrid plan, the server power that stays in the factory room against what the room can supply.",
+    more: ["Mission Control, the simulator and office IT stay; the solver estate moves. Over the room's capacity is \"Not possible\"."],
+    analogy: "What is left in the old garage after the move.",
+    inPlan: "{fmt.num(s.fac.hinwilIT, 0)} kW of {s.fac.hinwilCapacity} kept in Hinwil.",
+    source: "A-a · A-e",
+    terms: [],
+  },
+  // Solutions Architect head tiles
+  "stat-campus-load": {
+    title: "Server power at the campus",
+    term: "IT load at the campus",
+    one: "The kilowatts of servers the season puts on the Digital Realty campus, against the 500 kW offer.",
+    more: [
+      "The metered cluster plus the rest of the estate that moves with it and any machine-learning partition placed there.",
+      "At the wall the figure is higher by the site's power overhead.",
+    ],
+    analogy: "The load on a fuse board, with the fuse rating next to it.",
+    inPlan: "{fmt.num(d.envelope.drIT, 0)} kW of {d.envelope.offerKW} at the campus{d.campusLoadNote}.",
+    source: "G-h · G-b · D-d",
+    terms: ["term.envelope", "term.pue"],
+    sa: true,
+  },
+  "stat-ready": {
+    title: "When the suite must be ready",
+    term: "Suite ready by",
+    one: "The first day fit-out, fibre, hardware and burn-in are all done; the switch can happen then or at the next period boundary.",
+    more: [
+      "Counted forward from the contract date through the longest lead time.",
+      "Slack is the gap between ready and the chosen cutover; a slip means ready came later than the target.",
+    ],
+    analogy: "The day the removal van can actually come.",
+    inPlan: "{d.plan.readyLabel}; {d.plan.goLiveLabel}.",
+    source: "G-e · D-e · H-f",
+    terms: ["term.atp"],
+    sa: true,
+  },
+  "stat-risks": {
+    title: "Open risks",
+    term: "Open risks",
+    one: "How many entries of the live risk register are still open, and how many the current plan has actually triggered.",
+    more: [
+      "Likelihood and status follow the plan: a tighter schedule or a single fibre route moves the register.",
+      "Mitigated entries are the ones the plan already answers.",
+    ],
+    analogy: "The snag list on a building site.",
+    inPlan: "{d.sa.openRisks} open, {d.sa.triggeredRisks} triggered by this plan.",
+    source: "G-f · model",
+    terms: [],
+    sa: true,
+  },
 }
 
 const FLAG_ENTRIES = {
@@ -1443,6 +1713,102 @@ const MILESTONE_ENTRIES = {
   refresh: { title: "Next refresh", one: "When the fleet is next replaced under the refresh cadence; outside the 2027–2028 window in most plans.", more: ["A shorter cadence gives newer, more efficient processors sooner but costs more each year."], analogy: "Changing the family car every few years.", inPlan: "Refresh every {x.refreshYears} years.", source: "L4 · model", terms: ["term.ipc"] },
 }
 
+// The Gantt's task rows (timeline.js leadTasks / buildTimeline); the id is the task id without its season prefix.
+const TASK_ENTRIES = {
+  fitout: { title: "Campus fit-out", one: "Digital Realty builds the suite or cage: racks, power whips, rear-door or liquid rows. Twelve weeks, sixteen with a liquid loop.", more: ["The 2028 step-up fit-out adds liquid rows, cooling units and whips inside the same 500 kW envelope.", "Usually the longest lead time, so it sets the earliest switch day."], analogy: "Fitting out the shop before the stock arrives.", inPlan: "{d.task.fitout.line}.", source: "G-e · G11", terms: ["term.reardoor", "term.dlc"] },
+  fibre: { title: "Dark fibre build", one: "The carrier lights the route between Hinwil and the campus; a second route adds weeks but removes the single point of failure.", more: ["Fourteen weeks for a first route on existing ducts; civil works would take 26 weeks or more.", "The switch needs the fibre; burn-in does not."], analogy: "Laying the road before the removal van can use it.", inPlan: "{d.task.fibre.line}.", source: "D-e · D10", terms: ["term.darkfibre"] },
+  hardware: { title: "HPE delivery", one: "The cluster arrives: four to eight weeks pre-staged under HPE GreenLake, ten to eighteen weeks built to order.", more: ["GreenLake ships staged capacity with buffer servers; a purchase waits on the factory.", "The order date for 2028 counts back from 1 January so the graphics processors are burned in by then."], analogy: "Next-day delivery versus made to measure.", inPlan: "{d.task.hardware.line}.", source: "H-f · H1", terms: ["term.greenlake"] },
+  works: { title: "Hinwil works", one: "Changes to the factory room when the estate stays there: a rear-door cooling branch, chilled water or a liquid loop.", more: ["Only in plans that keep the cluster in Hinwil with denser cooling or a retrofit of the room."], analogy: "Rewiring the garage at home.", inPlan: "{d.task.works.line}.", source: "A-e · G-e", terms: ["term.reardoor"] },
+  xc: { title: "Cross-connects", one: "The cables from the cage to the carriers' meet-me room, ordered once the suite exists; three business days each under the portal service levels.", more: ["Follows the fit-out; the fibre routes land on them, and so do the cloud on-ramps."], analogy: "Plugging the house into the street.", inPlan: "{d.task.xc.line}.", source: "G11 · G8", terms: ["term.crossconnect"] },
+  burnin: { title: "Acceptance and burn-in", one: "Four weeks of benchmarks and soak testing before the cluster is trusted with metered runs and declared to the FIA.", more: ["Needs the room and the hardware, not the fibre.", "The benchmarks also give the declared clock and core count for the FIA filing."], analogy: "Running the new boiler for a month before winter.", inPlan: "{d.task.burnin.line}.", source: "H-f · F4.4.3", terms: ["term.declaredClock"] },
+  parallel: { title: "Parallel running", one: "Both clusters run side by side so the queue drains on the old one and restarts on the new one in a day instead of a week.", more: ["About CHF 20k a week: the old room's electricity, the overlap of the fee and staff.", "It turns a mid-period switch from seven lost solver days into one."], analogy: "Keeping the old flat for a fortnight while you move.", inPlan: "{d.task.parallel.line}.", source: "C9 · G-c", terms: ["term.atp"] },
+}
+
+// Solutions Architect view: requirement rows, service cards, risk entries, checklist items and owner roles (sa.js).
+// Written for a Digital Realty solutions architect new to Formula 1; the "In this plan" line repeats the row's live value.
+const REQ_ENTRIES = {
+  site: { title: "Where the estate sits", one: "Which building hosts the team's airflow-computing estate: the Hinwil factory room, the Zurich campus, or a split between the two.", more: ["Hybrid keeps Mission Control (the race-weekend operations room) and office IT in Hinwil and moves only the solver estate.", "The campus is ZUR1–ZUR3 in Glattbrugg/Opfikon; ZUR4 opens in 2028."], analogy: "Choosing between the garage at home and a rented workshop.", inPlan: "{d.sa.req.site.line}", source: "G1 · A-a · G7", terms: ["term.envelope"] },
+  power: { title: "Server power the campus must feed", one: "The kilowatts of servers the plan puts on the campus this season: the metered cluster plus the rest of the estate that moves with it.", more: ["At the wall the figure is higher by the site's power overhead (cooling and losses).", "The offer is 500 kW of critical server power; the row shows what is left inside it."], analogy: "The load on a fuse board, with the fuse rating next to it.", inPlan: "{d.sa.req.power.line}", source: "G-h · G-b · D-d", terms: ["term.envelope", "term.pue"] },
+  commit: { title: "Committed capacity", one: "The 500 kW the team commits to and pays for in both seasons, with no right to expand; more kW is a separate conversation about ZUR4.", more: ["Billing follows the committed kW, not the metered load; headroom is paid for whether used or not.", "ZUR4 adds 15 MW on the campus in 2028, but that is a new deal, not an option inside this one."], analogy: "A fixed-size storage unit: the rent is the same however full it is.", inPlan: "{d.sa.req.commit.line}", source: "G-h · G-c · G2", terms: ["term.envelope"] },
+  ml: { title: "The machine-learning partition", one: "Servers for machine learning on the simulation results: not metered by the FIA, but drawing power from the same 500 kW and the same cage.", more: ["The FIA counts only the restricted airflow solver; analysis of its results is free of the allowance but not of electricity.", "It can also live in the cloud or in Hinwil; here the plan puts it on the campus."], analogy: "The office next to the workshop: no production, same electricity bill.", inPlan: "{d.sa.req.ml.line}", source: "J-g · G-h", terms: ["term.mlpartition"] },
+  racks: { title: "Cage positions", one: "How many of the 60 rack positions in the cage the estate takes: estate racks at 8 kW each, the dense cluster racks and any machine-learning racks.", more: ["Denser racks need fewer positions; the cooling choice sets how dense a rack may be.", "Over 60 means a bigger cage or denser rows."], analogy: "Parking spaces in a rented garage.", inPlan: "{d.sa.req.racks.line}", source: "G-h · G5", terms: ["term.rackdensity"] },
+  redundancy: { title: "Power and cooling redundancy", one: "How many spares the power and cooling paths have: N (none), N+1 (one spare) or 2N (a complete second set).", more: ["ZUR2 runs 2N power and N+2 cooling; the model gives each tier a facility availability.", "For a team, an hour down inside a period is allowance that never comes back."], analogy: "One spare tyre versus a second car.", inPlan: "{d.sa.req.redundancy.line}", source: "G-d · D-d", terms: ["term.redundancy"] },
+  space: { title: "Racks for the cluster", one: "How many racks the metered cluster itself needs, at what density, and what goes in them.", more: ["Servers, graphics processors and storage; HPE GreenLake adds a few buffer servers.", "A cage or suite with the team's own access list keeps the FIA-declared hardware separate."], analogy: "The number of shelves and how heavily each is loaded.", inPlan: "{d.sa.req.space.line}", source: "G5 · H1 · H3", terms: ["term.rackdensity", "term.pfs"] },
+  cooling: { title: "Cooling for the rows", one: "Air, rear-door heat exchangers or direct-to-chip liquid: the choice sets the ceiling per rack and what design engineering must provide.", more: ["Air to about 20 kW a rack, rear-door to 70, direct liquid to 150.", "Liquid rows need cooling distribution units, a facility water loop and leak detection."], analogy: "A desk fan, a radiator on the door, or water pipes on the engine.", inPlan: "{d.sa.req.cooling.line}", source: "G5 · G-g · G8", terms: ["term.reardoor", "term.dlc"] },
+  fibre: { title: "Dark fibre to Hinwil", one: "Private fibre between the factory and the campus, one route or two different ones; engineers in Hinwil work on the cluster as if it were next door.", more: ["About 40 km, under half a millisecond each way; a carrier builds and owns it, terminated in the campus meet-me room.", "Two routes on different paths turn a dug-up cable from a lost week into a non-event."], analogy: "Two different roads to the same town.", inPlan: "{d.sa.req.fibre.line}", source: "B-e · D10 · G-a", terms: ["term.darkfibre"] },
+  xc: { title: "Cross-connects", one: "Cables inside the campus from the team's cage to the carriers' meet-me room, ordered through the portal and tested by Remote Hands.", more: ["Three business days each under the portal service levels; two for the two fibre routes.", "Cloud on-ramps and internet exchange ports are further cross-connects."], analogy: "The last few metres of wiring from the street to the house.", inPlan: "{d.sa.req.xc.line}", source: "G11 · G8 · G-c", terms: ["term.crossconnect"] },
+  cloud: { title: "Cloud on-ramps", one: "Private connections from the campus into AWS and Azure for the work the FIA does not meter: machine learning and analytics bursts.", more: ["ServiceFabric on-ramps avoid the public internet; the restricted solver never runs in the cloud under this plan.", "Charged inside the money cap like any service."], analogy: "A side door straight into the warehouse.", inPlan: "{d.sa.req.cloud.line}", source: "G6 · G8", terms: ["term.onramp"] },
+  internet: { title: "Internet and peering", one: "Internet bandwidth and, optionally, a port on the SwissIX exchange at ZUR1 for direct traffic with other networks.", more: ["The team's own internet need is small; peering matters for short paths to clouds and partners."], analogy: "A public road next to the private driveways.", inPlan: "{d.sa.req.internet.line}", source: "G10 · G8", terms: [] },
+  paddock: { title: "The paddock link", one: "How the race garage talks to the factory on a race weekend: internet tunnels, one carrier circuit, two, or two plus satellite.", more: ["It ends where Mission Control is: in Hinwil for hybrid plans, at the campus otherwise.", "The row carries the round trip for the chosen race and how long a reading takes to become a decision."], analogy: "The phone line from the away ground back to head office.", inPlan: "{d.sa.req.paddock.line}", source: "I-a · I-b · I-d", terms: ["term.rtt", "term.edge"] },
+  hands: { title: "Remote Hands", one: "Digital Realty staff doing physical work in the cage on the team's behalf: swaps, reboots, cabling, at any hour.", more: ["Scheduled for planned windows, on demand for a failed server inside a period.", "Mission-critical support tiers pair with 24×7 on-demand hands."], analogy: "A caretaker with the keys who can be called at night.", inPlan: "{d.sa.req.hands.line}", source: "G9 · H3", terms: [] },
+  support: { title: "HPE support tier", one: "How fast HPE fixes a broken server: next business day, four hours, or six-hour repair with spares on site.", more: ["A failed server inside an eight-week period is allowance never recovered, so race teams buy the faster tiers.", "Delivered through HPE GreenLake, not by Digital Realty."], analogy: "Breakdown cover: basic, same-day, or a mechanic round the corner.", inPlan: "{d.sa.req.support.line}", source: "H3 · H1", terms: ["term.greenlake"] },
+  windows: { title: "Maintenance windows", one: "When the campus may take a planned outage: at the boundary between two testing periods or during the summer and winter shutdowns.", more: ["The FIA counts airflow computing in six periods a year; a cluster down mid-period burns allowance that does not roll over.", "In the shutdowns the FIA bans airflow computing except for maintenance, which makes them ideal windows."], analogy: "Doing the roadworks during the school holidays.", inPlan: "{d.sa.req.windows.line}", source: "C13 · C14 · F4.1.4", terms: ["term.atp"] },
+  renewable: { title: "Renewable electricity", one: "Whether the campus electricity is bought as 100 % renewable, and the carbon the team reports for it on a contract basis.", more: ["Digital Realty's European portfolio is matched to renewables; the team reports both the contract figure and the Swiss grid-mix figure.", "Electricity is inside the money cap whatever its colour."], analogy: "Choosing the green tariff on the household bill.", inPlan: "{d.sa.req.renewable.line}", source: "D4 · D-c · G-b", terms: [] },
+  heat: { title: "Heat reuse", one: "Waste heat from the rows offered to neighbours now and to the Opfikon district heating network from 2029.", more: ["Liquid-cooled rows give warm water that is easiest to reuse.", "Reported as carbon avoided elsewhere, not as a saving on the team's bill."], analogy: "Warming the greenhouse with the oven's exhaust.", inPlan: "{d.sa.req.heat.line}", source: "G4 · D5", terms: ["term.dlc"] },
+  fia: { title: "The FIA declaration", one: "The FIA must be told about the cluster, its location, cores and declared clock within a month of a change; it may inspect the suite.", more: ["The filing is the team's, but the campus must allow FIA access on request and keep the declared hardware identifiable.", "A second declaration follows the 2028 step-up."], analogy: "Registering a vehicle after a rebuild, with an inspection possible.", inPlan: "{d.sa.req.fia.line}", source: "F4.4.3 · C15", terms: ["term.declaredClock"] },
+  cap: { title: "Cost-cap treatment of the fee", one: "How much of the colocation fee the team's finance function may class as property costs, which the money cap does not count.", more: ["Rent, lease and leasehold improvements can sit outside the cap; services such as power and Remote Hands sit inside.", "The invoice should separate the two so the split is defensible to the FIA's auditors."], analogy: "Splitting the bill into rent and services so each is clear.", inPlan: "{d.sa.req.cap.line}", source: "C3 · D5.1.1.j", terms: ["term.capcharge", "term.costcap"] },
+  ready: { title: "Suite ready for installation", one: "The first day the suite, fibre, hardware and burn-in are all done; the switch can happen then or at the next period boundary.", more: ["Counted forward from the contract date through the longest lead time.", "Slack is the gap between ready and the chosen cutover; a slip means ready came later than the target."], analogy: "The day the removal van can actually come.", inPlan: "{d.sa.req.ready.line}", source: "G-e · D-e · H-f", terms: ["term.atp"] },
+}
+
+const SERVICE_ENTRIES = {
+  colo: { title: "PlatformDIGITAL® colocation", one: "Space, power and cooling in a cabinet, cage or suite on the Zurich campus; the home of the restricted airflow-computing estate.", more: ["Two independent power feeds to every rack, the team's own access list, the 500 kW envelope.", "The team keeps its servers and its FIA filings; Digital Realty keeps the building running."], analogy: "Renting a workshop with the power and the air conditioning included.", inPlan: "{d.sa.service.colo.line}", source: "G5 · G1 · G-c", terms: ["term.envelope"] },
+  hd: { title: "High-density colocation", one: "Rows built for racks far denser than office IT: rear-door heat exchangers to 70 kW a rack, direct liquid beyond that by design.", more: ["Airflow solvers pack many cores into few racks, so density is the norm, not the exception.", "Liquid rows need cooling distribution units and a facility water loop."], analogy: "A kitchen wired for industrial ovens rather than a toaster.", inPlan: "{d.sa.service.hd.line}", source: "G5 · G-g", terms: ["term.reardoor", "term.dlc"] },
+  xc: { title: "ServiceFabric® Cross Connect", one: "The cables inside the campus that join the team's cage to carriers, clouds and partners in the meet-me room.", more: ["Ordered through the portal with a three-business-day service level; continuity-tested by Remote Hands."], analogy: "The last few metres of wiring from the street to the house.", inPlan: "{d.sa.service.xc.line}", source: "G8 · G11", terms: ["term.crossconnect"] },
+  campus: { title: "Campus Connect / Metro Connect", one: "Dedicated links between buildings on the campus (ZUR1–ZUR4) and across the Zurich metro, for a second site or a future ZUR4 hall.", more: ["Listed for 2N plans as the path to a second room; ZUR4's 15 MW in 2028 is a separate commercial conversation."], analogy: "A private corridor between two buildings you rent.", inPlan: "{d.sa.service.campus.line}", source: "G8 · G2 · G-h", terms: [] },
+  cloud: { title: "Cloud on-ramps", one: "Private connections into AWS Direct Connect and Azure ExpressRoute from the campus, for the team's unmetered machine learning and analytics.", more: ["Avoids the public internet; the restricted solver stays on the declared cluster."], analogy: "A side door straight into the warehouse.", inPlan: "{d.sa.service.cloud.line}", source: "G6 · G8", terms: ["term.onramp"] },
+  ix: { title: "Internet Exchange and IP bandwidth", one: "A port on the SwissIX exchange at ZUR1 and plain internet bandwidth, for traffic with other networks and the outside world.", more: ["SwissIX ports run to 400G; the team's need is modest but sensitive to delay."], analogy: "A junction onto the public motorway.", inPlan: "{d.sa.service.ix.line}", source: "G10", terms: [] },
+  hands: { title: "Remote Hands", one: "Digital Realty staff doing physical work in the cage for the team at any hour: swaps, reboots, cabling, maintenance-window support.", more: ["Requested through the portal, scheduled or on demand."], analogy: "A caretaker with the keys who can be called at night.", inPlan: "{d.sa.service.hands.line}", source: "G9", terms: [] },
+  sus: { title: "Sustainability programme", one: "Renewable electricity across the European portfolio, power-overhead and carbon reporting, and heat offered to the Opfikon network from 2029.", more: ["The team reports contract-based and grid-mix carbon; heat reuse counts as carbon avoided elsewhere."], analogy: "The green tariff and the recycling scheme in one contract.", inPlan: "{d.sa.service.sus.line}", source: "G4 · D4 · G-b", terms: ["term.pue"] },
+  fibre: { title: "Carrier dark fibre", one: "Private fibre from Hinwil to the campus, built and owned by a carrier such as Swisscom, Litecom or ewz; not a Digital Realty service.", more: ["Terminated in the campus meet-me room; a second route on a different path is the usual resilience step.", "Civil works on a route can take 26 weeks or more, so routes on existing ducts are preferred."], analogy: "Renting the road, not a bus ticket.", inPlan: "{d.sa.service.fibre.line}", source: "D10 · B-e · D-e", terms: ["term.darkfibre"] },
+  hpe: { title: "HPE via HPE GreenLake", one: "The cluster itself, its support and its refresh, supplied by HPE as a metered service installed in the cage; a partner service, not Digital Realty's.", more: ["GreenLake delivers pre-staged capacity in four to eight weeks with buffer servers; a purchase takes ten to eighteen.", "Support tiers run from next business day to six-hour repair with spares on site."], analogy: "Leasing the machines with the mechanic included.", inPlan: "{d.sa.service.hpe.line}", source: "H1 · H3 · H-f", terms: ["term.greenlake"] },
+}
+
+const RISK_ENTRIES = {
+  lead: { title: "Lead times slip past the boundary", one: "If fit-out, fibre or hardware takes longer than planned, the switch misses its period boundary and part of the season stays on today's room.", more: ["Likelihood follows the slack in the current schedule; triggered when the plan already shows a slip.", "Hold a fallback at the next boundary rather than switching mid-period."], analogy: "Missing the ferry and waiting for the next one rather than swimming.", inPlan: "{d.sa.risk.lead.line}", source: "G-e · D-e · H-f", terms: ["term.atp"] },
+  "fibre-civil": { title: "Fibre needs civil works", one: "A route that needs new ducts can take 26 weeks or more to build, far longer than the fit-out.", more: ["Choose routes on existing utility ducts; order the second route in parallel, not after the first."], analogy: "Digging a new driveway versus using the one that is there.", inPlan: "{d.sa.risk.fibreCivil.line}", source: "D-e · D10", terms: ["term.darkfibre"] },
+  "single-route": { title: "One fibre route", one: "With a single route the whole solver estate hangs on one cable; a dug-up road takes the engineers' link down with it.", more: ["Two diverse routes give about 99.995 % modelled availability; mitigated when the plan has two."], analogy: "A town with one bridge.", inPlan: "{d.sa.risk.singleRoute.line}", source: "B-e · I-b", terms: ["term.darkfibre"] },
+  midatp: { title: "A mid-period cutover", one: "Switching inside one of the FIA's eight-week periods wastes solver days of an allowance that does not roll over.", more: ["Move at a period boundary or in a shutdown; parallel running turns the switch into a one-day queue drain.", "Triggered when the schedule lands inside a period."], analogy: "Changing hotels halfway through a prepaid week.", inPlan: "{d.sa.risk.midatp.line}", source: "C9 · F4.6.1", terms: ["term.atp"] },
+  late27: { title: "Live after Round 1", one: "If the new estate goes live after the first race, the opening periods of 2027 run on today's power-short room.", more: ["Likelihood follows the share of 2027 on today's setup; signing earlier is the lever."], analogy: "Moving into the new house after the school year has started.", inPlan: "{d.sa.risk.late27.line}", source: "C7 · F4.1.4", terms: ["term.atp"] },
+  property: { title: "Less of the fee counted as property", one: "The team's auditors may class less of the colocation fee as property costs than planned, pushing more of it inside the money cap.", more: ["Structure the invoice so rent, lease and leasehold improvements are separable from services."], analogy: "A landlord's bill that mixes rent and cleaning on one line.", inPlan: "{d.sa.risk.property.line}", source: "C3", terms: ["term.capcharge"] },
+  "power-stepup": { title: "2028 power or liquid rows late", one: "If the step-up rows (power whips, liquid loop, cooling units) are not ready, the 2028 graphics processors wait.", more: ["Order by the date the timeline shows; the step-up stays inside the 500 kW envelope."], analogy: "The new oven arriving before the kitchen is rewired.", inPlan: "{d.sa.risk.powerStepup.line}", source: "G-e · G-h", terms: ["term.dlc"] },
+  "hinwil-short": { title: "The Hinwil room cannot power the estate", one: "Today's 300 kW room is short of the estate's power in both seasons; servers that cannot be switched on do no metered work.", more: ["Retrofit the room or move the solver estate to the campus."], analogy: "More appliances than the fuse board can carry.", inPlan: "{d.sa.risk.hinwilShort.line}", source: "A-e · A-a", terms: [] },
+  "gpu-rule": { title: "No GPU-to-AUh rule yet", one: "The FIA has not said how GPUs will be charged against the allowance from 2028; the model assumes a share of processor-equivalents.", more: ["Keep the GPU partition sized so it can be rebalanced when the rule lands; the risk is high for plans that put GPUs on the solver."], analogy: "Buying the ticket before the fare is published.", inPlan: "{d.sa.risk.gpuRule.line}", source: "C10 · J-c · F4.4.1", terms: ["term.gpu", "term.auh"] },
+  early28: { title: "GPU partition delivered too early", one: "Graphics processors delivered long before 1 January 2028 cost money every week they cannot legally run the solver.", more: ["Four weeks early is burn-in; later weeks are charge without value, shown as a carrying cost."], analogy: "Paying rent on a flat you cannot move into yet.", inPlan: "{d.sa.risk.early28.line}", source: "F4.4.1 · H-f", terms: ["term.gpu"] },
+  thermal: { title: "Racks hotter than the cooling allows", one: "Racks denser than the cooling ceiling throttle their chips, so the team pays allowance for slower work.", more: ["Match density to cooling: rear-door to 70 kW a rack, direct liquid beyond."], analogy: "An engine that loses power when it overheats.", inPlan: "{d.sa.risk.thermal.line}", source: "G5 · G-g", terms: ["term.rackdensity"] },
+  support: { title: "A failed node inside a period", one: "A broken server waiting for next-business-day support burns allowance that never comes back.", more: ["Four-hour or mission-critical support with on-site spares; Remote Hands do the physical swap."], analogy: "Breakdown cover that takes a day to arrive.", inPlan: "{d.sa.risk.support.line}", source: "H3 · G9", terms: [] },
+  calendar28: { title: "2028 calendar not yet published", one: "The 2028 pre-season and Round 1 dates are not out; the model uses the 2027 pattern.", more: ["Re-plan when the 2028 calendar is published; low impact on the campus design."], analogy: "Planning next year's holiday before the term dates are out.", inPlan: "{d.sa.risk.calendar28.line}", source: "C-a", terms: [] },
+}
+
+const CHECK_ENTRIES = {
+  position: { title: "Why the finishing position matters", one: "Last season's finishing position sets how much computing the FIA allows per period; worse teams get more, so it sizes the cluster.", more: ["First place gets 70 % of the base amount, tenth or lower 115 %; the scale is re-read after the third period.", "Ask which position the team plans against and when it will re-plan."], analogy: "Handicaps in golf: the weaker player gets more strokes.", inPlan: "This plan assumes position P{x.position}: {s.fia.pct} % of the base amount.", source: "F4.6.1 · C5", terms: ["term.atr"] },
+  "gpu-rule": { title: "The unwritten GPU rule", one: "From 2028 GPUs may run the solver, but the FIA has not said how they count against the allowance; the answer sizes the 2028 rows.", more: ["Ask what charge the team assumes and how it would rebalance if the rule is stricter."], analogy: "Designing the car park before the parking charges are published.", inPlan: "{d.gpuSolverNote}; modelled at {x.gpuChargePct} % of processor-equivalents.", source: "F4.4.1 · C10 · J-c", terms: ["term.gpu"] },
+  declaration: { title: "Who files with the FIA", one: "The team must declare the cluster to the FIA and report each period; the campus may need to admit an inspector.", more: ["Agree the access process for an FIA visit and how the declared hardware is identified in the cage."], analogy: "Knowing who holds the paperwork before the inspector calls.", inPlan: "{d.plan.declarationLabel}; {d.plan.declaration28Label}.", source: "F4.4.3 · C15", terms: ["term.declaredClock"] },
+  hinwil: { title: "What stays in Hinwil", one: "The real power and cooling of the factory room, and what stays there: Mission Control, the driving simulator, office IT.", more: ["It decides whether a hybrid plan works and how much estate moves."], analogy: "Measuring the old garage before deciding what goes to the new one.", inPlan: "{d.hinwilLine}.", source: "A-a · A3 · A-e", terms: ["term.dil"] },
+  estate: { title: "Today's cluster", one: "Server count, cores, declared clock, memory, network and storage of today's cluster, and what moves rather than being replaced.", more: ["Moved hardware needs racks and power at the campus from day one; replaced hardware arrives on HPE's lead time."], analogy: "An inventory before the removal van comes.", inPlan: "{d.clusterLine}.", source: "A15 · A-f · H-a", terms: ["term.declaredClock"] },
+  power: { title: "Power per season inside 500 kW", one: "Server kilowatts for 2027 and 2028 inside the 500 kW envelope, the machine-learning partition, and growth beyond 2028 (ZUR4).", more: ["The 2028 step-up must fit the same 500 kW; anything beyond is a ZUR4 conversation."], analogy: "Checking the suitcase weight for both legs of the trip.", inPlan: "{fmt.num(d.envelope.drIT, 0)} kW of {d.envelope.offerKW} at the campus; machine learning: {d.ml.note}.", source: "G-h · J-g · G2", terms: ["term.envelope", "term.mlpartition"] },
+  cooling: { title: "Density and cooling per season", one: "Rack density and cooling choice per season, and the liquid-loop details (cooling units, supply temperature, leak detection) for any dense partition.", more: ["Liquid rows take longer to fit out (16 weeks) and change the suite design."], analogy: "Deciding between a radiator and underfloor heating before the floor goes down.", inPlan: "{d.coolingLabel} at {x.rackKW} kW a rack; limit about {s.fac.coolingMax} kW.", source: "G5 · G-e · G-g", terms: ["term.dlc", "term.rackdensity"] },
+  redundancy: { title: "Redundancy and windows", one: "Whether the team needs N+1 or 2N, and which maintenance windows it will accept against the FIA's period calendar.", more: ["Boundaries between periods and the two shutdowns are the natural windows."], analogy: "Agreeing when the water can be turned off.", inPlan: "{d.redundancyLabel}; windows at period boundaries or in the shutdowns.", source: "G-d · C13", terms: ["term.redundancy", "term.atp"] },
+  fibre: { title: "Fibre routes and latency", one: "Which carriers, how different the two routes really are, and the delay the engineers' workflow can live with.", more: ["Route files show whether two routes share a duct.", "About 0.4 ms each way is invisible to the workflow."], analogy: "Checking that the two roads do not share the same bridge.", inPlan: "{d.fibreLine}.", source: "D10 · D-e · G-a", terms: ["term.darkfibre", "term.rtt"] },
+  xc: { title: "Cross-connects, clouds and the paddock", one: "Which cross-connects, cloud on-ramps and exchange ports the team needs, and who terminates the race-weekend link.", more: ["The paddock link ends where Mission Control is; the on-ramps serve the unmetered work."], analogy: "Listing every cable before the electrician arrives.", inPlan: "{d.cloudNote}; paddock link: {d.tracksideLabel}.", source: "G8 · G6 · I-b", terms: ["term.crossconnect", "term.onramp"] },
+  ops: { title: "Hands, support and keys", one: "What Remote Hands should cover, which HPE support tier the team buys, and who holds the keys to the cage.", more: ["A failed server inside a period is lost allowance, so hands and support tiers matter more than in office IT."], analogy: "Agreeing who has the spare key and who calls the plumber.", inPlan: "{d.supportLabel}; {d.consumptionLabel}.", source: "G9 · H3", terms: ["term.greenlake"] },
+  timeline: { title: "Dates that drive the design", one: "Contract date, the period boundary targeted for the switch, parallel-running weeks and the 2028 step-up date.", more: ["Every lead time counts from signature; the first feasible switch day falls out of them."], analogy: "Working back from the wedding date.", inPlan: "{d.plan.contractLabel}; {d.plan.goLiveLabel}; {d.plan.stepUpLabel}.", source: "C13 · G-e · H-f", terms: ["term.atp"] },
+  finance: { title: "How finance treats the fee", one: "How the team's finance function will class the colocation fee and the fit-out against the money cap.", more: ["Property costs sit outside the cap; the invoice structure decides how much qualifies."], analogy: "Keeping the rent receipt separate from the shopping.", inPlan: "{x.propertySharePct} % of the fee as property costs: {fmt.chf(s.money.excludedYearly)} a year outside the cap.", source: "C3 · D5.1.1.j", terms: ["term.capcharge"] },
+  sustainability: { title: "Certificates, heat and reporting", one: "Which renewable certificates, heat-reuse participation and carbon figures the team needs for its own reporting.", more: ["Contract-based and grid-mix carbon, plus heat offered to the network."], analogy: "Collecting the receipts the auditor will ask for.", inPlan: "{d.renewableNote}; {fmt.num(s.money.heatMWh, 0)} MWh of heat reused.", source: "D4 · G4 · D-c", terms: [] },
+  security: { title: "Access, secrecy and residency", one: "Physical access lists, FIA confidentiality, keeping data in Switzerland and audit logging for the cage.", more: ["A rival team's data on the same campus is normal in colocation; the cage and the access list are the boundary."], analogy: "Separate locked rooms in a shared building.", inPlan: "Estate at {d.siteName}; access list and FIA inspection access are the team's to define.", source: "G5 · F4.4.3", terms: [] },
+}
+
+const ROLE_ENTRIES = {
+  team: { title: "Audi F1 Team", one: "The customer: decides the estate, files the FIA declarations, owns the money-cap treatment and the race-weekend link.", more: ["Everything the FIA regulates stays with the team; Digital Realty never files anything."], analogy: "The homeowner who signs the forms.", inPlan: "{d.sa.role.team.line}", source: "A1 · F4.4.3", terms: [] },
+  hpe: { title: "HPE via HPE GreenLake", one: "Supplies, installs and supports the cluster and meters the GreenLake capacity; sets the hardware lead time.", more: ["The team has used GreenLake since 2023; the support tier decides how fast a failed server is fixed."], analogy: "The appliance maker with its own repair service.", inPlan: "{d.sa.role.hpe.line}", source: "H1 · H3 · A15", terms: ["term.greenlake"] },
+  carrier: { title: "Dark-fibre carrier", one: "Builds and owns the fibre routes between Hinwil and the campus (Swisscom, Litecom or ewz), with route files and a service level.", more: ["Not a Digital Realty service; terminated in the campus meet-me room."], analogy: "The road builder.", inPlan: "{d.sa.role.carrier.line}", source: "D10 · B-e", terms: ["term.darkfibre"] },
+  fia: { title: "FIA Technical Department", one: "Receives the declaration and the period reports and may inspect the cluster; the regulator everything is designed around.", more: ["Declarations within a month of a change; reports 14 days after each period."], analogy: "The referee.", inPlan: "{d.sa.role.fia.line}", source: "F4.4.3 · C15", terms: ["term.atr"] },
+  "sales-engineering": { title: "Digital Realty · Sales engineering", one: "Requirements, sizing, the commercial proposal and the 500 kW envelope; owns the ZUR4 conversation for anything beyond it.", more: ["A generic role name (ASSUMPTION); the fact pack lists the public services, not the org chart."], analogy: "The estate agent who sizes the house.", inPlan: "{d.sa.role.salesEngineering.line}", source: "G-f · G-h", terms: ["term.envelope"] },
+  "design-engineering": { title: "Digital Realty · Design engineering", one: "Suite layout, power whips, rear-door or liquid rows, cooling distribution units, redundancy and the fit-out lead time.", more: ["A generic role name (ASSUMPTION)."], analogy: "The architect and the builder.", inPlan: "{d.sa.role.designEngineering.line}", source: "G-f · G-e", terms: ["term.dlc"] },
+  interconnection: { title: "Digital Realty · Interconnection", one: "Cross-connects, Campus and Metro Connect, cloud on-ramps, carrier meet-me rooms and the SwissIX port.", more: ["A generic role name (ASSUMPTION)."], analogy: "The electrician who wires every room to the street.", inPlan: "{d.sa.role.interconnection.line}", source: "G-f · G8", terms: ["term.crossconnect"] },
+  sustainability: { title: "Digital Realty · Sustainability", one: "Renewable supply, power-overhead and carbon reporting, and the team's part in heat reuse.", more: ["A generic role name (ASSUMPTION)."], analogy: "The energy adviser.", inPlan: "{d.sa.role.sustainability.line}", source: "G-f · G4", terms: [] },
+  "customer-success-remote-hands": { title: "Digital Realty · Customer success / Remote Hands", one: "Onboarding, Remote Hands and maintenance windows lined up with the FIA's period boundaries.", more: ["A generic role name (ASSUMPTION)."], analogy: "The caretaker and the front desk.", inPlan: "{d.sa.role.customerSuccessRemoteHands.line}", source: "G-f · G9", terms: ["term.atp"] },
+}
+
 const TERM_ENTRIES = {
   atr: { title: "ATR — Aerodynamic Testing Restrictions", one: "The FIA's limits on wind-tunnel time and airflow computing, set every eight weeks by championship position.", analogy: "A salary cap for testing.", source: "F4 · C5" },
   auh: { title: "AUh / MAUh — Allocation Unit hours (millions of)", one: "The FIA's unit of computing: cores × seconds × declared clock ÷ 3,600. One MAUh is a million of them. Eighth place gets 6.3 MAUh per period.", analogy: "Units on a pre-paid electricity meter.", source: "F4.4.4 · C9" },
@@ -1491,6 +1857,12 @@ export const EXPLAIN = Object.freeze({
   ...withPrefix("driver", DRIVER_ENTRIES),
   ...withPrefix("strategy", STRATEGY_ENTRIES),
   ...withPrefix("milestone", MILESTONE_ENTRIES),
+  ...withPrefix("task", TASK_ENTRIES),
+  ...withPrefix("req", REQ_ENTRIES, () => ({ sa: true })),
+  ...withPrefix("service", SERVICE_ENTRIES, () => ({ sa: true })),
+  ...withPrefix("risk", RISK_ENTRIES, () => ({ sa: true })),
+  ...withPrefix("check", CHECK_ENTRIES, () => ({ sa: true })),
+  ...withPrefix("role", ROLE_ENTRIES, () => ({ sa: true })),
   ...withPrefix("term", TERM_ENTRIES, (id, e) => ({ more: [e.one], inPlan: null, terms: [] })),
 })
 
@@ -1501,6 +1873,14 @@ export const DRIVER_IDS = Object.keys(DRIVER_ENTRIES)
 export const STRATEGY_IDS = Object.keys(STRATEGY_ENTRIES)
 export const TERM_IDS = Object.keys(TERM_ENTRIES)
 export const MILESTONE_IDS = Object.keys(MILESTONE_ENTRIES)
+export const TASK_IDS = Object.keys(TASK_ENTRIES)
+export const REQ_IDS = Object.keys(REQ_ENTRIES)
+export const SERVICE_IDS = Object.keys(SERVICE_ENTRIES)
+export const RISK_IDS = Object.keys(RISK_ENTRIES)
+export const CHECK_IDS = Object.keys(CHECK_ENTRIES)
+export const ROLE_IDS = Object.keys(ROLE_ENTRIES)
+/** Entries whose templates read the Solutions Architect facts (`d.sa`) of explainContext({ plan }); they degrade to "not in this plan" without one. */
+export const SA_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.sa).map(([id]) => id)
 /** Entries for controls or flags the model does not have yet (none since the integration pass; kept for the tests). */
 export const PENDING_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.pending).map(([id]) => id)
 /** Entries for the two-season planning tool's tiles and timeline flags; their templates read explainContext({ plan }). */
@@ -1728,6 +2108,7 @@ function planFacts(plan, x) {
   const totals = (plan && plan.totals) || {}
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
   const earlyWeeks = Math.round(num(t28.earlyDays) / 7)
+  const contractMs = (plan && plan.timeline && Array.isArray(plan.timeline.milestones) && (plan.timeline.milestones.find((m) => m.id === "contract") || {}).date) || (plan && plan.timeline && plan.timeline.inputs && plan.timeline.inputs.contractDate) || null
   const stepUpNote = !t28.changes ? "" : earlyWeeks > 0 ? `, ${earlyWeeks} weeks before graphics processors are allowed` : num(t28.shareOld) > 0 ? `, ${Math.round(num(t28.shareOld) * 100)} % of 2028 on the 2027 estate` : ", on time for 1 January"
   return {
     changes27: Boolean(t27.changes),
@@ -1756,7 +2137,61 @@ function planFacts(plan, x) {
     todayTco3: num(totals.todayTco3),
     secTotal: num(totals.sec),
     confidence: x.confidence,
+    readyLabel: t27.feasible ? `Ready ${dateLabel(t27.feasible)}` : t27.changes ? "Ready date not set" : "No move in 2027",
+    contractLabel: t27.changes && contractMs ? `Signed ${dateLabel(contractMs)}` : "No contract in this plan",
+    declarationLabel: t27.declarationDue ? `2027 declaration due by ${dateLabel(t27.declarationDue)}` : "No new declaration in 2027",
+    declaration28Label: t28.declarationDue ? `2028 declaration due by ${dateLabel(t28.declarationDue)}` : "No new declaration in 2028",
   }
+}
+
+const camel = (id) => String(id).replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+const isPlanResult = (plan) => Boolean(plan && plan.seasons && plan.inputs && plan.timeline && plan.timeline.seasons && plan.seasons[2027] && plan.seasons[2028])
+
+/**
+ * Facts for the Gantt task rows: one line per task kind for the season (`y27-*` for 2027, `y28-*` for 2028),
+ * "Not needed in this season" when the plan has no such task.
+ */
+function taskFacts(plan, season) {
+  const out = {}
+  for (const id of Object.keys(TASK_ENTRIES)) out[id] = { line: "Not needed in this season" }
+  const tasks = (plan && plan.timeline && Array.isArray(plan.timeline.tasks) && plan.timeline.tasks) || []
+  const prefix = `y${String(season).slice(2)}-`
+  const owner = { team: "the team", dr: "Digital Realty", hpe: "HPE GreenLake", carrier: "the carrier", fia: "the FIA" }
+  for (const t of tasks) {
+    if (!String(t.id).startsWith(prefix)) continue
+    const kind = String(t.id).slice(prefix.length)
+    if (out[kind]) out[kind] = { line: `${t.label}: ${dateLabel(t.start)} to ${dateLabel(t.end)}, ${t.weeks} weeks, ${owner[t.owner] || t.owner}` }
+  }
+  return out
+}
+
+/**
+ * Facts for the Solutions Architect rows: the live requirement line per season, the service, risk and role lines
+ * (plan-level) and the risk counts. Every key exists with a "not in this plan" line when no plan.js result is given.
+ */
+function saFacts(plan, season) {
+  const req = {}
+  for (const id of Object.keys(REQ_ENTRIES)) req[camel(id)] = { line: "Not needed in this season" }
+  const service = {}
+  for (const id of Object.keys(SERVICE_ENTRIES)) service[camel(id)] = { line: "Not needed in this plan" }
+  const risk = {}
+  for (const id of Object.keys(RISK_ENTRIES)) risk[camel(id)] = { line: "Not raised for this plan" }
+  const role = {}
+  for (const id of Object.keys(ROLE_ENTRIES)) role[camel(id)] = { line: "No requirement row in this season" }
+  const out = { req, service, risk, role, openRisks: 0, triggeredRisks: 0 }
+  if (!isPlanResult(plan)) return out
+  const rows = requirements(plan, season)
+  for (const q of rows) if (req[camel(q.id)]) req[camel(q.id)] = { line: q.detail ? `${q.value} — ${q.detail}` : String(q.value) }
+  for (const r of ROLES) {
+    const mine = rows.filter((q) => q.owner === r.id)
+    if (role[camel(r.id)] && mine.length) role[camel(r.id)] = { line: `Owns ${mine.length} requirement row${mine.length === 1 ? "" : "s"} in ${season}: ${mine.map((q) => q.label).join(", ")}` }
+  }
+  for (const sv of serviceMap(plan)) if (service[camel(sv.id)]) service[camel(sv.id)] = { line: `${sv.need} → ${sv.service}` }
+  const risks = riskRegister(plan)
+  for (const k of risks) if (risk[camel(k.id)]) risk[camel(k.id)] = { line: `${k.likelihood} likelihood, ${k.impact} impact, ${k.status}${k.season ? ` (${k.season})` : ""}: ${k.mitigation}` }
+  out.openRisks = risks.filter((k) => k.status !== "mitigated").length
+  out.triggeredRisks = risks.filter((k) => k.status === "triggered").length
+  return out
 }
 
 /**
@@ -1846,6 +2281,21 @@ export function explainContext({ result, attribution = null, both = null, plan =
     sec2027: both && both[2027] ? both[2027].perf.sec : season === 2027 ? p.sec : undefined,
     sec2028: both && both[2028] ? both[2028].perf.sec : season === 2028 ? p.sec : undefined,
     plan: planFacts(plan, x),
+    // the drill-down tiles
+    gpuSolverNote: s.fia.gpuSolverAllowed ? `Allowed: ${s.comp.gpuSolverN} solver graphics processor${s.comp.gpuSolverN === 1 ? "" : "s"} declared` : "Not allowed: processor-only solver until 1 January 2028",
+    clusterLine: `${x.nodes} server${x.nodes === 1 ? "" : "s"}, ${intWord(s.hw.cores)} cores at ${x.clockGHz.toFixed(1)} GHz declared${x.gpus ? `, ${x.gpus} graphics processor${x.gpus === 1 ? "" : "s"} (${s.comp.gpuSolverN} on the solver)` : ""}, ${s.hw.racks} rack${s.hw.racks === 1 ? "" : "s"}`,
+    itChargeNote: x.consumption === "buy" ? ` (${fmt && fmt.chf ? fmt.chf(s.hw.hardwareCHF) : `CHF ${intWord(s.hw.hardwareCHF)}`} over ${x.refreshYears} years)` : ` with ${s.hw.bufferNodes} buffer server${s.hw.bufferNodes === 1 ? "" : "s"}`,
+    locationNote: x.location === "hybrid" ? "the solver estate moves, Mission Control stays in Hinwil" : x.location === "dr" ? "the whole estate on the campus" : "everything in the existing room",
+    racksWord: `${s.hw.racks} rack${s.hw.racks === 1 ? "" : "s"}`,
+    coolingLower: COOLING_WORD[x.cooling].toLowerCase(),
+    renewableSuffix: x.renewable ? ", renewable contract" : ", grid mix",
+    cageBreakdown: `${s.fac.racks.estate} estate rack${s.fac.racks.estate === 1 ? "" : "s"} at ${K.facility.estateRackKW} kW, ${s.fac.racks.cluster} cluster rack${s.fac.racks.cluster === 1 ? "" : "s"}${s.fac.racks.ml ? `, ${s.fac.racks.ml} machine-learning rack${s.fac.racks.ml === 1 ? "" : "s"}` : ""}`,
+    fibreLine: x.location === "hinwil" ? "No campus fibre: the estate stays in the room" : `${x.fibrePairs === 2 ? "Two diverse routes" : "One route"} at ${x.fibreGbps}G: ${(K.trackside.fibreAvailability[x.fibrePairs] * 100).toFixed(3)} % available, ${fmt && fmt.chf ? fmt.chf(lines.fibre.chf) : `CHF ${intWord(lines.fibre.chf)}`} a year`,
+    outsideShare: s.money.yearly > 0 ? s.money.excludedYearly / s.money.yearly : 0,
+    campusLoadNote: x.location === "hinwil" ? ": the estate stays in Hinwil" : `: ${s.hw.racks} rack${s.hw.racks === 1 ? "" : "s"}, ${COOLING_WORD[x.cooling].toLowerCase()}, ${option.redundancy}`,
+    hinwilLine: `${Math.round(s.fac.hinwilIT)} kW of servers in a ${s.fac.hinwilCapacity} kW room${s.fac.powerShortKW > 0 ? `: short by ${Math.round(s.fac.powerShortKW)} kW` : ""}`,
+    task: taskFacts(plan, season),
+    sa: saFacts(plan, season),
   }
 
   const a = {}

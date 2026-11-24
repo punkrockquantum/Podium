@@ -36,7 +36,7 @@ export function createExplainPanel({ getContext, onNavigate = null } = {}) {
 
   function kindLabel(id) {
     const kind = id.split(".")[0]
-    return { control: "Control", tile: "Figure", flag: "Flag", driver: "Where the seconds come from", strategy: "Strategy", term: "Glossary", milestone: "Milestone" }[kind] || ""
+    return { control: "Control", tile: "Figure", flag: "Flag", driver: "Where the seconds come from", strategy: "Strategy", term: "Glossary", milestone: "Milestone", task: "Timeline task", req: "Requirement", service: "Service", risk: "Risk", check: "Checklist item", role: "Role" }[kind] || ""
   }
 
   /** The "In this plan" lines: one per season when they differ, else one. */

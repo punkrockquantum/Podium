@@ -1,6 +1,6 @@
 /** Controls, gauges, badges and bars for the simulator. All functions return DOM nodes. */
 import { el, svg, fmt } from "./dom.js"
-import { EXPLAIN, labels as explainLabels } from "./explain.js"
+import { EXPLAIN, labels as explainLabels, TILE_BY_LABEL, tileIdFor } from "./explain.js"
 import { DRIVER_ORDER, waterfallSteps } from "./attribution.js"
 
 // ---------------------------------------------------------------------------------------------
@@ -11,12 +11,14 @@ let explainHandler = null
 let plainMode = true
 /** The app registers `(id, buttonEl) => panel.open(id, buttonEl)` once. */
 export function setExplainHandler(fn) { explainHandler = fn }
+/** Open the shared explainer from a widget that draws its own `?` (the Gantt task rows); no-op before the app wires the panel. */
+export function openExplainer(id, anchorEl) { if (explainHandler && EXPLAIN[id]) explainHandler(id, anchorEl) }
 /** Plain English on: labels show the explainer titles (plain words) with the model term as a tooltip; off: the model's own labels. */
 export function setPlainEnglish(on) { plainMode = Boolean(on) }
 export const isPlainEnglish = () => plainMode
 
 /** Labels that are already plain, or that the team asked to keep verbatim (the 500 kW rule, the FIA position input). */
-const KEEP_LABEL = new Set(["kW at Digital Realty of 500", "Constructors' position used for the sliding scale", "Seconds per lap vs Today", "Availability", "Season", "Cooling", "Heat reuse", "Model confidence", "Electricity price"])
+const KEEP_LABEL = new Set(["kW at Digital Realty of 500", "Constructors' position used for the sliding scale", "Seconds per lap vs Today", "Availability", "Season", "Cooling", "Heat reuse", "Model confidence", "Electricity price", "2027 IT load at the campus", "2028 IT load at the campus", "Suite ready by", "Open risks", "Interconnect", "Storage I/O", "Schedule", "Power"])
 
 /** The label to show for a tile or control: the plain title when Plain English is on and an entry exists. */
 function shownLabel(label, explainId) {
@@ -39,26 +41,7 @@ export function explainButton(id, titleText) {
   }, "?")
 }
 
-/** Tile ids by the label the views pass, so stats, gauges and bars get their `?` without touching every call site. */
-const TILE_BY_LABEL = {
-  "Seconds per lap vs Today": "headline-sec", "Seconds a lap found": "headline-sec", "From more useful computing": "stat-aero", "From money kept inside the cap": "stat-reinvest",
-  "Turnaround per run": "stat-turnaround", "Design iterations": "stat-runs", "Availability": "stat-availability", "Work per metered AUh": "stat-work",
-  "PUE": "stat-pue", "PUE · CO₂": "stat-pue", "Run-rate": "stat-yearly", "Inside the cap": "stat-cap", "Inside the cost cap": "stat-cap", "Cap per effective MAUh": "stat-tco",
-  "CO₂ market-based": "stat-co2", "Heat reused": "stat-heat", "Data-to-decision": "stat-decision", "Race weekends at risk": "stat-weekends", "Link availability": "stat-link",
-  "Bandwidth headroom": "stat-headroom", "Cost-cap charge": "gauge-cap", "Allowance turned into work": "gauge-eff", "Effective MAUh": "gauge-eff", "Effective MAUh (season)": "gauge-eff",
-  "Cash 2027 + 2028": "stat-cash-total", "3-year TCO (2028 estate)": "stat-tco3", "Lap time, both seasons": "stat-sec-total", "kW at Digital Realty of 500": "envelope",
-  "Go-live": "stat-golive", "Allowance lost at the switch": "stat-loss", "Critical path": "stat-critical", "2028 step-up": "stat-stepup", "Where the seconds come from": "waterfall",
-  "Interconnect": "eff-bars", "Storage I/O": "eff-bars", "Cooling": "eff-bars", "Schedule": "eff-bars", "Power": "eff-bars", "Cost lines": "money-lines", "Cost lines and one-offs": "money-lines",
-}
-export function tileIdFor(label) {
-  if (typeof label !== "string") return null
-  if (TILE_BY_LABEL[label]) return TILE_BY_LABEL[label]
-  if (/^MAUh used/.test(label)) return "gauge-mauh"
-  if (/IT load vs/.test(label)) return "bar-power"
-  if (/^kW at Digital Realty of/.test(label)) return "envelope"
-  if (/^Cash in 20/.test(label)) return "stat-cash-total"
-  return null
-}
+export { tileIdFor }
 const tileExplainId = (label, explicit) => {
   const id = explicit === false ? null : explicit || tileIdFor(label)
   return id ? (id.includes(".") ? id : `tile.${id}`) : null

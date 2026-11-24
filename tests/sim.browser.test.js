@@ -631,3 +631,82 @@ test("Explainers: ? on controls, tiles, flags and bars opens one shared panel; w
   await page.emulateMedia("")
   assert.deepEqual(page.errors, [], "no JS errors")
 })
+
+test("every tile, gauge, bar, ribbon row, flag, milestone, Gantt task and Solutions Architect row carries a ? on every route and preset", { skip, timeout: 120_000 }, async () => {
+  const page = await chrome.page()
+  await openFresh(page)
+  const ev = (s) => page.evaluate(s)
+  // Everything that reads as a figure, flag or row: the element itself is the button (Gantt rows, waterfall bars) or it contains a ? button
+  const AUDIT = `(() => {
+    const SEL = {
+      stat: ".stat", gauge: ".gauge", bar: ".bar", ribbon: ".ribbon-row", flag: "li.flag",
+      milestone: ".milestones-table tbody tr:not(.task-row)", ganttTask: ".gantt .task-row", taskRow: ".milestones-table tbody tr.task-row",
+      req: "#sa-requirements tbody tr", service: ".service-list .service", role: ".role-list .role-item", risk: "#risk-table tbody tr", check: ".checklist .check-item",
+    }
+    const out = { missing: [], counted: 0 }
+    for (const [kind, sel] of Object.entries(SEL)) for (const n of document.querySelectorAll(sel)) {
+      if (kind === "milestone" && n.textContent.includes("beyond 2028")) continue
+      out.counted++
+      if (!(n.matches("[data-explain]") || n.querySelector(".explain-btn, [data-explain]"))) out.missing.push(kind + ": " + n.textContent.trim().slice(0, 50))
+    }
+    return out
+  })()`
+  const totals = {}
+  for (const preset of ["today", "dr2027", "gl2028"]) {
+    await ev(`document.querySelector('#preset-${preset}').click()`)
+    await settle()
+    for (const r of ROUTES.filter((x) => x !== "model")) {
+      await go(page, `#/${r}`)
+      const a = await ev(AUDIT)
+      assert.deepEqual(a.missing, [], `${preset} /#/${r}: without a ?`)
+      totals[r] = (totals[r] || 0) + a.counted
+    }
+  }
+  assert.ok(totals.fia >= 20 && totals.compute >= 30 && totals.facility >= 25 && totals.connectivity >= 20, `tiles audited: ${JSON.stringify(totals)}`)
+  assert.ok(totals.deployment >= 30 && totals.sa >= 150 && totals.commercials >= 20 && totals.overview >= 20, `rows audited: ${JSON.stringify(totals)}`)
+  // a hybrid plan shows the Hinwil gauge on the Overview, with its ?
+  await go(page, "#/facility")
+  await ev("document.querySelector('[data-control=\"location\"] .seg[data-value=\"hybrid\"]').click()")
+  await settle()
+  await go(page, "#/overview")
+  assert.equal(await count(page, "#hinwil-gauge-2027 [data-explain=\"tile.hinwil-gauge\"]"), 1, "the hybrid Hinwil gauge carries a ?")
+  assert.deepEqual((await ev(AUDIT)).missing, [], "hybrid Overview")
+  await go(page, "#/facility")
+  assert.deepEqual((await ev(AUDIT)).missing, [], "hybrid Facility")
+
+  // Gantt task rows: the row is the button; keyboard opens the shared panel, one at a time, Escape returns focus
+  await ev("document.querySelector('#preset-gl2028').click()")
+  await settle()
+  await go(page, "#/deployment")
+  const rows = await ev("[...document.querySelectorAll('.gantt .task-row[role=button]')].map((g) => g.dataset.explain)")
+  assert.ok(rows.includes("task.fitout") && rows.includes("task.hardware") && rows.includes("task.burnin"), `task rows: ${rows}`)
+  assert.equal(await ev("document.querySelectorAll('.milestones-table .task-row .explain-btn').length"), rows.length, "the table repeats a ? per task")
+  await ev("document.querySelector('.gantt .task-row[data-explain=\"task.fibre\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))")
+  await settle()
+  assert.equal(await ev("document.querySelector('#explain-panel').hidden"), false)
+  assert.equal(await text(page, "#explain-title"), "Dark fibre build")
+  assert.match(await text(page, "#explain-inplan"), /2027: Dark fibre Hinwil ↔ Zurich campus .* weeks, the carrier/)
+  assert.equal(await ev("document.querySelector('.gantt .task-row[data-explain=\"task.fibre\"]').getAttribute('aria-expanded')"), "true")
+  await ev("document.querySelector('[data-explain=\"milestone.cutover\"]').click()")
+  await settle()
+  assert.equal(await count(page, "[aria-expanded=\"true\"]"), 1, "one ? at a time, across SVG rows and buttons")
+  await ev("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await settle()
+  assert.equal(await ev("document.querySelector('#explain-panel').hidden"), true)
+
+  // Solutions Architect rows: a requirement's ? repeats the row's live value per season; a risk's ? names its status
+  await go(page, "#/sa")
+  await ev("document.querySelector('#sa-requirements tr[data-req=\"power\"] .explain-btn').click()")
+  await settle()
+  assert.equal(await text(page, ".explain-kind"), "Requirement")
+  assert.match(await text(page, "#explain-inplan"), /2027: \d{3} kW of 500 kW/)
+  assert.match(await text(page, "#explain-inplan"), /2028: \d{3} kW of 500 kW/)
+  await ev("document.querySelector('#risk-table tr[data-risk=\"gpu-rule\"] .explain-btn').click()")
+  await settle()
+  assert.match(await text(page, "#explain-inplan"), /likelihood, .* impact, open/)
+  await ev("document.querySelector('.check-item[data-id=\"timeline\"] .explain-btn').click()")
+  await settle()
+  assert.match(await text(page, "#explain-inplan"), /Signed \d+ \w+ 2026; Live \d+ \w+ 2027; 2028 step-up 1 Jan 2028/)
+  await ev("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  assert.deepEqual(page.errors, [], "no JS errors")
+})

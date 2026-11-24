@@ -191,7 +191,7 @@ function renderEnvelope(card, result, ctx) {
     const x = result.inputs[y]
     const items = [envelopeGauge(env, y, { id: `envelope-gauge-${y}` })]
     if (x.location === "hybrid") items.push(hinwilGauge(env, y, { id: `hinwil-gauge-${y}` }))
-    if (x.location === "hinwil") items[0] = el("div", { class: "gauge gauge-empty", id: `envelope-gauge-${y}` }, el("div", { class: "gauge-display-text" }, "Hinwil room"), el("div", { class: "gauge-label" }, `kW at Digital Realty of ${env.offerKW} · ${y}`), el("div", { class: "muted small" }, `${Math.round(env.hinwilIT)} of ${env.hinwilCapacity} kW at Hinwil`))
+    if (x.location === "hinwil") items[0] = el("div", { class: "gauge gauge-empty", id: `envelope-gauge-${y}` }, el("div", { class: "gauge-display-text" }, "Hinwil room"), el("div", { class: "gauge-label" }, `kW at Digital Realty of ${env.offerKW} · ${y}`, explainButton("tile.envelope", `kW at Digital Realty of ${env.offerKW}`)), el("div", { class: "muted small" }, `${Math.round(env.hinwilIT)} of ${env.hinwilCapacity} kW at Hinwil`))
     return el("div", { class: `envelope-season ${env.fits ? "" : "over"}`, dataset: { season: String(y) } }, ...items)
   })
   fill(card, 
@@ -231,7 +231,7 @@ function renderRibbon(ribbon, result, plan, ctx) {
     ribbonRow("Cost-cap charge", fmt.chf(s27.money.capCharge), fmt.chf(s28.money.capCharge), { sub27: `${fmt.chfDelta(s27.money.capChargeDelta)} vs today`, sub28: `${fmt.chfDelta(s28.money.capChargeDelta)} vs today`, id: "ribbon-cap" }),
     ribbonRow("Availability", fmt.availability(s27.availabilityPct / 100), fmt.availability(s28.availabilityPct / 100), { id: "ribbon-availability" }),
     ribbonRow("CHF per year", fmt.chf(s27.money.yearly), fmt.chf(s28.money.yearly), { sub27: `${fmt.chf(s27.money.cash)} cash in 2027`, sub28: `${fmt.chf(s28.money.cash)} cash in 2028`, id: "ribbon-yearly", explain: "stat-yearly" }),
-    ribbonRow("CO₂ (market-based)", `${fmt.num(s27.money.co2MarketT, 0)} t`, `${fmt.num(s28.money.co2MarketT, 0)} t`, { sub27: `${fmt.signed(s27.money.co2Delta, 0, " t")} vs today`, sub28: `${fmt.signed(s28.money.co2Delta, 0, " t")} vs today`, id: "ribbon-co2" }),
+    ribbonRow("CO₂ (market-based)", `${fmt.num(s27.money.co2MarketT, 0)} t`, `${fmt.num(s28.money.co2MarketT, 0)} t`, { sub27: `${fmt.signed(s27.money.co2Delta, 0, " t")} vs today`, sub28: `${fmt.signed(s28.money.co2Delta, 0, " t")} vs today`, id: "ribbon-co2", explain: "stat-co2" }),
     raceNowButtons(result, plan),
     el("div", { class: "ribbon-foot muted small", id: "ribbon-foot" }, footLine(result)))
 }

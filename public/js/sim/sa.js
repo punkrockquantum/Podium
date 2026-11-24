@@ -101,7 +101,7 @@ export function serviceMap(result) {
     { id: "cloud", need: "Unrestricted ML and analytics bursts", service: "Cloud on-ramps: AWS Direct Connect, Azure ExpressRoute", detail: S.cloudOnRamps, source: "G6", applies: x27.cloudOnRamp || x28.cloudOnRamp },
     { id: "ix", need: "Internet and peering", service: "Internet Exchange (SwissIX) / IP Bandwidth", detail: S.swissix, source: "G10", applies: atDr },
     { id: "hands", need: "Rack & stack, maintenance-window support", service: "Remote Hands", detail: S.remoteHands, source: "G9", applies: atDr },
-    { id: "sus", need: "Renewable electricity, PUE and CO₂ reporting, heat reuse", service: "Sustainability programme", detail: "100 % renewable across the European portfolio; heat to the Opfikon network from 2029", source: "G7", applies: atDr },
+    { id: "sus", need: "Renewable electricity, PUE and CO₂ reporting, heat reuse", service: "Sustainability programme", detail: "100 % renewable across the European portfolio; heat to the Opfikon network from 2029", source: "G4", applies: atDr },
     { id: "fibre", need: `Dark fibre Hinwil ↔ campus (${x27.fibrePairs === 2 || x28.fibrePairs === 2 ? "two diverse routes" : "one route"})`, service: "Carrier dark fibre (not a Digital Realty service)", detail: S.darkFibre, source: "D10", applies: atDr, external: true },
     { id: "hpe", need: "Cluster, support and refresh", service: "HPE via HPE GreenLake", detail: `${S.hpeSupport}. ${S.greenlakeStartup}`, source: "H3", applies: true, external: true },
   ]

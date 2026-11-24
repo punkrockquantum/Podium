@@ -1,6 +1,6 @@
 /** Solutions Architect view: requirements per season, service mapping, owner roles, discovery checklist (notes persisted), live risk register and the solution brief export. */
 import { el, fmt, fill } from "../dom.js"
-import { badge, stat } from "../widgets.js"
+import { badge, stat, explainButton } from "../widgets.js"
 import { requirements, requirementDelta, serviceMap, riskRegister, solutionBrief, CHECKLIST, ROLES, roleLabel, HPE_FOOTNOTE } from "../sa.js"
 import { fmtDate } from "../timeline.js"
 import * as store from "../planstore.js"
@@ -32,7 +32,7 @@ export function saView(ctx) {
       const done = el("span", { class: `check-done ${(notes[c.id] || "").trim() ? "yes" : ""}`, "aria-hidden": "true" })
       return el("li", { class: "check-item", dataset: { id: c.id } },
         el("div", { class: "check-head" }, done, el("span", { class: "check-group" }, c.group), c.rule ? el("span", { class: "fia-badge" }, c.rule) : null),
-        el("p", { class: "check-q" }, c.q), ta)
+        el("p", { class: "check-q" }, c.q, explainButton(`check.${c.id}`, c.q)), ta)
     })),
     el("button", { type: "button", class: "btn btn-small", id: "clear-notes", onclick: () => { notes = {}; store.saveNotes(notes); for (const ta of checklistCard.querySelectorAll("textarea")) { ta.value = ""; ta.dispatchEvent(new Event("input")) } } }, "Clear notes"))
 
@@ -52,7 +52,7 @@ export function saView(ctx) {
         stat("Open risks", String(risks.filter((k) => k.status !== "mitigated").length), `${risks.filter((k) => k.status === "triggered").length} triggered by the current plan`)))
     // One row per requirement: the 2027 value, then what 2028 changes (highlighted) or "same"
     const statusBadge = (q) => badge(q.status === "VERIFIED" ? "ok" : q.status === "ASSUMPTION" ? "info" : "warn", q.status === "derived" ? "from plan" : q.status)
-    const detailCell = (q) => el("td", {}, el("b", {}, q.label), el("div", { class: "muted small" }, q.detail))
+    const detailCell = (q) => el("td", {}, el("b", {}, q.label), explainButton(`req.${q.id}`, q.label), el("div", { class: "muted small" }, q.detail))
     const rows28 = new Map(r28.map((q) => [q.id, q]))
     const changedCount = r28.filter((q) => q.changed).length
     const onlyIn28 = r28.filter((q) => !r27.some((p) => p.id === q.id))
@@ -77,18 +77,18 @@ export function saView(ctx) {
       el("h3", {}, "Service mapping"),
       el("p", { class: "card-sub" }, "Public Digital Realty service names, each keyed to a fact-pack row; carrier fibre and HPE are partner services."),
       el("ul", { class: "service-list" }, ...services.map((s) => el("li", { class: `service ${s.external ? "external" : ""}` },
-        el("div", { class: "service-need" }, s.need), el("div", { class: "service-name" }, s.service, el("span", { class: "fia-badge src" }, s.source)), el("div", { class: "muted small" }, s.detail)))))
+        el("div", { class: "service-need" }, s.need), el("div", { class: "service-name" }, s.service, el("span", { class: "fia-badge src" }, s.source), explainButton(`service.${s.id}`, s.service)), el("div", { class: "muted small" }, s.detail)))))
     fill(rolesCard, 
       el("h3", {}, "Who owns what"),
       el("p", { class: "card-sub" }, "Digital Realty roles are generic (ASSUMPTION); the team, HPE, the carrier and the FIA are as published."),
-      el("ul", { class: "role-list" }, ...ROLES.map((r) => el("li", { class: `role-item side-${r.side}` }, el("span", { class: "role-side" }, SIDE[r.side] || r.side), el("b", {}, r.label), el("span", { class: "muted small" }, r.scope), badge(r.status === "VERIFIED" ? "ok" : "info", r.status)))))
+      el("ul", { class: "role-list" }, ...ROLES.map((r) => el("li", { class: `role-item side-${r.side}`, dataset: { role: r.id } }, el("span", { class: "role-side" }, SIDE[r.side] || r.side), el("b", {}, r.label, explainButton(`role.${r.id}`, r.label)), el("span", { class: "muted small" }, r.scope), badge(r.status === "VERIFIED" ? "ok" : "info", r.status)))))
     fill(risksCard, 
       el("h3", {}, "Risk register (live)"),
       el("p", { class: "card-sub" }, "Likelihood and status follow the plan: change the schedule or the estate and the register moves."),
       el("div", { class: "table-wrap" }, el("table", { class: "table risk-table", id: "risk-table" },
         el("thead", {}, el("tr", {}, el("th", {}, "Risk"), el("th", {}, "L"), el("th", {}, "I"), el("th", {}, "Owner"), el("th", {}, "Mitigation"), el("th", {}, "Status"))),
         el("tbody", {}, ...risks.map((k) => el("tr", { class: `risk-${k.status} lvl-${k.likelihood}`, dataset: { risk: k.id } },
-          el("td", {}, el("b", {}, k.title), k.season ? el("span", { class: "season-tag" }, String(k.season)) : null, k.source ? el("span", { class: "fia-badge src" }, k.source) : null),
+          el("td", {}, el("b", {}, k.title), k.season ? el("span", { class: "season-tag" }, String(k.season)) : null, k.source ? el("span", { class: "fia-badge src" }, k.source) : null, explainButton(`risk.${k.id}`, k.title)),
           el("td", {}, badge(k.likelihood === "high" ? "bad" : k.likelihood === "medium" ? "warn" : "ok", k.likelihood)),
           el("td", {}, badge(k.impact === "high" ? "bad" : k.impact === "medium" ? "warn" : "ok", k.impact)),
           el("td", { class: "small" }, roleLabel(k.owner)),

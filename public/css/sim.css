@@ -409,6 +409,14 @@ body[data-view="sa"] .sim-top { border-bottom-color: var(--dr); }
 .marker-text.race { fill: #c4b5fd; }
 .task-label { fill: var(--text); font-size: 10.5px; }
 .task-weeks { fill: var(--muted); font-size: 9.5px; }
+/* Gantt task rows with a `?`: the whole row is the button (click, Enter, Space); the glyph mirrors .explain-btn */
+.task-row[role="button"] { cursor: pointer; outline: none; }
+.task-help circle { fill: var(--panel2); stroke: var(--line); stroke-width: 1; }
+.task-help text { fill: var(--muted); font-size: 10px; font-weight: 800; }
+.task-row[role="button"]:hover .task-help circle, .task-row[role="button"]:focus-visible .task-help circle, .task-row[aria-expanded="true"] .task-help circle { fill: var(--panel3); stroke: var(--info); }
+.task-row[role="button"]:hover .task-help text, .task-row[role="button"]:focus-visible .task-help text, .task-row[aria-expanded="true"] .task-help text { fill: var(--text); }
+.task-row[role="button"]:focus-visible .task { stroke: var(--text); stroke-width: 1.5; }
+.task-row[aria-expanded="true"] .task-help circle { stroke-width: 2; }
 .task { fill: #3b4a5c; }
 .task.owner-dr { fill: #2f855a; }
 .task.owner-hpe { fill: #2563eb; }
@@ -801,7 +809,7 @@ body.explain-open.explain-side .plan-main { padding-right: 420px; }
 
 .explained-appendix { display: none; }
 @media print {
-  .explain-btn, #explain-panel, .plain-toggle, .wf-modes { display: none !important; }
+  .explain-btn, #explain-panel, .plain-toggle, .wf-modes, .task-help { display: none !important; }
   .stat-label .label-text::after { content: none; }
   .explained-appendix { display: block; break-before: page; padding: 12px 0; }
   .explained-appendix h2 { font-size: 18px; margin: 0 0 4px; }
