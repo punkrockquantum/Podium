@@ -154,7 +154,7 @@ const milestone = (id, label, date, extra = {}) => ({ id, label, date, status: "
 function leadTasks(prefix, from, { x, atDr, fitOutNeeded, fibreNeeded, hardwareNeeded, worksNeeded, expansion }) {
   const L = T.leadWeeks
   const tasks = []
-  if (atDr && fitOutNeeded) tasks.push(task(`${prefix}-fitout`, expansion ? "Expansion fit-out: power step-up and liquid rows" : x.cooling === "dlc" ? "Digital Realty fit-out: suite, power whips, liquid loop and CDUs" : "Digital Realty fit-out: suite or cage, racks, power whips", "dr", from, addWeeks(from, expansion ? L.expansion : x.cooling === "dlc" ? L.fitOutLiquid : L.fitOut), { path: "fitout" }))
+  if (atDr && fitOutNeeded) tasks.push(task(`${prefix}-fitout`, expansion ? "Step-up fit-out: liquid rows, CDUs and power whips" : x.cooling === "dlc" ? "Digital Realty fit-out: suite, power whips, liquid loop and CDUs" : "Digital Realty fit-out: suite or cage, racks, power whips", "dr", from, addWeeks(from, expansion ? L.expansion : x.cooling === "dlc" ? L.fitOutLiquid : L.fitOut), { path: "fitout" }))
   if (atDr && fibreNeeded) tasks.push(task(`${prefix}-fibre`, `Dark fibre Hinwil ↔ Zurich campus (${x.fibrePairs === 2 ? "two diverse routes" : "one route"})`, "carrier", from, addWeeks(from, L.fibre + (x.fibrePairs === 2 ? L.fibreSecondRoute : 0)), { path: "fibre" }))
   if (hardwareNeeded) tasks.push(task(`${prefix}-hardware`, x.consumption === "greenlake" ? "HPE GreenLake capacity delivered (pre-staged, buffer)" : "HPE hardware delivered (built to order)", "hpe", from, addWeeks(from, L[x.consumption] || L.buy), { path: "hardware" }))
   if (!atDr && worksNeeded) tasks.push(task(`${prefix}-works`, x.cooling === "dlc" ? "Hinwil liquid loop" : "Hinwil rear-door branch and chilled-water", "team", from, addWeeks(from, L.hinwilWorks), { path: "works" }))
@@ -178,7 +178,7 @@ const PATH_LABEL = { fitout: "the Digital Realty fit-out", fibre: "the dark fibr
  */
 export function buildTimeline(tlRaw, ctx) {
   const tl = normalizeTimeline(tlRaw)
-  const { x27, x28, changes27, stepUp, cpuChange28, expansionNeeded, itYearly27 = 0, itYearly28 = 0 } = ctx
+  const { x27, x28, changes27, stepUp, cpuChange28, stepUpFitOutNeeded, itYearly27 = 0, itYearly28 = 0 } = ctx
   const contract = Math.max(parseDate(tl.contractDate), PLANNING_DATE)
   const plannedCutover = parseDate(tl.cutoverDate)
   const plannedStepUp = parseDate(tl.stepUpDate)
@@ -236,7 +236,7 @@ export function buildTimeline(tlRaw, ctx) {
   let s28 = { changes: stepUp, goLive: null, planned: plannedStepUp, feasible: null, orderBy: null, slipDays: 0, shareOld: 0, shareNew: 1, downtimeDays: 0, periodLoss: 0, seasonLoss: 0, atp: null, atBoundary: false, shutdown: null, critical: null, earlyDays: 0, earlyCostCHF: 0, declarationDue: null }
   if (stepUp) {
     const hardwareNeeded = ["nodes", "coresPerNode", "clockGHz", "memoryGB", "interconnect", "storage", "gpus", "gpuModel", "consumption"].some((k) => x28[k] !== x27[k])
-    const fitOutNeeded = Boolean(expansionNeeded)
+    const fitOutNeeded = Boolean(stepUpFitOutNeeded)
     const L = T.leadWeeks
     const total = Math.max(fitOutNeeded ? L.expansion : 0, hardwareNeeded ? L[x28.consumption] || L.buy : 0) + (hardwareNeeded || fitOutNeeded ? L.burnIn : 0)
     const orderBy = addWeeks(plannedStepUp, -total)
@@ -270,7 +270,7 @@ export function buildTimeline(tlRaw, ctx) {
     if (earlyCostCHF > 0) oneOffs.push({ id: "early", label: `Early step-up carrying cost (${Math.round(earlyDays / 7)} wk before 1 Jan 2028)`, chf: earlyCostCHF, year: 2027, cap: "included", why: "GreenLake charge or depreciation without ATR value before GPUs are allowed (F4.4.1)" })
 
     const pre = preSeason(2028)
-    if (slipDays > 0) flag("slip28", "warn", 2028, `Step-up slips ${slipText(slipDays)} to ${fmtDate(goLive)}`, `${total} weeks of lead time (${fitOutNeeded ? "expansion fit-out, " : ""}${hardwareNeeded ? "delivery, " : ""}burn-in) from ${fmtDate(orderAt)}; the ${fmtDate(plannedStepUp)} target needed an order by ${fmtDate(orderBy)}.`, "")
+    if (slipDays > 0) flag("slip28", "warn", 2028, `Step-up slips ${slipText(slipDays)} to ${fmtDate(goLive)}`, `${total} weeks of lead time (${fitOutNeeded ? "step-up fit-out, " : ""}${hardwareNeeded ? "delivery, " : ""}burn-in) from ${fmtDate(orderAt)}; the ${fmtDate(plannedStepUp)} target needed an order by ${fmtDate(orderBy)}.`, "")
     else if (daysBetween(PLANNING_DATE, orderBy) <= 120) flag("order28", "info", 2028, `Order the 2028 step-up by ${fmtDate(orderBy)}`, `${total} weeks of lead time before the ${fmtDate(plannedStepUp)} target.`, "")
     if (goLive > pre.round1) flag("late28", "bad", 2028, `GPU partition live ${fmtDate(goLive)}, after Round 1 2028`, `${Math.round(shareOld * 100)} % of 2028 runs on the 2027 estate.`, "F4.4.1")
     else if (goLive > jan2028) flag("late28", "warn", 2028, `2028 step-up live ${fmtDate(goLive)}: ${Math.round(shareOld * 100)} % of the season on the 2027 estate`, `GPU cores may run the solver from 1 January 2028; every week after it is allowance the step-up cannot help with.`, "F4.4.1")

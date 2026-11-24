@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import {
   PLAN_PRESETS, PLAN_PRESET_ORDER, SEASON_IDS, SHARED_IDS, TIMELINE_IDS, presetPlan, normalizePlan, seasonInputs,
   controlValue, setControl, detach, reattach, isDetached, setTimeline, evaluatePlan, matchingPreset, planHealth,
+  envelopeLine, seasonCeilings, setControlClamped, fitPlanToEnvelope, optionFit,
 } from "../public/js/sim/plan.js"
 import {
   atpCalendar, week1Monday, shutdowns, atpAt, nextBoundary, declarationDue, buildTimeline, normalizeTimeline, cutoverOptions,
@@ -259,8 +260,10 @@ test("evaluatePlan: every preset returns both seasons with finite figures and co
       const s = r.seasons[year]
       assert.equal(s.year, year)
       assert.equal(s.inputs.season, year)
-      assert.ok(Number.isFinite(s.perf.sec) && Number.isFinite(s.perf.points) && Number.isFinite(s.money.capCharge))
-      assert.ok(s.perf.scenarioPosition >= 1 && s.perf.scenarioPosition <= 11)
+      assert.ok(Number.isFinite(s.perf.sec) && Number.isFinite(s.money.capCharge))
+      assert.ok(!("points" in s.perf) && !("scenarioPosition" in s.perf) && !("ladder" in s.perf), "no position or points outcome")
+      assert.ok(s.envelope && typeof s.envelope.fits === "boolean" && s.envelope.offerKW === 500)
+      assert.ok(Number.isFinite(s.trackside.decisionSec) && Number.isFinite(s.trackside.weekendsAtRisk) && s.trackside.linkAvailability > 0.9)
       assert.ok(s.availabilityPct > 90 && s.availabilityPct <= 100)
       assert.ok(s.money.cash > 0)
       assert.ok(Array.isArray(s.money.oneOffs))
@@ -272,6 +275,9 @@ test("evaluatePlan: every preset returns both seasons with finite figures and co
     assert.ok(r.health.headline.length > 5)
     for (const h of r.health.items) assert.ok(h.route && h.title && ["ok", "info", "warn", "bad"].includes(h.level))
     assert.equal(r.totals.cash, r.seasons[2027].money.cash + r.seasons[2028].money.cash)
+    assert.ok(!("points" in r.totals), "no points total")
+    assert.deepEqual(Object.keys(r.envelope).sort(), ["2027", "2028", "fits"])
+    if (id !== "today") assert.equal(r.envelope.fits, true, `${id} fits the 500 kW envelope in both seasons`)
   }
 })
 
@@ -299,8 +305,64 @@ test("evaluatePlan: 'today' is the zero line; 'dr2027' gains in both seasons; 'g
   assert.ok(gl.seasons[2028].effectiveMauh > dr.seasons[2028].effectiveMauh, "the GPU step-up adds effective work")
   assert.ok(gl.seasons[2028].perf.sec >= dr.seasons[2028].perf.sec)
   assert.ok(gl.deltas.detached.includes("gpus"))
-  assert.ok(gl.seasons[2028].money.oneOffs.some((o) => o.id === "expansion"), "liquid rows under the expansion right")
+  assert.ok(gl.seasons[2028].money.oneOffs.some((o) => o.id === "liquidrows"), "direct-liquid rows are a one-off inside the 500 kW cage")
+  assert.ok(!gl.seasons[2028].money.oneOffs.some((o) => /expansion/i.test(o.id + o.label)), "no expansion-right one-off")
   assert.ok(gl.seasons[2027].sim.comp.gpuSolverN === 0, "2027 stays CPU-only")
+  // Plan-level headline figures (blended by go-live) sit below the steady-state figures in 2027 and match them in 2028
+  assert.ok(gl.seasons[2027].perf.sec > 0.05 && gl.seasons[2027].perf.sec < 0.12, `gl2028 2027 ≈ +0.08 s: ${gl.seasons[2027].perf.sec}`)
+  assert.ok(gl.seasons[2028].perf.sec > 0.40 && gl.seasons[2028].perf.sec < 0.46, `gl2028 2028 ≈ +0.43 s: ${gl.seasons[2028].perf.sec}`)
+  assert.ok(gl.seasons[2028].envelope.drIT > 395 && gl.seasons[2028].envelope.drIT <= 450, `≈ 405 kW of 500: ${gl.seasons[2028].envelope.drIT}`)
+  assert.ok(dr.seasons[2027].perf.sec < evaluate(seasonInputs(presetPlan("dr2027"), 2027)).perf.sec, "part of 2027 runs on today's estate")
+})
+
+test("envelopeLine: plan-health wording and tone bands (green ≤ 450, amber 450–500, red over)", () => {
+  const gl = evaluatePlan(presetPlan("gl2028"))
+  const l27 = envelopeLine(gl.seasons[2027].envelope, 2027)
+  assert.match(l27.text, /^Fits the 500 kW envelope: \d{3} \/ 500 kW \(2027\)$/)
+  assert.equal(l27.tone, "ok")
+  const amber = envelopeLine({ ...gl.seasons[2028].envelope, drIT: 470, tone: "warn", fits: true }, 2028)
+  assert.equal(amber.tone, "warn")
+  const over = evaluatePlan(setControl(presetPlan("gl2028"), 2028, "mlPartitionKW", 300))
+  const l28 = envelopeLine(over.seasons[2028].envelope, 2028)
+  assert.equal(l28.tone, "bad")
+  assert.match(l28.text, /^Not possible \(2028\): .*705 kW > 500 kW offer/)
+  assert.equal(over.health.status, "bad")
+  assert.ok(over.health.items.some((h) => h.id === "envelope-2028" && h.level === "bad" && h.route === "facility"))
+  assert.ok(!over.health.items.some((h) => h.id === "power28" && h.level === "bad"), "the envelope item replaces the raw power flag")
+  const hin = envelopeLine(evaluatePlan(presetPlan("today")).seasons[2027].envelope, 2027)
+  assert.match(hin.text, /Nothing at Digital Realty \(2027\)/)
+})
+
+test("ceilings and clamps at plan level: dependent re-clamps, won't-fit options and Fit to the envelope", () => {
+  const gl = presetPlan("gl2028")
+  const c28 = seasonCeilings(gl, 2028)
+  assert.equal(c28.committedKW.max, 500)
+  assert.equal(c28.mlPartitionKW.max, 75)
+  assert.equal(c28.rackKW.max, 150)
+  assert.equal(seasonCeilings(gl, 2027).rackKW.max, 70, "rear-door in 2027")
+  // Switching 2027 to air cooling pulls rack density down to the air ceiling and says so
+  const air = setControlClamped(gl, 2027, "cooling", "air")
+  assert.equal(seasonInputs(air.plan, 2027).rackKW, 20)
+  assert.deepEqual(air.changes.map((ch) => [ch.year, ch.id, ch.from, ch.to, ch.reason]), [[2027, "rackKW", 30, 20, "air ceiling"]])
+  assert.equal(seasonInputs(air.plan, 2028).rackKW, 60, "the detached 2028 density is untouched")
+  // A clock under the base clock of a part is raised to the floor
+  const slow = setControl(gl, 2027, "clockGHz", 2.5)
+  const arm = setControlClamped(slow, 2027, "cpuArch", "arm")
+  assert.ok(seasonInputs(arm.plan, 2027).clockGHz >= 3.1, `${seasonInputs(arm.plan, 2027).clockGHz}`)
+  assert.ok(arm.changes.some((ch) => ch.id === "clockGHz" && ch.year === 2027 && /base clock/.test(ch.reason)))
+  assert.equal(seasonInputs(arm.plan, 2028).clockGHz, 3, "2028's detached clock already meets the Vera floor")
+  // Options that cannot fit are disabled with a reason, judged after the dependent re-clamps
+  const squeezed = setControl(setControl(gl, 2028, "mlPartitionKW", 75), 2028, "mlPlacement", "dr")
+  const fit = optionFit(squeezed, 2028, "coresPerNode")
+  assert.ok(Object.values(fit).every((reason) => typeof reason === "string" && reason.length > 5))
+  assert.deepEqual(optionFit(gl, 2027, "cooling"), {}, "every cooling option fits once density is re-clamped")
+  // Fit to the envelope clamps in order and reports what it changed
+  const over = setControl(gl, 2028, "mlPartitionKW", 300)
+  const fitted = fitPlanToEnvelope(over, 2028)
+  assert.equal(fitted.fits, true)
+  assert.deepEqual(fitted.changes.map((ch) => [ch.year, ch.id, ch.to]), [[2028, "mlPartitionKW", 75]])
+  assert.equal(evaluatePlan(fitted.plan).envelope.fits, true)
+  assert.deepEqual(fitPlanToEnvelope(gl, 2027).changes, [])
 })
 
 test("evaluatePlan: the single-season model is the limit of a plan with no move to make", () => {
@@ -316,7 +378,8 @@ test("evaluatePlan: the single-season model is the limit of a plan with no move 
   const sim = simulate(seasonInputs(p, 2027))
   const pb = perfBlock(sim, single.today, { wScenario: sim.comp.effectiveMauh, wToday: single.today.comp.effectiveMauh })
   assert.equal(typeof pb.sec, "number")
-  assert.ok(Array.isArray(pb.ladder) && pb.ladder.length >= 1)
+  assert.ok(!("ladder" in pb) && !("points" in pb), "no lap-time ladder, no points")
+  assert.ok(Number.isFinite(pb.decisionDeltaSec) && Number.isFinite(pb.weekendsAtRiskDelta))
 })
 
 test("evaluatePlan: detaching a 2028 control changes 2028 only", () => {
@@ -334,8 +397,11 @@ test("evaluatePlan: health reasons point at a route and flag illegal or inconsis
   assert.equal(gpu27.health.status, "bad")
   assert.ok(gpu27.health.items.some((h) => h.id === "gpu27" && h.route === "compute" && h.season === 2027))
 
-  const noRight = evaluatePlan(setControl(setControl(presetPlan("gl2028"), 2028, "expansionRight", false), 2028, "committedKW", 500))
-  assert.ok(noRight.health.items.some((h) => h.route === "facility" && h.level === "bad"), "2028 estate does not fit without the expansion right")
+  const over = evaluatePlan(setControl(presetPlan("gl2028"), 2028, "mlPartitionKW", 300))
+  assert.ok(over.health.items.some((h) => h.route === "facility" && h.level === "bad" && /Not possible/.test(h.title)), "an estate over 500 kW is not possible")
+  const legacy = evaluatePlan(normalizePlan({ ...presetPlan("gl2028"), seasons: { ...presetPlan("gl2028").seasons, 2028: { ...presetPlan("gl2028").seasons[2028], expansionRight: true } } }))
+  assert.ok(legacy.health.items.some((h) => h.id === "expansion-2028" && h.level === "info"), "a legacy expansion-right input is ignored with an info note")
+  assert.equal(legacy.health.status === "bad", false)
 
   const oneRoute = evaluatePlan(setControl(presetPlan("dr2027"), 2027, "fibrePairs", 1))
   assert.ok(oneRoute.health.items.some((h) => h.id === "fibre" && h.route === "connectivity"))

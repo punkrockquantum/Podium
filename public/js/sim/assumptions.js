@@ -6,8 +6,8 @@
  * entry for the "Assumptions & sources" panel.
  *
  * The provider is Digital Realty (Zurich campus, Glattbrugg/Opfikon). The OEM dimension is HPE via
- * HPE GreenLake: the sales lead's working assumption for this demo, not a statement about the
- * Audi F1 Team's actual suppliers.
+ * HPE GreenLake: Sauber Motorsport AG's publicly announced CFD platform since November 2023 (A15);
+ * every 2027/2028 configuration in this tool is our proposal (A-f).
  */
 import { FIGURES as F } from "../customer.js"
 
@@ -19,7 +19,7 @@ export const PROVIDER = {
   name: "Digital Realty",
   campus: "Digital Realty Zurich campus (ZUR1–ZUR3, Glattbrugg/Opfikon; ZUR4 from 2028)",
   oem: "HPE via HPE GreenLake",
-  oemNote: "HPE GreenLake is the sales lead's working assumption for the OEM dimension; it is not a claim about the Audi F1 Team's actual suppliers.",
+  oemNote: "HPE GreenLake and AMD EPYC are the team's publicly announced 2023 CFD platform (HPE, 15 Nov 2023: Sauber Motorsport AG runs its CFD cluster as a service via HPE GreenLake on HPE ProLiant Gen11 with 4th Gen AMD EPYC and Cray ClusterStor, A15); the 2027/2028 configuration in this tool is our proposal (A-f).",
 }
 
 export const A = {
@@ -37,6 +37,7 @@ export const A = {
     depreciationYearsPlant: a(F.fia.depreciationYearsPlant, "C11", "Straight line, zero residual (D6.1.1.k); fit-out and plant over 10 years"),
     propertyShareOfFee: a(0.5, "C3-open", "Share of the colocation fee that a finance team might present as Property Costs (space) rather than service"),
     telemetry: v("Car → team telemetry only; team → car is prohibited (C8.5.3)", "C12"),
+    atp2027: v([["P1", "2027-01-01", "2027-03-07"], ["P2", "2027-03-08", "2027-05-02"], ["P3", "2027-05-03", "2027-06-27"], ["P4", "2027-06-28", "2027-09-05"], ["P5", "2027-09-06", "2027-10-31"], ["P6", "2027-11-01", "2027-12-31"]], "C13", "2027 ATP boundaries derived from F4.1.4; cutovers are planned at 8 Mar 2027 (P1/P2) and 1 Jan 2028"),
   },
   compute: {
     refClockGHz: a(3.7, "J-d", "Reference CCF: one reference core-hour = 1 AUh at 3.7 GHz on current silicon"),
@@ -52,12 +53,27 @@ export const A = {
     storageGBs: a({ nas: 3, pfs: 25, flash: 80 }, "J-d", "Sustained read/write of the storage tier"),
     memoryFactor: a({ 384: 0.95, 768: 1.0, 1536: 1.0 }, "J-d", "384 GB nodes split large meshes over more nodes; 1.5 TB only matters for very large meshes"),
     ipcByRefresh: a({ 3: 1.08, 4: 1.0, 5: 0.92 }, "H-d", "Newer cores do more per clock, and the FIA charges clock, not work"),
+    ccfFloorGHz: v({ 64: 2.4, 96: 2.3, 128: 2.4, 192: 2.25 }, "H3", "Base clocks of AMD EPYC 9005 parts by core count; the declared CCF may not be lower (F4.4.2)"),
+    cpuArchToday: a("today", "A-f", "Today's solver fleet is the 2023 GreenLake cluster: 4th Gen EPYC standard cache, DDR5-4800, in its fourth/fifth year by 2027"),
+    cpuArch: a({
+      today: { label: "Today's processors (standard cache)", bar: "Today's processors", workPerAuh: { 2027: 1.0, 2028: 1.0 }, kwFactor: { 2027: 1.0, 2028: 1.0 }, nodeCHF: { 2027: 0, 2028: 0 }, baseGHz: { 2027: 2.4, 2028: 2.4 }, part: { 2027: "AMD EPYC 9004 (Zen 4), as in the 2023 cluster", 2028: "AMD EPYC 9004 (Zen 4), aged" } },
+      std: { label: "Standard cache, newest generation", bar: "Newest standard processor", workPerAuh: { 2027: 1.05, 2028: 1.12 }, kwFactor: { 2027: 1.0, 2028: 1.05 }, nodeCHF: { 2027: 3_000, 2028: 8_000 }, baseGHz: { 2027: 2.7, 2028: 1.7 }, part: { 2027: "AMD EPYC 9005 Turin (12 × DDR5-6000)", 2028: "AMD EPYC 9006 Venice (16 × MRDIMM-12800)" } },
+      bigcache: { label: "Big cache (3D V-Cache)", bar: "Big-cache processor", workPerAuh: { 2027: 1.2, 2028: 1.3 }, kwFactor: { 2027: 1.08, 2028: 1.1 }, nodeCHF: { 2027: 5_000, 2028: 12_000 }, baseGHz: { 2027: 2.55, 2028: 2.5 }, part: { 2027: "AMD EPYC 9684X Genoa-X (1,152 MB L3)", 2028: "AMD EPYC Venice-X (1,152 MB L3, launch H2 2027)" }, launchFlag: { 2028: "arch" } },
+      xeon: { label: "Intel Xeon, fast memory", bar: "Fast-memory processor", workPerAuh: { 2027: 1.08, 2028: 1.15 }, kwFactor: { 2027: 1.15, 2028: 1.15 }, nodeCHF: { 2027: 10_000, 2028: 12_000 }, baseGHz: { 2027: 2.0, 2028: 2.0 }, part: { 2027: "Intel Xeon 6 6980P with MRDIMM-8800", 2028: "Intel Xeon 7 Diamond Rapids (launch 2027)" }, launchFlag: { 2028: "arch" } },
+      arm: { label: "Arm (NVIDIA Grace → Vera)", bar: "Arm processor", workPerAuh: { 2027: 1.0, 2028: 1.07 }, kwFactor: { 2027: 0.85, 2028: 0.9 }, nodeCHF: { 2027: 5_000, 2028: 8_000 }, baseGHz: { 2027: 3.1, 2028: 3.0 }, part: { 2027: "NVIDIA Grace CPU Superchip", 2028: "NVIDIA Vera CPU Superchip" }, portFlag: "armport" },
+    }, "K-b", "Useful CFD work per AUh at equal core generation and declared clock (K-a…K-e); the clock exponent and the generation factor are unchanged for every option (K-e)"),
+    armPortWeeks: a(2, "K-d", "Re-validation of the proprietary solver on Arm before the first metered run; taken off the delivery slider"),
     coreFp64GFLOPSPerGHz: v(32, "J2", "Two 512-bit FMA units: 32 FP64 FLOP per cycle per core"),
     gpu: v({
       h200: { label: "NVIDIA H200-class", fp64: 34, kW: 0.9 },
       b200: { label: "NVIDIA B200-class", fp64: 37, kW: 1.25 },
+      gb200: { label: "NVIDIA GB200-class", fp64: 40, kW: 1.5 },
+      rubin: { label: "NVIDIA Rubin-class (projected)", fp64: 33, kW: 1.8, projected: true },
+      mi300x: { label: "AMD MI300X-class", fp64: 81.7, kW: 1.0 },
+      mi325x: { label: "AMD MI325X-class", fp64: 81.7, kW: 1.3 },
       mi355x: { label: "AMD MI355X-class", fp64: 78.6, kW: 1.65 },
-    }, "J2", "Peak FP64 TFLOPS per accelerator; kW includes a share of the host server"),
+      mi430x: { label: "AMD MI430X-class (1H 2027)", fp64: 288, kW: 2.6, exceedsAllowanceAt100: true },
+    }, "J2", "Peak FP64 vector TFLOPS per accelerator; kW includes a share of the host server (J-i for the added parts). B300-class parts (1.2 TFLOPS FP64) are not offered for the solver"),
     gpuWorkPerAuh: a(1.3, "J-c", "GPU solvers achieve ≈ 1.3 × the useful work per FP64-normalised AUh of CPU solvers (HBM bandwidth)"),
     gpuChargeFactorDefault: a(1.0, "J-c", "GPUs charged at 100 % of their FP64-peak core-equivalent until the FIA publishes a rule"),
     nodeKW: a({ base: 0.25, perCoreBlock: 0.95, clockExponent: 1.3 }, "B-c", "Node kW = 0.25 + 0.95 × (cores ÷ 128) × (CCF ÷ 3.7)^1.3: ≈ 1.2 kW for a 128-core node at 3.7 GHz"),
@@ -75,7 +91,7 @@ export const A = {
     nodeCoreExponent: a(0.9, "H-a", "Price scales with cores^0.9"),
     memoryDeltaCHF: a({ 384: -8000, 768: 0, 1536: 25_000 }, "H-a"),
     interconnectPerNodeCHF: a({ eth100: 1500, eth200: 3000, ibndr: 6000, slingshot: 7000 }, "H-a", "NIC, optics and a share of the switches"),
-    gpuCHF: a({ h200: 35_000, b200: 45_000, mi355x: 30_000 }, "H-a", "Per accelerator incl. host share"),
+    gpuCHF: a({ h200: 35_000, b200: 45_000, gb200: 55_000, rubin: 60_000, mi300x: 20_000, mi325x: 25_000, mi355x: 30_000, mi430x: 45_000 }, "H-a", "Per accelerator incl. host share (J-i for the added parts)"),
     storageCHF: a({ nas: 120_000, pfs: 450_000, flash: 700_000 }, "H-a"),
     greenlakeUplift: a(1.25, "H-b", "Financing plus managed service over the purchase-equivalent price"),
     greenlakeFlexPremium: a(0.25, "H-b", "Extra unit-rate uplift at a 0 % reserve, scaling linearly: a 60 % reserve pays 1.35 ×, a 100 % reserve 1.25 ×"),
@@ -87,7 +103,7 @@ export const A = {
     feeCHFPerKWMonth: a(F.offer.feeCHFPerKWMonth, "G-c", "Digital Realty committed kW, power metered on top"),
     fitOutCHFPerKW: a(1600, "G-c"),
     migrationCHF: a(F.offer.migrationCHF, "G-c"),
-    expansionFitOutCHF: a(F.offer.expansionFitOutCHF, "G-c", "Liquid manifolds, CDUs and busway for the 2028 GPU rows"),
+    drLiquidRowsCHF: a(F.offer.liquidLoopCHF, "J-h", "CDUs, manifolds and hoses for direct-liquid rows at the campus; a leasehold improvement outside the cap"),
     crossConnectCHFPerMonth: a(300, "G-c"),
     fibrePairCHFPerYear: a(48_000, "B-e", "One diverse dark-fibre route Hinwil ↔ the campus"),
     fibreBandwidthFactor: a({ 10: 1.0, 100: 1.4, 400: 2.2 }, "B-e", "Optics and transponders"),
@@ -100,10 +116,18 @@ export const A = {
     pue: a({ hinwil: { air: 1.6, reardoor: 1.45, dlc: 1.3 }, dr: { air: 1.35, reardoor: 1.25, dlc: 1.15 } }, "G-b", "Derived PUE by site and cooling; the slider overrides it"),
     retrofitPueGain: a(0.2, "A-e", "New chillers and containment in the old shell"),
     availability: a({ n: 0.995, n1: 0.999, "2n": 0.9999 }, "G-d", "Facility availability by the customer's power topology"),
-    drSitePower: v("ZUR2: 2N UPS, N+2 cooling; ZUR1/ZUR3: N+1 cooling", "G1"),
+    drSitePower: v("ZUR2: 2N UPS, N+2 cooling, ≈ 12 MW; ZUR3: 2N UPS, N+1 cooling, 29,150 m²", "G9"),
     hinwilCapacityKW: a(F.room.capacityKW, "A-a"),
-    drExpansionRightKW: a(F.offer.expansionRightKW, "G-c", "Contractual expansion right at the same fee"),
-    restOfEstateKW: a({ 2027: 375, 2028: 760 }, "J-f", "Everything that is not the modelled CFD cluster: enterprise IT, FEA, simulator, trackside and, in 2028, the unrestricted ML partition"),
+    envelopeKW: a(F.offer.committedKW, "G-h", "The Digital Realty offer: 500 kW of critical IT in both seasons; no expansion right in the model (ZUR4's 15 MW in 2028 is a separate commercial conversation)"),
+    estateBaseKW: a(375, "J-g", "Everything that is not the CFD cluster or the ML partition: enterprise IT, FEA, simulator, trackside, CFD pre/post, buffer; both seasons"),
+    estateDemandKW: a({ 2027: 375, 2028: 760 }, "J-f", "Today's baseline demand at Hinwil incl. the business-case 2028 GPU partition; used when the cluster stays in the Hinwil room"),
+    mlPartitionMaxKW: a(400, "J-g", "Slider range for the unrestricted ML / GPU partition; the live ceiling is what the envelope leaves"),
+    cageRackPositions: a(60, "G-f", "Rack positions in the 500 kW cage"),
+    estateRackKW: a(8, "G-f", "Enterprise-IT rack density for the non-cluster estate"),
+    feedLoadingMax: a(0.5, "G-e", "2N A+B: each feed ≤ 50 % of its rating in normal operation; the committed kW is the usable redundant load, so 2N never halves the 500 kW"),
+    leadTimes: v({ precablingBusinessDays: 15, crossConnectBusinessDays: 3, fibreOfferWorkingDays: 15, fibreConfirmWorkingDays: 10 }, "G11", "Digital Realty EMEA portal delivery SLAs and Swisscom Fiber Line offer/confirmation times (D10)"),
+    fibreBuildWeeks: a([12, 24], "D-e", "Dark-fibre build after order, Hinwil ↔ Glattbrugg"),
+    dock: v({ rackKgMax: 1500, liftKgMin: 1500, rampMax: "1:12", floorKNm2: [7.17, 11.97] }, "D11", "OCP colo facility guidelines v4.0 for the goods path"),
     hinwilLiquidLoopCHF: a(450_000, "A-e", "A liquid loop for direct-liquid rows in the Hinwil room"),
     hinwilRearDoorCHF: a(300_000, "A-e", "Rear-door heat exchangers and a chilled-water branch in the Hinwil room"),
     hybridHinwilKW: a(150, "J-f", "Hybrid: Mission Control, simulator, edge and office IT stay in Hinwil"),
@@ -138,8 +162,9 @@ export const A = {
     decisionBaseSec: a(6.0, "I-d"),
     decisionRoundTrips: a(2, "I-d"),
     edgeSavingSec: a(1.5, "I-d"),
-    strategyPointsSwing: a(6, "I-e", "Points a season between a slow, fragile loop and a fast, resilient one"),
+    decisionTargetSec: a(5.0, "I-d", "A pit-wall call made in time: data to decision under five seconds"),
     fibreAvailability: a({ 1: 0.999, 2: 0.99995 }, "D6", "Hinwil ↔ campus: one route vs two diverse routes (Swisscom Fiber Line 99.80–99.90 % per route)"),
+    raceWeekends: v(24, "C7", "Grands Prix a season the paddock link must carry"),
   },
   timeline: {
     planningDate: v("2026-11-24", "C13", "The date the plan is drawn up; lead times count from here or from the contract date"),
@@ -158,7 +183,7 @@ export const A = {
       buy: a(14, "H-f", "Built-to-order HPC configuration purchased outright: 10–18 weeks"),
       fitOut: a(12, "G-e", "Digital Realty fit-out: suite or cage, racks, power whips, rear-door exchangers"),
       fitOutLiquid: a(16, "G-e", "Fit-out with a direct-to-chip liquid loop and CDUs"),
-      expansion: a(16, "G-e", "2028 power step-up and liquid rows under the expansion right"),
+      expansion: a(16, "G-e", "2028 step-up fit-out inside the 500 kW cage: liquid rows, CDUs and power whips"),
       fibre: a(14, "D-e", "One dark-fibre route Hinwil ↔ Glattbrugg from existing ducts (10–16 weeks; 26+ with civil works)"),
       fibreSecondRoute: a(2, "D-e", "Extra weeks to deliver the second, diverse route"),
       crossConnects: a(1, "G8", "Cross-connects and campus/metro connectivity after the suite is ready"),
@@ -187,10 +212,20 @@ export const A = {
     aeroW0: a(4, "J-a", "Effective MAUh per period at which returns halve"),
     reinvestMaxSec: a(0.3, "J-b", "Ceiling of the reinvestment effect"),
     reinvestScaleCHF: a(3_000_000, "J-b", "Δt = 0.3 × (1 − e^(−saved ÷ 3 M)): ≈ 0.085 s for CHF 1 M"),
-    secPerPosition: a(0.10, "J-e", "Lap-time spread per constructors' position in the midfield"),
-    pointsPerPosition: a(25, "J-e"),
-    midfield: a([5, 11], "J-e", "Positions the swing is clamped to"),
     confidenceDefault: a(60, "J-a", "Default model confidence (%)"),
+  },
+  optimiser: {
+    restarts: a(8, "J-l", "Coordinate-descent restarts: the user's plan plus seven seeded random starts (24 with Thorough)"),
+    thoroughRestarts: a(24, "J-l"),
+    maxSweeps: a(12, "J-l", "Sweeps over every unlocked control per start"),
+    maxPlans: a(6000, "J-l", "Hard cap on plan evaluations per run"),
+    thoroughMaxPlans: a(20000, "J-l"),
+    seed: a(2027, "J-l", "mulberry32 seed: the same inputs give the same proposal"),
+    capGuardRailCHF: a(4_000_000, "J-l", "No proposal may charge more than CHF 4.0 M a year inside the cap in either season"),
+    minSec: a(0.10, "J-l", "Side condition: a proposal must still find at least +0.10 s per lap in the season it does not optimise"),
+  },
+  explain: {
+    attribution: a({ method: "shapley", prune: true }, "J-j", "Exact Shapley over the twelve driver groups with null-player pruning; the ordered waterfall is drawing only"),
   },
 }
 

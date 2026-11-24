@@ -5,7 +5,7 @@
  * on the new one, minus any allowance lost at the cutover) and returns the figures, deltas and health
  * the Overview and the component views render. Pure functions, no DOM.
  */
-import { CONTROLS, DEFAULTS, GROUPS, PRESETS, normalize, simulate, todayInputs, perfBlock } from "./model.js"
+import { CONTROLS, DEFAULTS, GROUPS, PRESETS, normalize, simulate, todayInputs, perfBlock, ceilings, fitToEnvelope, envelope, ccfFloor } from "./model.js"
 import { buildTimeline, normalizeTimeline, TIMELINE_DEFAULTS, fmtDate, parseDate } from "./timeline.js"
 import { K } from "./assumptions.js"
 
@@ -59,7 +59,7 @@ export const PLAN_PRESETS = {
     id: "gl2028",
     label: "Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028",
     short: "DR 2027 + GreenLake GPU 2028",
-    summary: "Same 2027 move on HPE GreenLake; on 1 January 2028 the partition steps up to GPUs, liquid rows and 2N under the expansion right.",
+    summary: "Same 2027 move on HPE GreenLake; on 1 January 2028 the partition steps up to GPUs, liquid rows and 2N inside the 500 kW envelope.",
     plan: {
       meta: { name: "Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028", preset: "gl2028" },
       shared: sharedValues(PRESETS.dr2027.inputs),
@@ -98,8 +98,11 @@ export function normalizePlan(raw = {}) {
   const meta = r.meta && typeof r.meta === "object" ? r.meta : {}
   const name = String(meta.name ?? "").trim().slice(0, NAME_MAX) || "Untitled plan"
   const preset = typeof meta.preset === "string" && PLAN_PRESETS[meta.preset] ? meta.preset : "custom"
+  // A plan saved before the 500 kW envelope may still carry the removed expansion-right control: it is ignored,
+  // and remembered only so plan health can say so (an info note, never a change to the figures)
+  const legacy = meta.legacyExpansionRight === true || [sharedRaw, s27raw, s28raw].some((o) => o.expansionRight === true || o.legacyExpansionRight === true)
   return {
-    meta: { name, preset, version: PLAN_VERSION, ...(meta.updatedAt ? { updatedAt: String(meta.updatedAt) } : {}) },
+    meta: { name, preset, version: PLAN_VERSION, ...(meta.updatedAt ? { updatedAt: String(meta.updatedAt) } : {}), ...(legacy ? { legacyExpansionRight: true } : {}) },
     shared,
     seasons: { 2027: s27, 2028: s28 },
     timeline: normalizeTimeline(r.timeline),
@@ -109,7 +112,7 @@ export function normalizePlan(raw = {}) {
 /** Full model inputs for a season of the plan (2028 inherits 2027 except where detached). */
 export function seasonInputs(plan, year) {
   const p = plan
-  const base = { ...DEFAULTS, ...p.shared, ...p.seasons[2027], season: year }
+  const base = { ...DEFAULTS, ...p.shared, ...p.seasons[2027], season: year, ...(p.meta?.legacyExpansionRight ? { legacyExpansionRight: true } : {}) }
   if (year === 2028) Object.assign(base, p.seasons[2028])
   // The timeline decides delivery and the cutover; the two legacy controls stay neutral.
   base.leadWeeks = 0
@@ -162,6 +165,84 @@ export function setTimeline(plan, patch) {
   return normalizePlan(next)
 }
 
+// ---------------------------------------------------------------------------------------------
+// Ceilings, dependent re-clamps and the envelope fit (strategies brief 1.3)
+// ---------------------------------------------------------------------------------------------
+
+const COOLING_WORD = { air: "air", reardoor: "rear-door", dlc: "direct-liquid" }
+
+/** The live ceilings of every clamped control in a season of the plan (closed form, from model.ceilings). */
+export const seasonCeilings = (plan, year) => ceilings(seasonInputs(plan, year))
+
+/**
+ * The hard dependent ceilings a change can trip: rack density above the cooling ceiling, a declared clock below
+ * the CCF floor of the part, more solver GPUs than GPUs. Returns the re-clamped value or null for each season.
+ */
+function dependentClamps(x) {
+  const out = []
+  const coolingMax = K.compute.coolingMaxKWPerRack[x.cooling]
+  if (x.rackKW > coolingMax) out.push({ id: "rackKW", from: x.rackKW, to: coolingMax, reason: `${COOLING_WORD[x.cooling]} ceiling` })
+  const floor = ccfFloor(x)
+  if (x.nodes > 0 && x.clockGHz < floor - 1e-9) out.push({ id: "clockGHz", from: x.clockGHz, to: floor, reason: `${floor} GHz base clock` })
+  return out
+}
+
+/** The seasons a change to `id` in `year` affects: 2027 changes flow into 2028 unless 2028 has detached the control. */
+const affectedSeasons = (plan, year, id) => (isShared(id) ? SEASONS : year === 2028 ? [2028] : isDetached(plan, id) ? [2027] : SEASONS)
+
+/**
+ * Set a control and re-clamp its dependents (rack density to the cooling ceiling, declared clock to the CCF floor).
+ * Returns `{ plan, changes: [{ year, id, from, to, reason }] }`; the UI shows "Also changed: …" for each change.
+ */
+export function setControlClamped(plan, year, id, value) {
+  let next = setControl(plan, year, id, value)
+  const changes = []
+  for (const y of affectedSeasons(next, year, id)) {
+    for (const c of dependentClamps(seasonInputs(next, y))) {
+      if (c.id === id) continue
+      // The dependent control follows the season the user changed: 2028 detaches only when 2027 does not carry it
+      const target = y === 2028 && (year === 2028 || isDetached(next, c.id)) ? 2028 : 2027
+      if (target === 2027 && isDetached(next, c.id) && y === 2028) continue
+      next = setControl(next, target, c.id, c.to)
+      if (!changes.some((d) => d.id === c.id && d.to === c.to)) changes.push({ year: y, id: c.id, from: c.from, to: c.to, reason: c.reason })
+    }
+  }
+  return { plan: next, changes }
+}
+
+/**
+ * Clamp a season of the plan into the 500 kW envelope (model.fitToEnvelope order: ML partition → GPUs → nodes →
+ * rack density → CCF floor). 2028 changes detach the control. Returns `{ plan, changes, fits }`.
+ */
+export function fitPlanToEnvelope(plan, year) {
+  const fit = fitToEnvelope(seasonInputs(plan, year))
+  let next = plan
+  for (const c of fit.changes) next = setControl(next, year, c.id, c.to)
+  return { plan: next, changes: fit.changes.map((c) => ({ ...c, year })), fits: fit.fits }
+}
+
+/**
+ * Which options of a select or segmented control would not fit the envelope in a season of the plan
+ * (while the current value does). Returns `{ [value]: reason }`.
+ */
+export function optionFit(plan, year, id) {
+  const control = CONTROLS[id]
+  if (!control || !control.options) return {}
+  const x = seasonInputs(plan, year)
+  const now = envelope(normalize(x))
+  if (!now.fits) return {}
+  const out = {}
+  for (const o of control.options) {
+    if (o.value === x[id]) continue
+    // The option is judged after the re-clamps that choosing it would trigger (rack density, CCF floor)
+    const y = normalize({ ...x, [id]: o.value })
+    for (const c of dependentClamps(y)) y[c.id] = c.to
+    const env = envelope(normalize(y))
+    if (!env.fits) out[o.value] = env.reasons[0]
+  }
+  return out
+}
+
 export function renamePlan(plan, name) {
   const next = JSON.parse(JSON.stringify(plan))
   next.meta.name = name
@@ -187,9 +268,9 @@ export function matchingPreset(plan) {
 // Evaluation
 // ---------------------------------------------------------------------------------------------
 
-const ESTATE_IDS = ["nodes", "coresPerNode", "clockGHz", "memoryGB", "interconnect", "storage", "gpus", "solverGpus", "gpuModel", "consumption", "location", "cooling", "rackKW", "redundancy", "committedKW", "hinwilRetrofit"]
-const CPU_IDS = ["nodes", "coresPerNode", "clockGHz", "memoryGB", "interconnect", "storage", "location"]
-const ROUTE_OF_FLAG = { mauh: "compute", gpu: "compute", clock: "compute", power: "facility", hybridpower: "facility", cooling: "facility", loop: "facility", declare: "deployment", delivery: "deployment" }
+const ESTATE_IDS = ["nodes", "coresPerNode", "clockGHz", "cpuArch", "memoryGB", "interconnect", "storage", "gpus", "solverGpus", "gpuModel", "consumption", "location", "cooling", "rackKW", "redundancy", "committedKW", "hinwilRetrofit", "mlPartitionKW", "mlPlacement"]
+const CPU_IDS = ["nodes", "coresPerNode", "clockGHz", "cpuArch", "memoryGB", "interconnect", "storage", "location"]
+const ROUTE_OF_FLAG = { mauh: "compute", gpu: "compute", clock: "compute", arch: "compute", armport: "compute", power: "facility", racks: "facility", hybridpower: "facility", cooling: "facility", loop: "facility", expansion: "facility", declare: "deployment", delivery: "deployment" }
 
 const itLine = (sim) => sim.money.lines.find((l) => l.id === "it")?.chf || 0
 
@@ -201,8 +282,8 @@ export function evaluatePlan(rawPlan) {
   const plan = normalizePlan(rawPlan)
   const x27 = seasonInputs(plan, 2027)
   const x28 = seasonInputs(plan, 2028)
-  const today27 = simulate(todayInputs(2027, plan.shared.position, plan.shared.confidence))
-  const today28 = simulate(todayInputs(2028, plan.shared.position, plan.shared.confidence))
+  const today27 = simulate(todayInputs(2027, plan.shared.position, plan.shared.confidence, plan.shared.venue))
+  const today28 = simulate(todayInputs(2028, plan.shared.position, plan.shared.confidence, plan.shared.venue))
   const todayIds = SEASON_IDS.filter((id) => !["venue"].includes(id))
   const changes27 = todayIds.some((id) => x27[id] !== today27.inputs[id])
   const stepUp = SEASON_IDS.some((id) => x28[id] !== x27[id])
@@ -210,10 +291,11 @@ export function evaluatePlan(rawPlan) {
   const cpuChange28 = CPU_IDS.some((id) => x28[id] !== x27[id])
   const pre27 = simulate(x27)
   const pre28 = simulate(x28)
-  const expansionNeeded = x28.location !== "hinwil" && (x28.cooling !== x27.cooling || x28.redundancy !== x27.redundancy || pre28.fac.drIT > x27.committedKW || x28.rackKW > x27.rackKW)
+  // The 2028 step-up needs campus works when it changes the cooling, the redundancy, the density or the rows at the campus
+  const stepUpFitOutNeeded = x28.location !== "hinwil" && (x28.cooling !== x27.cooling || x28.redundancy !== x27.redundancy || x28.rackKW > x27.rackKW || pre28.fac.racks.total > pre27.fac.racks.total || pre28.fac.mlAtDr > pre27.fac.mlAtDr)
 
   const timeline = buildTimeline(plan.timeline, {
-    x27, x28, changes27, stepUp: estateStepUp, cpuChange28, expansionNeeded,
+    x27, x28, changes27, stepUp: estateStepUp, cpuChange28, stepUpFitOutNeeded,
     itYearly27: itLine(pre27), itYearly28: itLine(pre28),
   })
   const t27 = timeline.seasons[2027]
@@ -241,7 +323,7 @@ export function evaluatePlan(rawPlan) {
   const perf28 = perfBlock(sim28, today28, { wScenario: w28, wToday: today28.comp.effectiveMauh })
 
   const oneOffs27 = [...sim27.money.oneOffs.filter((o) => changes27 || o.id === "edge" || o.id === "patch"), ...timeline.oneOffs.filter((o) => o.year === 2027)]
-  const oneOffs28 = [...(estateStepUp ? sim28.money.oneOffs.filter((o) => ["expansion", "loop", "reardoor"].includes(o.id) && !sim27.money.oneOffs.some((p) => p.id === o.id)) : []), ...timeline.oneOffs.filter((o) => o.year === 2028)]
+  const oneOffs28 = [...(estateStepUp ? sim28.money.oneOffs.filter((o) => ["liquidrows", "loop", "reardoor"].includes(o.id) && !sim27.money.oneOffs.some((p) => p.id === o.id)) : []), ...timeline.oneOffs.filter((o) => o.year === 2028)]
   const cash = (shares, oneOffs) => Math.round(shares.reduce((s, [share, sim]) => s + share * sim.money.yearly, 0) + oneOffs.reduce((s, o) => s + o.chf, 0))
   const cash27 = cash([[shareOld27, today27], [shareNew27, sim27]], oneOffs27)
   const cash28 = cash([[shareToday28, today28], [shareCarry28, carry28], [shareNew28, estateStepUp ? sim28 : carry28]], oneOffs28)
@@ -261,6 +343,8 @@ export function evaluatePlan(rawPlan) {
     availabilityPct: sim.comp.availabilityPct,
     usage: sim.comp.usage,
     effectiveMauh: round(perf.effectiveMauh, 3),
+    envelope: sim.envelope,
+    trackside: { decisionSec: sim.net.venue.decisionSec, decisionDeltaSec: perf.decisionDeltaSec, linkAvailability: sim.net.linkAvailability, weekendsAtRisk: sim.net.weekendsLost, venue: sim.net.venue.name },
     status: sim.status,
   })
 
@@ -271,7 +355,6 @@ export function evaluatePlan(rawPlan) {
 
   const deltas = {
     sec: round(perf28.sec - perf27.sec, 3),
-    points: round(perf28.points - perf27.points, 1),
     effectiveMauh: round(w28 - w27, 3),
     capCharge: sim28.money.capCharge - sim27.money.capCharge,
     yearly: sim28.money.yearly - sim27.money.yearly,
@@ -291,11 +374,20 @@ export function evaluatePlan(rawPlan) {
     tco3: Math.round(sim28.money.tco3 + oneOffs27.filter((o) => !sim28.money.oneOffs.some((p) => p.id === o.id)).reduce((s, o) => s + o.chf, 0)),
     todayTco3: today28.money.tco3,
     sec: round(perf27.sec + perf28.sec, 3),
-    points: round(perf27.points + perf28.points, 1),
   }
 
+  const envelopeFits = sim27.envelope.fits && sim28.envelope.fits
   const health = planHealth({ plan, seasons, timeline, changes27, estateStepUp, x27, x28 })
-  return { plan, inputs: { 2027: x27, 2028: x28 }, today: { 2027: today27, 2028: today28 }, seasons, deltas, timeline, health, totals, changes27, stepUp: estateStepUp }
+  return { plan, inputs: { 2027: x27, 2028: x28 }, today: { 2027: today27, 2028: today28 }, seasons, deltas, timeline, health, totals, changes27, stepUp: estateStepUp, envelope: { fits: envelopeFits, 2027: sim27.envelope, 2028: sim28.envelope } }
+}
+
+/** The envelope health line for one season: tone by share of the 500 kW offer (green ≤ 90 %, amber ≤ 100 %, red over). */
+export function envelopeLine(env, season) {
+  if (!env) return null
+  const kw = Math.round(env.drIT)
+  if (env.drIT === 0) return { tone: "ok", text: `Nothing at Digital Realty (${season}): the cluster stays in the Hinwil room`, kw, offerKW: env.offerKW }
+  if (!env.fits) return { tone: "bad", text: `Not possible (${season}): ${env.reasons[0]}`, kw, offerKW: env.offerKW }
+  return { tone: env.tone === "warn" ? "warn" : "ok", text: `Fits the ${env.offerKW} kW envelope: ${kw} / ${env.offerKW} kW (${season})`, kw, offerKW: env.offerKW }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -308,11 +400,13 @@ export function planHealth({ plan, seasons, timeline, changes27, estateStepUp, x
   const items = []
   const add = (id, level, season, title, detail, route, rule = "") => items.push({ id, level, season, title, detail, route, rule })
 
+  const ENVELOPE_FLAGS = new Set(["power", "racks", "cooling", "clock", "gpu"])
   for (const year of SEASONS) {
     const s = seasons[year]
     for (const f of s.sim.flags) {
       if (f.level === "ok" || f.level === "info") continue
       if (f.id === "declare" || f.id === "delivery") continue // the timeline owns these
+      if (f.level === "bad" && !s.sim.envelope.fits && ENVELOPE_FLAGS.has(f.id)) continue // the envelope item below lists the reasons
       add(`${year}-${f.id}`, f.level, year, f.title, f.detail, ROUTE_OF_FLAG[f.id] || "compute", f.rule)
     }
   }
@@ -322,7 +416,11 @@ export function planHealth({ plan, seasons, timeline, changes27, estateStepUp, x
   }
   // Plan-level consistency
   if (x27.solverGpus > 0) add("gpu27", "bad", 2027, "Solver GPUs planned for 2027", "GPU cores may run the Restricted CFD solver from 1 January 2028 only; keep them for pre/post-processing in 2027 or detach the 2028 estate.", "compute", "F4.4.1")
-  if (estateStepUp && x28.location !== "hinwil" && !x28.expansionRight && seasons[2028].sim.fac.drIT > x28.committedKW) add("expansion", "bad", 2028, "2028 estate exceeds the committed kW without the expansion right", "Raise the commitment or keep the 2028 expansion right to 1,000 kW.", "facility")
+  for (const year of SEASONS) {
+    const env = seasons[year].sim.envelope
+    if (!env.fits) add(`envelope-${year}`, "bad", year, `Not possible: the ${year} estate does not fit the ${env.offerKW} kW envelope`, `${env.reasons.join("; ")}. Use "Fit to the envelope" or trim the ML partition, GPUs, nodes or rack density.`, "facility")
+    if (env.notes.length) add(`expansion-${year}`, "info", year, "Expansion right ignored (commercial note)", "The 500 kW offer has no expansion right; ZUR4 adds 15 MW on the campus in 2028 and is a separate conversation.", "facility")
+  }
   if (x27.location !== "hinwil" && x27.fibrePairs === 1) add("fibre", "warn", 2027, "One dark-fibre route Hinwil ↔ campus", "A single route puts the whole solver estate behind one cable; two diverse routes take the link to 99.995 %.", "connectivity")
   if (x27.location !== "hinwil" && x27.redundancy === "n") add("redundancy", "warn", 2027, "N power and cooling at the campus", "An outage inside a period is allowance lost; Digital Realty Zurich offers 2N UPS and N+2 cooling.", "facility")
   if (!changes27 && !estateStepUp) add("status-quo", "info", null, "Nothing changes against today's setup", "Both seasons run on the existing room; the plan is the baseline every other plan is measured against.", "overview")

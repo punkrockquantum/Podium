@@ -153,7 +153,7 @@ export function architecture(sim, { year } = {}) {
 
 /**
  * Front elevation of the room the cluster lives in: cluster racks filled to their load, the rest
- * of the estate as a block, feeds per redundancy, cooling per rack and the expansion rows.
+ * of the estate as a block, the ML partition rows, feeds per redundancy and cooling per rack, inside the 500 kW envelope.
  */
 export function rackLayout(sim, { year } = {}) {
   const x = sim.inputs
@@ -166,7 +166,7 @@ export function rackLayout(sim, { year } = {}) {
   const capacity = atDr ? sim.fac.drCapacity : sim.fac.hinwilCapacity
   const load = atDr ? sim.fac.drIT : sim.fac.hinwilIT
   node.append(text(12, 20, "arch-title", `${year || x.season} · ${site}`))
-  node.append(text(W - 12, 20, `arch-note ${sim.fac.powerShortKW > 0 ? "warn" : ""}`, `${Math.round(load)} kW of ${capacity} kW${atDr && x.expansionRight && capacity > x.committedKW ? ` (${x.committedKW} kW committed + expansion right)` : ""}`, { "text-anchor": "end" }))
+  node.append(text(W - 12, 20, `arch-note ${sim.fac.powerShortKW > 0 ? "warn" : ""}`, `${Math.round(load)} kW of ${capacity} kW${atDr ? ` envelope · ${sim.fac.racks.total} of ${K.facility.cageRackPositions} rack positions` : ""}`, { "text-anchor": "end" }))
 
   // Floor
   const floorY = 186
@@ -212,9 +212,10 @@ export function rackLayout(sim, { year } = {}) {
   }
 
   // Rest of the estate as one block
-  const restKW = Math.max(0, load - hw.clusterKW)
+  const mlKW = atDr ? sim.fac.mlAtDr : sim.fac.mlAtHinwil
+  const restKW = Math.max(0, load - hw.clusterKW - mlKW)
   const restX = Math.max(clusterRight + (x.cooling === "dlc" ? 46 : 16), 300)
-  const restW = Math.min(W - 12 - restX - (atDr && x.expansionRight ? 120 : 0), 220)
+  const restW = Math.min(W - 12 - restX - (mlKW > 0 ? 120 : 0), 220)
   if (restKW > 0 && restW > 60) {
     node.append(box(restX, floorY - rackH, restW, rackH, "rack-rest", 3))
     node.append(text(restX + restW / 2, floorY - rackH / 2 - 8, "arch-part-title", `Rest of the estate · ${Math.round(restKW)} kW`, { "text-anchor": "middle" }))
@@ -222,11 +223,12 @@ export function rackLayout(sim, { year } = {}) {
     node.append(text(restX + restW / 2, floorY - rackH / 2 + 22, "arch-note", "drawn as a block: no rack plan in the model", { "text-anchor": "middle" }))
   }
 
-  // Expansion rows (dashed) when the right is held
-  if (atDr && x.expansionRight) {
+  // ML partition rows (dashed) when a partition is placed in this room
+  if (mlKW > 0) {
     const ex = W - 12 - 104
-    for (let i = 0; i < 3; i++) node.append(box(ex + i * 36, floorY - 80, 28, 80, "rack-expansion", 3))
-    node.append(text(ex + 50, floorY - 90, "arch-note", `Expansion right · ${K.facility.drExpansionRightKW} kW`, { "text-anchor": "middle" }))
+    const mlRacks = Math.min(3, Math.max(1, Math.ceil(mlKW / Math.max(1, x.rackKW))))
+    for (let i = 0; i < mlRacks; i++) node.append(box(ex + i * 36, floorY - 80, 28, 80, "rack-expansion", 3))
+    node.append(text(ex + 50, floorY - 90, "arch-note", `ML partition · ${mlKW} kW`, { "text-anchor": "middle" }))
   }
 
   // Power feeds legend and facility figures
