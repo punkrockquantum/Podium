@@ -8,7 +8,7 @@
 
 LOG_DIR="${PODIUM_TUNNEL_LOG_DIR:-$HOME/Library/Logs/Podium}"
 LOG="$LOG_DIR/tunnel.log"
-PORT="${PORT:-8080}"
+PORT="${PORT:-8090}"
 # http2 runs over TCP 443, which works on networks and VPNs that block QUIC (UDP 7844).
 PROTOCOL="${PODIUM_TUNNEL_PROTOCOL:-http2}"
 mkdir -p "$LOG_DIR"

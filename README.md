@@ -1,3 +1,42 @@
+# Audi F1 Team × Digital Realty · Infrastructure performance simulator
+
+**The product for tomorrow's demo is the simulator at `http://localhost:8090/`.** It lets the Audi F1
+Team tweak every component of its 2027 and 2028 infrastructure inside the FIA envelope — the
+Restricted CFD cluster (HPE via HPE GreenLake as the working assumption for the OEM), where it lives
+(the Hinwil room, Digital Realty's Zurich campus, or a hybrid), how it is paid for, and how the
+paddock is connected — and reads the impact live: FIA compliance (MAUh, GPU legality, cost-cap
+charge), effective compute and turnaround, trackside latency and data-to-decision, money and
+sustainability, and the headline **seconds per lap found over a season against Today's setup**.
+
+```bash
+sh start.command          # Mac: finds Node, starts the server on port 8090, opens the browser
+# or
+npm start                 # http://localhost:8090/
+```
+
+- **Presets:** *Today: Hinwil on-prem* · *Digital Realty Zurich 2027* · *Digital Realty + HPE GreenLake 2028*.
+  Season toggle (2027 plan · 2028 path), Save / Load (this browser), **Set as A / B** to compare against
+  Today, **Export JSON**, **Print**, a shareable link, and the business case one tap away (`/case.html`).
+- **Controls** in four cards: FIA envelope · Compute (HPE GreenLake) · Facility (Digital Realty Zurich) ·
+  Connectivity & trackside. Every control carries a "why it matters" line and the FIA article it touches;
+  choices outside the envelope are clamped and flagged *not allowed* or *not possible*.
+- **The model** is pure functions in `public/js/sim/model.js`; the formulae are in
+  [`docs/audi-f1-model.md`](docs/audi-f1-model.md) and every constant is tagged VERIFIED (with its row in
+  [`docs/audi-f1-sources.md`](docs/audi-f1-sources.md)) or ASSUMPTION, on the page under *Assumptions &
+  sources*. HPE GreenLake is the sales lead's working assumption, not a claim about the team's suppliers.
+- Files: `public/sim.html`, `public/js/sim/` (`model.js`, `assumptions.js`, `app.js`, `widgets.js`,
+  `scenes.js`, `store.js`, `dom.js`), `public/css/sim.css`; tests `tests/sim.model.test.js` and
+  `tests/sim.browser.test.js`.
+
+### Legacy game pages
+
+The table game below is still in the repository and still tested, but it is **unlinked from
+navigation**: `/` and `/index.html` open the simulator. The game's landing page is at
+`/home.html`, the tables at `/station.html?station=…`, the host console at `/host.html`, the
+projector at `/race.html`. The rest of this README describes that game.
+
+---
+
 # Podium 2027 · Audi F1 Team edition
 
 A table game for a customer meeting (about 50 minutes) about solving a Formula 1 team's infrastructure
@@ -433,7 +472,8 @@ the race (2027 plan against today) → readout. It does not touch the real game.
 **Requirements.** Node.js 18 or newer. There are no npm packages: do not run `npm install`.
 
 **Quick start on a Mac.** Double-click `start.command`. It finds Node (including nvm), starts Podium
-on this Mac only and opens `http://localhost:8080/`. From Terminal: `npm start`.
+on this Mac only and opens `http://localhost:8090/` (the simulator; the game's landing page is
+`/home.html`). From Terminal: `npm start`.
 
 **On Wi-Fi for iPads.**
 
@@ -441,7 +481,7 @@ on this Mac only and opens `http://localhost:8080/`. From Terminal: `npm start`.
 npm run start:lan            # the host PIN is the default unless HOST_PIN is set (section 3)
 ```
 
-The line starting `iPads` gives the room address, for example `http://192.168.1.20:8080/`. Every
+The line starting `iPads` gives the room address, for example `http://192.168.1.20:8090/home.html`. Every
 device must be on the same network. If the background service (section 9) is running, stop it first:
 `launchctl bootout gui/$(id -u)/com.podium.server`.
 
@@ -473,7 +513,7 @@ if you want one, and run the race when the room is ready.
 ## 9. Background service and public tunnel
 
 **Background service (macOS).** A LaunchAgent (`com.podium.server`) starts Podium at login on port
-8080 and restarts it within about two seconds if it stops.
+8090 and restarts it within about two seconds if it stops.
 
 ```bash
 sh scripts/install-service.sh                                        # install; HOST_PIN=… LEADER_PIN=… RACE_PIN=… in front to change the PINs
@@ -520,8 +560,8 @@ afterwards.
 | Symptom | Fix |
 | --- | --- |
 | `node: command not found` | Install Node 18+ from [nodejs.org](https://nodejs.org), or use `start.command`, which finds nvm. |
-| Port 8080 in use | `lsof -nP -iTCP:8080 -sTCP:LISTEN`, or `PORT=8090 npm start`. If it is Podium, a second start just opens the browser. |
-| "Podium needs its server" | An `.html` file was opened from Finder. Use `http://localhost:8080/`. |
+| Port 8090 in use | `lsof -nP -iTCP:8090 -sTCP:LISTEN`, or `PORT=8091 npm start`. If it is Podium, a second start just opens the browser. |
+| "Podium needs its server" | An `.html` file was opened from Finder. Use `http://localhost:8090/`. |
 | "Reconnecting to the game server" | The server is restarting. It recovers on its own; choices are re-sent. |
 | An iPad says "Waiting for the game server to create the customer's team" | The server is starting or its save is being migrated; it clears on its own within a poll. If it stays, check the server log in `data/logs/`. |
 | "This edition has one participant" (HTTP 410) | Something called the old team-registration or host team routes. There is one customer, created by the server; nothing adds, renames or removes teams. |
@@ -542,7 +582,8 @@ afterwards.
 
 ```text
 server.mjs               Node HTTP server: static files, JSON API, state, persistence (no dependencies)
-public/index.html        landing page            public/station.html   table iPad
+public/index.html        opens the simulator     public/sim.html       the infrastructure performance simulator (public/js/sim/, public/css/sim.css)
+public/home.html         the game's landing page public/station.html   table iPad
 public/host.html         host controls / SA view  public/race.html     projector and readouts
 public/case.html         the business case (Hinwil on-prem vs the Zurich campus, 2027 and 2028)
 public/js/customer.js    every customer-specific figure, annotated VERIFIED (source row) or ASSUMPTION (rationale), and CUSTOMER.team (the one participant)
@@ -672,8 +713,9 @@ answer `410`.
 ### How to run tomorrow's demo
 
 1. `npm start` (or `PORT=8199 DATA_DIR=/tmp/podium-audi node server.mjs` for a throwaway game), then
-   open `http://localhost:8080/`. The header reads *Audi F1 Team · Hinwil → Zurich campus · 2027
-   plan, 2028 path*. The landing page names the four roles in the room: **The customer's table**,
+   open `http://localhost:8090/home.html` (the game's landing page; `/` is the simulator). The header
+   reads *Audi F1 Team · Hinwil → Zurich campus · 2027 plan, 2028 path*. The landing page names the four
+   roles in the room: **The customer's table**,
    **Solutions Architects**, **Session host**, **Projector** (tap one for its instructions).
 2. Open the **Business case** (`/case.html`, linked from the landing page and the host console) on
    the projector first: Hinwil as is, Hinwil upgraded and the Zurich campus side by side for 2027 and

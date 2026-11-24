@@ -1,6 +1,6 @@
 /**
  * The business case: Audi F1's IT estate in the Hinwil data room (as is, or upgraded) versus
- * 500 kW committed in our Zurich campus, for 2027 and for the 2028 load. Pure arithmetic over
+ * 500 kW committed at Digital Realty's Zurich campus, for 2027 and for the 2028 load. Pure arithmetic over
  * customer.js (`caseModel`), plus the page that renders it with live sliders. No dependencies.
  *
  * Formulae (per option o, per year y with IT load L kW):
@@ -90,8 +90,8 @@ function options(inputs) {
     },
     {
       id: "campus",
-      name: `Zurich campus, ${offer.committedKW} kW committed`,
-      short: "Zurich campus",
+      name: `Digital Realty Zurich campus, ${offer.committedKW} kW committed`,
+      short: "Digital Realty Zurich",
       site: "campus",
       tariff: inputs.campusRp / 100,
       capacity: { 2027: offer.committedKW, 2028: offer.expansionRightKW },

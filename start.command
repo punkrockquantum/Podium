@@ -4,7 +4,7 @@
 # localhost and opens the landing page in the default browser.
 
 cd "$(dirname "$0")" || exit 1
-PORT="${PORT:-8080}"
+PORT="${PORT:-8090}"
 
 find_node() {
   if command -v node >/dev/null 2>&1; then command -v node; return; fi
@@ -44,7 +44,7 @@ fi
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Port $PORT is used by another program:"
   lsof -nP -iTCP:"$PORT" -sTCP:LISTEN
-  echo "Stop it, or run: PORT=8090 sh start.command"
+  echo "Stop it, or run: PORT=8091 sh start.command"
   read -r -p "Press Return to close." _
   exit 1
 fi

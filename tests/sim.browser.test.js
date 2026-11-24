@@ -46,12 +46,17 @@ const count = (page, selector) => page.evaluate(`document.querySelectorAll(${JSO
 const flagLevels = (page) => page.evaluate(`[...document.querySelectorAll('#flags .flag')].map((f) => f.dataset.flag + ':' + f.dataset.level).join('|')`)
 const setSlider = (page, id, value) => page.evaluate(`(() => { const n = document.querySelector('[data-control=${JSON.stringify(id)}] input[type=range]'); n.value = ${JSON.stringify(String(value))}; n.dispatchEvent(new Event('input', { bubbles: true })); return n.value })()`)
 const settle = () => sleep(120)
+/** Open the simulator with a clean browser state (presets and slots live in localStorage). */
+async function openFresh(page, path = "/sim.html") {
+  await page.goto(`${base}${path}`)
+  await page.evaluate("localStorage.clear()")
+  await page.goto(`${base}${path}`)
+  await page.waitFor("document.querySelector('#headline-sec')", 10_000, `the headline on ${path}`)
+}
 
 test("/ serves the simulator and /sim.html loads with zero JavaScript errors", { skip, timeout: 60_000 }, async () => {
   const page = await chrome.page()
-  await page.evaluate("localStorage.clear()")
-  await page.goto(`${base}/`)
-  await page.waitFor("document.querySelector('#headline-sec')", 10_000, "the headline on /")
+  await openFresh(page, "/")
   assert.deepEqual(page.errors, [], "no JS errors on /")
   assert.match(await text(page, ".sim-top h1"), /Infrastructure performance simulator/)
   assert.match(await text(page, ".brand"), /Audi F1 Team × Digital Realty/)
@@ -74,9 +79,7 @@ test("/ serves the simulator and /sim.html loads with zero JavaScript errors", {
 
 test("three sliders change the headline and the compliance badges", { skip, timeout: 60_000 }, async () => {
   const page = await chrome.page()
-  await page.evaluate("localStorage.clear()")
-  await page.goto(`${base}/sim.html`)
-  await page.waitFor("document.querySelector('#headline-sec')", 10_000, "headline")
+  await openFresh(page)
   await page.click("#preset-dr2027")
   await settle()
   const headline0 = await text(page, "#headline-sec")
@@ -115,9 +118,7 @@ test("three sliders change the headline and the compliance badges", { skip, time
 
 test("season toggle, every preset, A/B compare and the printable page", { skip, timeout: 60_000 }, async () => {
   const page = await chrome.page()
-  await page.evaluate("localStorage.clear()")
-  await page.goto(`${base}/sim.html`)
-  await page.waitFor("document.querySelector('#headline-sec')", 10_000, "headline")
+  await openFresh(page)
 
   await page.click("#season-toggle .seg[data-value='2028']")
   await settle()
@@ -131,11 +132,11 @@ test("season toggle, every preset, A/B compare and the printable page", { skip, 
     await settle()
     assert.equal(await page.evaluate(`document.querySelector('#preset-${id}').getAttribute('aria-pressed')`), "true")
     results[id] = await text(page, "#headline-sec")
+    if (id === "today") assert.match(await text(page, "#headline-sub"), /baseline/)
     const body = await page.evaluate("document.body.innerText")
     assert.doesNotMatch(body, /\bundefined\b|\bNaN\b|Infinity/, `${id}: clean page`)
   }
   assert.equal(results.today, "0.00 s", "Today is the baseline")
-  assert.match(await text(page, "#headline-sub"), /baseline/)
   assert.match(results.dr2027, /^\+0\.\d\d s$/)
   assert.match(results.gl2028, /^\+0\.\d\d s$/)
   assert.ok(parseFloat(results.gl2028.slice(1)) > parseFloat(results.dr2027.slice(1)), "the 2028 path beats the 2027 plan")

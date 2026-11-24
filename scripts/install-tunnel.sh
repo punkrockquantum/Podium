@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install Podium's account-free Cloudflare Quick Tunnel as a per-user LaunchAgent (com.podium.tunnel):
-# it starts at login, restarts if it stops, and publishes http://127.0.0.1:8080 at a random
+# it starts at login, restarts if it stops, and publishes http://127.0.0.1:8090 at a random
 # https://*.trycloudflare.com address. Usage: sh scripts/install-tunnel.sh
 #
 # macOS privacy protection (TCC) stops launchd agents from touching ~/Documents, so the agent's runner

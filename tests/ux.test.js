@@ -12,8 +12,9 @@ const root = new URL("../", import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), "utf8")
 const publicFiles = () => [
   ...readdirSync(new URL("public/js/", root)).filter((f) => f.endsWith(".js")).map((f) => `public/js/${f}`),
+  ...readdirSync(new URL("public/js/sim/", root)).filter((f) => f.endsWith(".js")).map((f) => `public/js/sim/${f}`),
   ...readdirSync(new URL("public/", root)).filter((f) => f.endsWith(".html")).map((f) => `public/${f}`),
-  "public/css/app.css", "server.mjs", "README.md",
+  "public/css/app.css", "public/css/sim.css", "server.mjs", "README.md",
 ]
 
 /** Every file below a folder, as paths from the repo root. */
@@ -140,9 +141,24 @@ test("demo steps: brief â†’ tune (one tap locks; out of the zone, then in it) â†
   assert.ok(DEMO_STEPS.some((s) => /2027 plan/.test(s.narration) && /today/.test(s.narration)), "the demo race is the plan against today")
 })
 
-test("the landing page puts the four tables first with a short how-to; it and the README describe the single-customer flow", () => {
-  const home = read("public/index.html")
-  for (const w of ["Pick your table", "Nothing to set up", "The customer's table", "Solutions Architects", "Session host", "Projector", "Brief", "Tune", "locks the moment you tap it", "Call the Solutions Architect", "seconds per lap", "2027 plan", "today's Hinwil setup", "Host controls"]) assert.ok(home.includes(w), `index.html lacks "${w}"`)
+test("the simulator is the front door; the legacy table picker lives at /home.html and is linked from no page", () => {
+  const index = read("public/index.html")
+  assert.ok(index.includes('url=/sim.html') && index.includes('href="/sim.html"'), "index.html opens the simulator")
+  assert.ok(index.includes('href="/case.html"'), "the business case stays one tap away")
+  assert.ok(!/station\.html|host\.html|race\.html|home\.html/.test(index), "no legacy game links on the front door")
+  const sim = read("public/sim.html")
+  assert.ok(sim.includes("/js/sim/app.js") && sim.includes("/css/sim.css"), "sim.html mounts the simulator")
+  for (const file of ["public/sim.html", ...readdirSync(new URL("public/js/sim/", root)).map((f) => `public/js/sim/${f}`)]) {
+    assert.ok(!/station\.html|host\.html|race\.html|home\.html/.test(read(file)), `${file} links to a legacy game page`)
+  }
+  const start = read("start.command")
+  assert.ok(start.includes('PORT="${PORT:-8090}"'), "start.command defaults to port 8090")
+  assert.match(read("server.mjs"), /process\.env\.PORT\) \|\| 8090/, "the server defaults to port 8090")
+})
+
+test("the legacy landing page (home.html) puts the four tables first with a short how-to; it and the README describe the single-customer flow", () => {
+  const home = read("public/home.html")
+  for (const w of ["Pick your table", "Nothing to set up", "The customer's table", "Solutions Architects", "Session host", "Projector", "Brief", "Tune", "locks the moment you tap it", "Call the Solutions Architect", "seconds per lap", "2027 plan", "today's Hinwil setup", "Host controls"]) assert.ok(home.includes(w), `home.html lacks "${w}"`)
   assert.ok(home.indexOf('id="stations"') < home.indexOf('id="howToPlay"') && home.indexOf('id="howToPlay"') < home.indexOf('id="hostLink"'), "tables first, then how to play, then the small links")
   const steps = home.slice(home.indexOf('id="howToPlay"'), home.indexOf("</ol>")).match(/<li>/g) || []
   assert.ok(steps.length >= 3 && steps.length <= 4, `three or four how-to lines (${steps.length})`)

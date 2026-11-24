@@ -2,7 +2,7 @@
  * Podium game server: serves the iPad app and keeps one shared game state.
  * No dependencies. `node server.mjs` (localhost) or `node server.mjs --lan` (every iPad on the Wi-Fi).
  *
- * Env: PORT (8080), HOST_PIN, LEADER_PIN (the Solutions Architect PIN), RACE_PIN, DATA_DIR (./data).
+ * Env: PORT (8090), HOST_PIN, LEADER_PIN (the Solutions Architect PIN), RACE_PIN, DATA_DIR (./data).
  * Every PIN defaults to the one event PIN in DEFAULT_PINS below. PIN values are never logged, never
  * sent to a client and never written to the saved game.
  *
@@ -773,7 +773,8 @@ async function serveStatic(pathname, res) {
   }
   if (decoded.includes("\0")) return send(res, 400, { error: "Bad path" })
   const clean = normalize(decoded).replace(/^([/\\])+/, "")
-  let path = join(PUBLIC, clean || "index.html")
+  // The simulator is the product: `/` serves it; the legacy game pages stay reachable by URL.
+  let path = join(PUBLIC, clean || "sim.html")
   if (path !== PUBLIC && !path.startsWith(PUBLIC + sep)) return send(res, 403, { error: "Forbidden" })
   try {
     if ((await stat(path)).isDirectory()) path = join(path, "index.html")
@@ -811,9 +812,9 @@ function isDirectRun() {
 
 if (isDirectRun()) {
   const lan = process.argv.includes("--lan")
-  const port = Number(process.env.PORT) || 8080
+  const port = Number(process.env.PORT) || 8090
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    console.error(`[podium] PORT must be a whole number from 1 to 65535 (got "${process.env.PORT}"). Example: PORT=8080 npm start`)
+    console.error(`[podium] PORT must be a whole number from 1 to 65535 (got "${process.env.PORT}"). Example: PORT=8090 npm start`)
     process.exit(1)
   }
   const bind = lan ? "0.0.0.0" : "127.0.0.1"
@@ -832,9 +833,9 @@ if (isDirectRun()) {
         process.exit(0)
       }
       console.error(`[podium] Port ${port} is used by another program. See it with: lsof -nP -iTCP:${port} -sTCP:LISTEN`)
-      console.error(`[podium] Stop that program, or pick another port: PORT=8090 npm start`)
+      console.error(`[podium] Stop that program, or pick another port: PORT=8091 npm start`)
     } else if (err.code === "EACCES") {
-      console.error(`[podium] This Mac will not allow port ${port}. Use a port above 1024: PORT=8080 npm start`)
+      console.error(`[podium] This Mac will not allow port ${port}. Use a port above 1024: PORT=8090 npm start`)
     } else if (lan) {
       console.error(`[podium] Could not open a LAN address (${err.code || err.message}). Stay on this Mac instead: npm start`)
     } else {
