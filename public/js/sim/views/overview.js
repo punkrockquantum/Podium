@@ -155,6 +155,9 @@ const groupOf = (id) => Object.keys(GROUP_OF).find((g) => GROUP_OF[g].includes(i
 
 const LOCATION_WORD = { hinwil: "Hinwil", dr: "Digital Realty Zurich", hybrid: "Hybrid (Hinwil + Digital Realty Zurich)" }
 
+/** The ribbon's envelope sub-line: headroom when something runs at the campus, the untouched offer when nothing does. */
+const envelopeSub = (env) => (!env.fits ? "Not possible" : env.drIT > 0 ? `${Math.round(env.headroomKW)} kW to spare` : `${env.offerKW} kW on offer, none used`)
+
 /** The car spec the arcade's "Race now" hook takes, from a season of the plan result. */
 const PRESET_TAG = { today: "Today's setup", dr2027: "From 2027", gl2028: "GreenLake step-up" }
 
@@ -222,7 +225,7 @@ function renderRibbon(ribbon, result, plan, ctx) {
       el("div", { class: "ribbon-label" }, "Seconds per lap", explainButton("tile.headline-sec", "Seconds per lap vs Today")),
       el("div", { class: `headline-number tone-${tone(s27)}`, id: "sec-2027" }, fmt.sec(s27.perf.sec)),
       el("div", { class: `headline-number tone-${tone(s28)}`, id: "sec-2028" }, fmt.sec(s28.perf.sec))),
-    ribbonRow("kW at Digital Realty of 500", result.envelope[2027].drIT > 0 ? `${Math.round(result.envelope[2027].drIT)} kW` : "Hinwil", result.envelope[2028].drIT > 0 ? `${Math.round(result.envelope[2028].drIT)} kW` : "Hinwil", { sub27: result.envelope[2027].fits ? `${Math.round(result.envelope[2027].headroomKW)} kW to spare` : "Not possible", sub28: result.envelope[2028].fits ? `${Math.round(result.envelope[2028].headroomKW)} kW to spare` : "Not possible", id: "ribbon-envelope" }),
+    ribbonRow("kW at Digital Realty of 500", result.envelope[2027].drIT > 0 ? `${Math.round(result.envelope[2027].drIT)} kW` : "Hinwil", result.envelope[2028].drIT > 0 ? `${Math.round(result.envelope[2028].drIT)} kW` : "Hinwil", { sub27: envelopeSub(result.envelope[2027]), sub28: envelopeSub(result.envelope[2028]), id: "ribbon-envelope" }),
     ribbonRow("Trackside value", tr(s27), tr(s28), { sub27: trSub(s27), sub28: trSub(s28), id: "ribbon-trackside", explain: "stat-decision" }),
     ribbonRow("ATR allowance used", fmt.pct(s27.usage), fmt.pct(s28.usage), { sub27: `${fmt.num(s27.effectiveMauh, 2)} eff. MAUh`, sub28: `${fmt.num(s28.effectiveMauh, 2)} eff. MAUh`, id: "ribbon-atr", explain: "gauge-mauh" }),
     ribbonRow("Cost-cap charge", fmt.chf(s27.money.capCharge), fmt.chf(s28.money.capCharge), { sub27: `${fmt.chfDelta(s27.money.capChargeDelta)} vs today`, sub28: `${fmt.chfDelta(s28.money.capChargeDelta)} vs today`, id: "ribbon-cap" }),
