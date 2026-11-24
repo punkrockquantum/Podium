@@ -929,6 +929,85 @@ const TILE_ENTRIES = {
     source: "model · 1.3",
     terms: ["term.shapley"],
   },
+  // Plan-level tiles added by the two-season planning tool (plan.js / timeline.js on the customer branch).
+  // They read the `plan` facts of explainContext({ plan }), which default to "no move" when no plan result is given.
+  "stat-golive": {
+    title: "When the 2027 estate goes live",
+    term: "2027 go-live",
+    one: "The day the new estate takes over the metered runs, and how much of 2027 runs on today's setup before that.",
+    more: ["Counted from the contract date through fit-out, fibre, hardware delivery and burn-in. A late go-live hands part of the season to today's room."],
+    analogy: "The move-in date on a house purchase.",
+    inPlan: "{d.plan.goLiveLabel}: {fmt.pct(d.plan.shareOld27)} of 2027 on today's setup{d.plan.slipNote}.",
+    source: "C13 · G-e · H-f",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  "stat-loss": {
+    title: "Allowance lost at the switch",
+    term: "Allowance lost at the switch",
+    one: "Share of the eight-week allowance lost while the cluster moves.",
+    more: ["Moving at a period boundary or with parallel running loses almost nothing; a mid-period move without it loses about seven solver days."],
+    analogy: "Days of a prepaid gym pass lost while you move house.",
+    inPlan: "{fmt.pct(d.plan.periodLoss27, 1)} of the period, {fmt.pct(d.plan.seasonLoss27, 2)} of the season: {d.plan.downtimeDays27} solver days.",
+    source: "F4.6.1 · C9",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  "stat-critical": {
+    title: "What sets the earliest date",
+    term: "Critical path",
+    one: "The longest chain of work between signing and the switch; it sets the earliest possible go-live.",
+    more: ["Fibre, the campus fit-out, hardware delivery or the Hinwil works. Shortening anything else does not move the date."],
+    analogy: "The slowest leg of a relay decides the finish time.",
+    inPlan: "{d.plan.criticalLabel}: {fmt.num(d.plan.totalWeeks27, 0)} weeks from contract to the earliest switch.",
+    source: "G-e · D-e · H-f",
+    terms: [],
+    plan: true,
+  },
+  "stat-stepup": {
+    title: "The 2028 change",
+    term: "2028 step-up",
+    one: "When the 2028 hardware arrives and whether it is early, on time or late for the first metered run.",
+    more: ["Graphics processors may run the solver from 1 January 2028. Early delivery costs carrying weeks; late delivery runs part of 2028 on the 2027 estate."],
+    analogy: "Booking the removal van for the right week.",
+    inPlan: "{d.plan.stepUpLabel}{d.plan.stepUpNote}.",
+    source: "F4.4.1 · C10 · H-f",
+    terms: ["term.gpu"],
+    plan: true,
+  },
+  "stat-cash-total": {
+    title: "Cash over the two seasons",
+    term: "Cash 2027 + 2028",
+    one: "Everything paid out over 2027 and 2028, old and new estate together, against staying as today.",
+    more: ["Blends the old and the new estate by the share of each year they run, then adds that year's one-offs."],
+    analogy: "Two years of bank statements added up.",
+    inPlan: "{fmt.chf(d.plan.cash)} over both seasons, {fmt.chfDelta(d.plan.cashDelta)} vs staying as today ({fmt.chf(d.plan.todayCash)}).",
+    source: "C3 · G-c · H-a",
+    terms: ["term.capcharge"],
+    plan: true,
+  },
+  "stat-tco3": {
+    title: "Three-year total cost of the 2028 estate",
+    term: "3-year TCO (2028 estate)",
+    one: "Three-year total cost of the 2028 estate plus the 2027 one-offs it does not already carry, against today's room in 2028.",
+    more: ["Like for like: the same estate size in the same season. The steady state once the plan is in."],
+    analogy: "Total cost of owning a car for three years.",
+    inPlan: "{fmt.chf(d.plan.tco3)} against {fmt.chf(d.plan.todayTco3)} for today's room carried into 2028.",
+    source: "model · C3",
+    terms: [],
+    plan: true,
+  },
+  "stat-sec-total": {
+    title: "Lap time over both seasons",
+    term: "Lap time, both seasons",
+    one: "The 2027 and 2028 lap-time gains added together, with the points they are worth.",
+    more: ["Each season is measured against today's setup in that season, at the confidence you set."],
+    analogy: "Two race results added into a championship score.",
+    inPlan: "{fmt.sec(d.plan.secTotal)} over two seasons, worth about {fmt.signed(d.plan.pointsTotal, 0)} points at {x.confidence} % confidence.",
+    source: "J-a · J-c",
+    terms: [],
+    plan: true,
+  },
 }
 
 const FLAG_ENTRIES = {
@@ -1032,6 +1111,107 @@ const FLAG_ENTRIES = {
     source: "K-d",
     terms: ["term.cfd"],
     pending: true,
+  },
+  // Timeline flags raised by the deployment schedule (timeline.js on the customer branch); read explainContext({ plan }).
+  slip: {
+    title: "The cutover date slips",
+    one: "The target cutover date cannot be met from this contract date; the go-live slips to the earliest feasible day.",
+    more: ["The longest lead time (fibre, fit-out, hardware) is the critical path. Sign earlier to hold the date."],
+    analogy: "The builder cannot finish before you planned to move in.",
+    inPlan: "{d.plan.goLiveLabel}, slipped {d.plan.slipDays27} days; {d.plan.criticalLabel} is the critical path.",
+    source: "G-e · D-e · H-f",
+    terms: [],
+    plan: true,
+  },
+  late27: {
+    title: "Live after the season starts",
+    one: "The 2027 estate is live after the pre-season test or the first race, so part of 2027 runs on today's setup.",
+    more: ["If go-live falls in 2028, every 2027 period runs on today's room."],
+    analogy: "Joining the team mid-season.",
+    inPlan: "{d.plan.goLiveLabel}: {fmt.pct(d.plan.shareOld27)} of 2027 on today's setup.",
+    source: "F4.1.4 · C7",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  midatp: {
+    title: "A move inside a period",
+    one: "The cutover falls inside an eight-week period, so some of that period's allowance is lost.",
+    more: ["Parallel running keeps it to a one-day switch; a move at the boundary loses nothing."],
+    analogy: "Changing trains between stations instead of at one.",
+    inPlan: "{fmt.pct(d.plan.periodLoss27, 1)} of the period's allowance lost; {d.plan.downtimeDays27} solver days.",
+    source: "F4.6.1 · C9",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  shutdown: {
+    title: "A move in the shutdown",
+    one: "The cutover falls in the summer or winter shutdown, when no metered runs happen, so nothing is lost.",
+    more: ["Compute may not run in the shutdown except for upgrades and maintenance, which is exactly what a move is."],
+    analogy: "Rewiring the office over the holidays.",
+    inPlan: "{d.plan.goLiveLabel}: in a shutdown, no allowance lost.",
+    source: "F3.1.1 · F3.1.2.b",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  boundary: {
+    title: "A move at the boundary",
+    one: "The cutover sits on a period boundary: the old allowance is used up first and the new declaration follows within a month.",
+    more: ["The cleanest timing the rules allow."],
+    analogy: "Changing phone contracts on the renewal date.",
+    inPlan: "{d.plan.goLiveLabel}: at a period boundary, no allowance lost.",
+    source: "F4.4.3 · F4.6.1",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  early28: {
+    title: "2028 hardware arrives early",
+    one: "The 2028 hardware lands before graphics processors are allowed in the solver, so it waits at a carrying cost.",
+    more: ["Up to four early weeks count as burn-in; beyond that the kit is idle money."],
+    analogy: "Paying rent on a flat you cannot move into yet.",
+    inPlan: "{d.plan.stepUpLabel}{d.plan.stepUpNote}.",
+    source: "F4.4.1 · H-f",
+    terms: ["term.gpu"],
+    plan: true,
+  },
+  late28: {
+    title: "2028 hardware arrives late",
+    one: "The 2028 hardware lands after 1 January 2028, so part of the season runs on the 2027 estate.",
+    more: ["Order earlier or keep the 2028 change smaller."],
+    analogy: "The new car arriving after the first race.",
+    inPlan: "{d.plan.stepUpLabel}{d.plan.stepUpNote}.",
+    source: "F4.1.4 · H-f",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  midatp28: {
+    title: "The 2028 change inside a period",
+    one: "The 2028 step-up lands inside an eight-week period, so some of that period's allowance is lost at the switch.",
+    more: ["Move the step-up date to a boundary or keep parallel running."],
+    analogy: "Changing trains between stations.",
+    inPlan: "{d.plan.stepUpLabel}: {fmt.pct(d.plan.periodLoss28, 1)} of the period's allowance lost.",
+    source: "F4.6.1 · C9",
+    terms: ["term.atp"],
+    plan: true,
+  },
+  order28: {
+    title: "Order date for the 2028 hardware",
+    one: "The latest day to order the 2028 hardware so that it lands on time.",
+    more: ["Lead time of the chosen buying route plus burn-in, counted back from the step-up date."],
+    analogy: "The last posting date before Christmas.",
+    inPlan: "Order by {d.plan.orderByLabel}; {d.plan.stepUpLabel}.",
+    source: "H-f",
+    terms: [],
+    plan: true,
+  },
+  slip28: {
+    title: "The 2028 step-up slips",
+    one: "The planned 2028 step-up date cannot be met; it slips to the earliest feasible day.",
+    more: ["The order date is already past or the lead time is longer than the gap."],
+    analogy: "The removal van is booked for a day the keys are not ready.",
+    inPlan: "{d.plan.stepUpLabel}, slipped {d.plan.slipDays28} days.",
+    source: "H-f · G-e",
+    terms: [],
+    plan: true,
   },
 }
 
@@ -1320,6 +1500,8 @@ export const STRATEGY_IDS = Object.keys(STRATEGY_ENTRIES)
 export const TERM_IDS = Object.keys(TERM_ENTRIES)
 /** Entries for controls or flags the committed model does not have yet (explain brief 2.5, strategies brief 5.3). */
 export const PENDING_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.pending).map(([id]) => id)
+/** Entries for the two-season planning tool's tiles and timeline flags; their templates read explainContext({ plan }). */
+export const PLAN_IDS = Object.entries(EXPLAIN).filter(([, e]) => e.plan).map(([id]) => id)
 
 // ---------------------------------------------------------------------------------------------
 // Template resolver (no eval, no Function)
@@ -1526,11 +1708,65 @@ function optionLabel(id, value) {
   return opt ? opt.label : String(value)
 }
 
+const DAY_MS = 86_400_000
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const dateLabel = (ms) => {
+  const n = typeof ms === "string" ? Date.parse(ms) : Number(ms)
+  if (!Number.isFinite(n)) return "not set"
+  const dt = new Date(n)
+  return `${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`
+}
+const PATH_WORD = { fibre: "The fibre route", fitout: "The campus fit-out", hardware: "Hardware delivery", hinwil: "The Hinwil works", expansion: "The 2028 power step-up", parallel: "Parallel running", burnin: "Burn-in" }
+
+/**
+ * Facts for the plan-level tiles and timeline flags from a plan.js `evaluatePlan()` result
+ * (`{ timeline: { seasons: { 2027, 2028 } }, totals }`). Every field has a value when no plan is given.
+ */
+function planFacts(plan, x) {
+  const seasons = (plan && plan.timeline && plan.timeline.seasons) || {}
+  const t27 = seasons[2027] || {}
+  const t28 = seasons[2028] || {}
+  const totals = (plan && plan.totals) || {}
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+  const earlyWeeks = Math.round(num(t28.earlyDays) / 7)
+  const stepUpNote = !t28.changes ? "" : earlyWeeks > 0 ? `, ${earlyWeeks} weeks before graphics processors are allowed` : num(t28.shareOld) > 0 ? `, ${Math.round(num(t28.shareOld) * 100)} % of 2028 on the 2027 estate` : ", on time for 1 January"
+  return {
+    changes27: Boolean(t27.changes),
+    goLiveLabel: t27.goLive ? `Live ${dateLabel(t27.goLive)}` : "No move in 2027",
+    shareOld27: t27.goLive ? num(t27.shareOld) : t27.changes ? 1 : 0,
+    slipDays27: num(t27.slipDays),
+    slipNote: num(t27.slipDays) > 0 ? `, slipped ${num(t27.slipDays)} days` : num(t27.slackDays) > 0 ? `, ${num(t27.slackDays)} days of slack` : "",
+    periodLoss27: num(t27.periodLoss),
+    seasonLoss27: num(t27.seasonLoss),
+    downtimeDays27: num(t27.downtimeDays),
+    atpLabel27: (t27.atp && t27.atp.label) || "no period",
+    criticalLabel: PATH_WORD[t27.critical] || (t27.critical ? String(t27.critical) : "Nothing on the critical path"),
+    totalWeeks27: num(t27.totalWeeks),
+    stepUpLabel: t28.changes ? (t28.goLive ? `2028 step-up ${dateLabel(t28.goLive)}` : "2028 step-up date not set") : "No 2028 step-up: 2028 runs the 2027 estate",
+    stepUpNote,
+    earlyWeeks28: earlyWeeks,
+    earlyCostCHF: num(t28.earlyCostCHF),
+    shareOld28: num(t28.shareOld),
+    periodLoss28: num(t28.periodLoss),
+    slipDays28: num(t28.slipDays),
+    orderByLabel: t28.orderBy ? dateLabel(t28.orderBy) : "not set",
+    cash: num(totals.cash),
+    todayCash: num(totals.todayCash),
+    cashDelta: num(totals.cashDelta),
+    tco3: num(totals.tco3),
+    todayTco3: num(totals.todayTco3),
+    secTotal: num(totals.sec),
+    pointsTotal: num(totals.points),
+    confidence: x.confidence,
+  }
+}
+
 /**
  * Build the template context from an `evaluate()` result (`result`), the attribution for the same inputs (optional),
- * both seasons' results (`both`, optional, for the season strip) and the `fmt` helpers from dom.js.
+ * both seasons' results (`both`, optional, for the season strip), a plan.js result (`plan`, optional, for the
+ * plan-level tiles and timeline flags) and the `fmt` helpers from dom.js.
  */
-export function explainContext({ result, attribution = null, both = null, fmt = null, plainEnglish = true } = {}) {
+export function explainContext({ result, attribution = null, both = null, plan = null, fmt = null, plainEnglish = true } = {}) {
   if (!result) throw new Error("explainContext needs an evaluate() result")
   const s = result.scenario
   const t = result.today
@@ -1610,6 +1846,7 @@ export function explainContext({ result, attribution = null, both = null, fmt = 
     decisionDelta: s.net.venue.decisionSec - t.net.venue.decisionSec,
     sec2027: both && both[2027] ? both[2027].perf.sec : season === 2027 ? p.sec : undefined,
     sec2028: both && both[2028] ? both[2028].perf.sec : season === 2028 ? p.sec : undefined,
+    plan: planFacts(plan, x),
   }
 
   const a = {}
