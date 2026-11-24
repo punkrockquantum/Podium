@@ -1252,14 +1252,14 @@ const DRIVER_ENTRIES = {
   clock: {
     title: "More cores at a lower declared clock",
     term: "nodes × cores × CCF vs clock^0.6",
-    one: "Declaring a slower clock and running more cores buys more work for the same allowance.",
+    one: "Declaring a slower clock buys more core-hours for the same allowance; a smaller cluster still gets through less work, so this bar can go either way.",
     more: [
       "The allowance is charged per core per clock tick. Declaring 2.4 GHz instead of 3.7 buys 54 % more core-hours for the same charge.",
       "Each slower core does less, but not proportionally less (clock^0.6), because airflow maths waits on memory.",
-      "The catch: the extra cores need power and money, and if the cluster shrinks instead (to make room for graphics processors) this bar goes negative. The clock may not be declared below the chip's base speed.",
+      "The catch: extra cores need power and money, a cluster bigger than the allowance can keep busy idles, and a cluster that shrinks (to make room for graphics processors, or to fit the 500 kW) gets through less work however well each core is charged. In those cases this bar is negative. The clock may not be declared below the chip's base speed.",
     ],
-    analogy: "Driving at 100 km/h instead of 130 to go further on the same tank.",
-    inPlan: "{x.nodes} servers × {x.coresPerNode} cores at {fmt.num(x.clockGHz, 1)} GHz vs Today's {t.inputs.nodes} × {t.inputs.coresPerNode} at {fmt.num(t.inputs.clockGHz, 1)} GHz: {fmt.num(s.comp.clockWorkPerAuh, 2)}× work per charged unit, {fmt.pct(s.comp.usage)} of the allowance used. {fmt.sec(a.clock.sec)} per lap ({fmt.pct(a.clock.share)}).",
+    analogy: "Driving at 100 km/h instead of 130 to go further on the same tank; fewer vans still deliver fewer parcels.",
+    inPlan: "{x.nodes} servers × {x.coresPerNode} cores at {fmt.num(x.clockGHz, 1)} GHz vs Today's {t.inputs.nodes} × {t.inputs.coresPerNode} at {fmt.num(t.inputs.clockGHz, 1)} GHz: each charged unit buys {fmt.num(s.comp.clockWorkPerAuh, 2)}× the work, {d.clockNote}; {fmt.pct(s.comp.usage)} of the allowance used. {fmt.sec(a.clock.sec)} per lap ({fmt.pct(a.clock.share)}).",
     zero: "Same cluster size and declared clock as Today.",
     source: "F4.4.2 · F4.4.4 · J-d · C9",
     terms: ["term.declaredClock", "term.auh"],
@@ -1370,13 +1370,13 @@ const DRIVER_ENTRIES = {
   connectivity: {
     title: "Faster decisions at the track",
     term: "fibre availability, trackside quality → data-to-decision seconds",
-    one: "Better links to the track and the campus mean quicker, safer race-day calls; they cost money inside the cap.",
+    one: "Better links to the track and the campus mean quicker, safer race-day calls; they cost money inside the cost cap, which the car's development then cannot spend.",
     more: [
       "A carrier or satellite-backed link cuts the round trip and keeps sessions online; edge compute in the garage pre-digests telemetry; two fibre routes keep the wind tunnel connected to its cluster.",
-      "The model pays these back in data-to-decision seconds and race weekends kept online, not lap time, so this bar is usually negative on the lap-time chart.",
+      "The lap-time chart only counts what the links cost inside the cost cap (every franc spent there is a franc less for car development), so this bar is usually negative. What the links buy shows up elsewhere: data-to-decision seconds and race weekends kept online.",
     ],
-    analogy: "A private phone line to the pit wall.",
-    inPlan: "{d.tracksideLabel}{d.edgeSuffix}, {d.fibreLabel}: decision in {fmt.num(s.net.venue.decisionSec, 1)} s vs {fmt.num(t.net.venue.decisionSec, 1)} s, link {fmt.availability(s.net.linkAvailability)}. {fmt.chfDelta(a.connectivity.savedCHF)} a year inside the cap = {fmt.sec(a.connectivity.sec)} per lap.",
+    analogy: "A private phone line to the pit wall: it comes out of the same budget as the car.",
+    inPlan: "{d.tracksideLabel}{d.edgeSuffix}, {d.fibreLabel}: decision in {fmt.num(s.net.venue.decisionSec, 1)} s vs {fmt.num(t.net.venue.decisionSec, 1)} s, link {fmt.availability(s.net.linkAvailability)}. {d.connectivityNote}",
     zero: "Same links as Today.",
     source: "I-a · I-b · I-d · I-e · B-e · G6",
     terms: ["term.rtt", "term.edge", "term.darkfibre", "term.onramp"],
@@ -1858,6 +1858,43 @@ export function explainContext({ result, attribution = null, both = null, plan =
     a.n = active.length
     a.top = active.reduce((best, r) => (!best || Math.abs(r.sec) > Math.abs(best.sec) ? r : best), null) || { label: "nothing", sec: 0, share: 0 }
   }
+  d.clockNote = clockNote(x, s, t, a.clock)
+  d.connectivityNote = connectivityNote(a.connectivity, fmt)
 
   return { x, s, t, p, a, d, K, fmt: fmt || {}, labelsFor: labels(plainEnglish) }
+}
+
+const intWord = (n) => Math.round(n).toLocaleString("en-US")
+const pctWord = (v) => `${Math.round(Math.abs(v) * 100)} %`
+
+/**
+ * Why the "lower declared clock" bar has the sign it has, in plain words: the model's CPU work scales with
+ * cores × clock^0.6 (J-d) while the charge scales with cores × clock, so a cheaper charge per unit still loses
+ * when the cluster has fewer core-hours than Today's, or idles when it has more than the allowance can keep busy.
+ */
+function clockNote(x, s, t, row) {
+  const planCores = x.nodes * x.coresPerNode
+  const todayCores = t.inputs.nodes * t.inputs.coresPerNode
+  const exp = K.compute.clockWorkExponent
+  const ratio = todayCores > 0 && t.inputs.clockGHz > 0 ? (planCores * x.clockGHz ** exp) / (todayCores * t.inputs.clockGHz ** exp) : 1
+  const negative = Boolean(row && row.sec < 0)
+  const cores = planCores === todayCores ? `the same ${intWord(planCores)} cores` : `${intWord(planCores)} cores instead of Today's ${intWord(todayCores)}`
+  if (planCores === 0) return `but with no processor servers left the processor cluster does no work at all${negative ? ", which is why this bar is negative" : ""}`
+  if (s.comp.usage > 1) return `but with ${cores} the cluster is bigger than the allowance can keep busy (${pctWord(s.comp.idleShare)} of it idles)${negative ? ", and idle servers still cost power and money, which is why this bar is negative" : ""}`
+  if (ratio < 0.995) return `but with ${cores} the cluster on its own gets through about ${pctWord(1 - ratio)} less work than Today's${negative ? ", which is why this bar is negative" : ""}`
+  const work = ratio > 1.005 ? `about ${pctWord(ratio - 1)} more work than Today's` : "about the same work as Today's"
+  const servers = x.nodes + Math.ceil((x.gpus || 0) / 8)
+  const todayServers = t.inputs.nodes + Math.ceil((t.inputs.gpus || 0) / 8)
+  return `and with ${cores} the cluster on its own gets through ${work}${negative ? `; what makes this bar negative is the cost of running ${servers} servers instead of ${todayServers}: power, money and more parts to fail` : ""}`
+}
+
+/** Why the connectivity bar has the sign it has: the lap-time chart only sees what the links cost or save inside the cap. */
+function connectivityNote(row, fmt) {
+  const chf = row ? row.savedCHF || 0 : 0
+  const sec = row ? row.sec || 0 : 0
+  const money = (v) => (fmt && typeof fmt.chf === "function" ? fmt.chf(Math.abs(v)) : `CHF ${intWord(Math.abs(v))}`)
+  const lap = fmt && typeof fmt.sec === "function" ? fmt.sec(sec) : `${sec >= 0 ? "+" : ""}${sec.toFixed(2)} s`
+  if (chf < -500) return `The links cost ${money(chf)} a year more inside the cost cap, money the car's development cannot spend${sec < 0 ? ", which is why this bar is negative" : ""}: ${lap} per lap. The pay-back is faster decisions and race weekends kept online, which this chart does not count.`
+  if (chf > 500) return `The links save ${money(chf)} a year inside the cost cap, money the car's development can spend: ${lap} per lap.`
+  return `The links cost nothing extra inside the cost cap: ${lap} per lap${sec < 0 ? ", from a fibre link that is down more often" : ""}.`
 }
