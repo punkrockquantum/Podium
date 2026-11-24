@@ -10,6 +10,7 @@ import * as C from "./catalog.js"
 import { boardFor } from "./model.js"
 import { createScene, sceneThumb } from "./scene.js"
 import { el, WORDS } from "./ui.js"
+import { chf } from "./customer.js"
 
 const SVG_NS = "http://www.w3.org/2000/svg"
 const svg = (tag, attrs = {}) => {
@@ -18,7 +19,7 @@ const svg = (tag, attrs = {}) => {
   return node
 }
 const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v))
-const money = (v) => (Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}k`)
+const money = (v) => chf(v)
 
 /* ------------------------------------------------------------ FIT ring */
 
@@ -82,9 +83,9 @@ function capBar(c) {
   const fill = el("i", { class: "capbar-fill" })
   const text = el("b", {})
   const consequence = el("p", { class: "capbar-consequence" })
-  const name = c.id === "capex" ? "CapEx vs this table's envelope" : c.id === "opex" ? "Yearly OpEx vs the cost-cap allowance" : c.name
+  const label = el("span", {}, c.id === "capex" ? "Capital vs this table's 2027 envelope" : c.id === "opex" ? "Yearly cost-cap charge vs the allowance" : c.name)
   const node = el("div", { class: "capbar", "data-cap": c.id },
-    el("div", { class: "capbar-label" }, el("span", {}, name), text),
+    el("div", { class: "capbar-label" }, label, text),
     el("div", { class: "capbar-track" }, fill, el("b", { class: "capbar-line", style: `left:${(100 / 1.6).toFixed(1)}%`, title: "Cap" }), el("s", { class: "capbar-ghost", style: `left:${(clamp(c.today / scale) * 100).toFixed(1)}%`, title: "Today" })),
     consequence)
   return {
@@ -94,6 +95,7 @@ function capBar(c) {
       node.classList.toggle("over", x.over > 0)
       fill.style.width = `${(clamp(x.used / scale) * 100).toFixed(1)}%`
       text.textContent = x.unit === "kW" ? `${Math.round(x.used)} of ${Math.round(x.cap)} kW` : `${money(x.used)} of ${money(x.cap)}`
+      if (x.unit === "kW" && x.name && label.textContent !== x.name) label.textContent = x.name
       consequence.textContent = x.over > 0 ? (deciding && x.fix ? x.consequence.replace(/\s[^.]*would bring it back\.$/, "") : x.consequence) : ""
     },
   }
