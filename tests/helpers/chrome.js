@@ -25,6 +25,7 @@ export function findChrome() {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const KEY_CODES = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Space: 32, Enter: 13, Escape: 27, KeyP: 80, KeyR: 82, KeyM: 77, KeyW: 87, KeyA: 65, KeyS: 83, KeyD: 68 }
 
 /** Start headless Chrome and connect to its browser target. */
 export async function launchChrome({ width = 1024, height = 768 } = {}) {
@@ -124,6 +125,11 @@ export async function launchChrome({ width = 1024, height = 768 } = {}) {
       async emulateMedia(media = "") {
         await send("Emulation.setEmulatedMedia", { media }, sessionId)
         await sleep(50)
+      },
+      /** A real key press via the input domain: `type` is "keyDown" | "keyUp", `code` e.g. "ArrowUp". */
+      async key(type, code) {
+        const key = code === "Space" ? " " : code.startsWith("Key") ? code.slice(3).toLowerCase() : code
+        await send("Input.dispatchKeyEvent", { type, code, key, windowsVirtualKeyCode: KEY_CODES[code] || 0 }, sessionId)
       },
       async screenshot(path) {
         const { data } = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId)

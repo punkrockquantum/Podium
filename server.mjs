@@ -26,6 +26,7 @@ import { runRace, finaleEntries } from "./public/js/race.js"
 import { buildPlan } from "./public/js/plandata.js"
 import { PITCH_MS, REJECT_REASON_MAX, lockedDials } from "./public/js/approval.js"
 import { phaseOf, playOpen } from "./public/js/session.js"
+import { leagueRoutes } from "./server/league.mjs"
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const PUBLIC = join(ROOT, "public")
@@ -532,6 +533,8 @@ export function createApp({ dataDir = join(ROOT, "data"), env = process.env } = 
       return send(res, 200, publicState())
     },
   }
+  /* The arcade's league table (GET/POST /api/league, POST /api/league/reset on the host PIN): server/league.mjs. */
+  Object.assign(routes, leagueRoutes({ dataDir, send, requireHost, clientIp }))
 
   function endPlay(by) {
     Object.assign(state.clock, { status: "ended", endsAt: null, remainingMs: 0, endedAt: Date.now(), endedBy: by })

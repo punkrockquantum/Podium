@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Race the plan · Austin arcade</title>
+<link rel="stylesheet" href="/css/arcade.css">
+</head>
+<body class="arcade">
+<main id="app">
+
+  <section id="screen-pick" class="screen">
+    <header class="masthead">
+      <p class="kicker">Digital Realty × Audi F1 Team · Circuit of the Americas, Austin</p>
+      <h1>RACE THE PLAN</h1>
+      <p class="lede">Ten cars, three laps, arrow keys. Your car carries the plan's advantage: the computation it buys, how fast the pit wall reacts and how often the telemetry drops. The nine rivals run today's on-prem setup.</p>
+    </header>
+
+    <p id="handed-note" class="note" hidden>Your car came over from the planning tool. <button type="button" id="forget-car" class="link">Choose another car</button></p>
+
+    <div id="car-grid" class="car-grid" aria-label="Cars"></div>
+
+    <div class="row cta">
+      <div class="laps">
+        <span class="label">RACE LENGTH</span>
+        <div id="laps" role="group" aria-label="Race length">
+          <button type="button" data-laps="1">1 LAP</button>
+          <button type="button" data-laps="3" class="selected">3 LAPS</button>
+          <button type="button" data-laps="5">5 LAPS</button>
+        </div>
+      </div>
+      <p id="picked" class="picked"></p>
+      <button type="button" id="race-now" class="primary" disabled>RACE NOW · ENTER</button>
+    </div>
+
+    <section class="controls" aria-label="Controls">
+      <h2>CONTROLS</h2>
+      <ul>
+        <li><kbd>↑</kbd> accelerate</li>
+        <li><kbd>↓</kbd> brake / reverse</li>
+        <li><kbd>←</kbd> <kbd>→</kbd> steer</li>
+        <li><kbd>SPACE</kbd> overtake boost</li>
+        <li><kbd>P</kbd> pause</li>
+        <li><kbd>R</kbd> restart</li>
+        <li><kbd>ESC</kbd> back</li>
+        <li><kbd>M</kbd> sound</li>
+      </ul>
+      <p class="hint">W A S D work too. The dashed blue line and red boards are the pit wall's call: the faster the data loop, the further ahead and the steadier they are. Laps count only through all three sector lines.</p>
+    </section>
+
+    <nav class="links">
+      <a href="/">Back to the plan</a>
+      <button type="button" class="link" data-action="league">League table</button>
+      <span class="toggles">
+        <button type="button" id="crt-toggle" aria-pressed="false">CRT SCANLINES · C</button>
+        <button type="button" id="mute-toggle" aria-pressed="false">SOUND OFF · M</button>
+      </span>
+    </nav>
+  </section>
+
+  <section id="screen-stage" class="screen stage" hidden>
+    <div class="frame">
+      <canvas id="game" width="480" height="270" aria-label="Race view"></canvas>
+      <div id="hud" class="hud" aria-live="off">
+        <div class="hud-top">
+          <div class="box pos"><span data-hud="pos">P5</span></div>
+          <div class="box lap"><span data-hud="lap">LAP 1/3</span></div>
+          <div class="box delta"><span data-hud="delta">TO P1 --.-</span></div>
+          <div class="box car"><span id="car-name"></span></div>
+        </div>
+        <div class="hud-left">
+          <div class="times">
+            <div class="t"><span class="k">LAP</span><span class="v" data-hud="current">0:00.000</span></div>
+            <div class="t"><span class="k">LAST</span><span class="v" data-hud="last">--:--.---</span></div>
+            <div class="t"><span class="k">BEST</span><span class="v" data-hud="best">--:--.---</span></div>
+          </div>
+          <div class="sectors">
+            <span data-hud="sector" data-colour="none">S1 --.--</span>
+            <span data-hud="sector" data-colour="none">S2 --.--</span>
+            <span data-hud="sector" data-colour="none">S3 --.--</span>
+          </div>
+        </div>
+        <div class="hud-right">
+          <canvas id="minimap" width="132" height="132" aria-label="Track map"></canvas>
+          <div class="status">
+            <span class="pill assist" data-hud="assist">PIT WALL</span>
+            <span class="pill aero" data-hud="aero">AERO +0%</span>
+            <span class="pill drs" data-hud="drs">DRS</span>
+          </div>
+        </div>
+        <div class="hud-bottom">
+          <div class="speed"><span data-hud="speed">0</span><small>KM/H</small></div>
+          <div class="boost">
+            <div class="bar"><div class="fill" data-hud="boost"></div></div>
+            <span class="k" data-hud="boost-label">BOOST</span>
+          </div>
+        </div>
+        <div id="flash" class="flash" data-hud="flash"></div>
+      </div>
+      <div id="lights" class="lights" aria-label="Start lights">
+        <span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span>
+      </div>
+      <div id="flag" class="flag" hidden><span>🏁</span></div>
+      <div id="pause" class="overlay" hidden><p>PAUSED</p><small>P to resume · R to restart · ESC to leave</small></div>
+      <div id="touch" class="touch" aria-label="Touch controls">
+        <div class="pad left">
+          <button type="button" data-key="ArrowLeft" aria-label="Steer left">◀</button>
+          <button type="button" data-key="ArrowRight" aria-label="Steer right">▶</button>
+        </div>
+        <div class="pad right">
+          <button type="button" data-key="Space" aria-label="Boost" class="boost-btn">BOOST</button>
+          <button type="button" data-key="ArrowDown" aria-label="Brake">BRAKE</button>
+          <button type="button" data-key="ArrowUp" aria-label="Accelerate" class="gas">GAS</button>
+        </div>
+      </div>
+      <div class="scanlines" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <section id="screen-results" class="screen results" hidden>
+    <h1 id="results-title">FINISHED</h1>
+    <p id="results-sub" class="sub"></p>
+    <div class="two">
+      <table class="results-table" aria-label="Results">
+        <thead><tr><th>Pos</th><th>Car</th><th>Best lap</th><th>Gap</th></tr></thead>
+        <tbody id="results-body"></tbody>
+      </table>
+      <aside class="recap">
+        <h2 id="recap-headline">Advantage</h2>
+        <ul id="recap-lines"></ul>
+        <form id="name-form" class="name-form" autocomplete="off">
+          <label for="name">YOUR NAME FOR THE LEAGUE</label>
+          <div class="row">
+            <input id="name" name="name" type="text" maxlength="24" minlength="1" required placeholder="1–24 characters" autocomplete="off" spellcheck="false">
+            <button type="submit" id="save-lap" class="primary">SAVE LAP</button>
+          </div>
+          <p id="name-error" class="error" role="alert"></p>
+          <button type="button" id="skip-name" class="link">Skip, show the league</button>
+        </form>
+        <p id="no-lap" class="hint" hidden>No full lap to save: the league keeps completed laps only.</p>
+        <div class="row actions">
+          <button type="button" class="secondary" data-action="again">RACE AGAIN · R</button>
+          <button type="button" class="secondary" data-action="pick">CHANGE CAR · ESC</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="screen-league" class="screen league" hidden>
+    <header class="masthead small">
+      <p class="kicker">Austin arcade · best laps</p>
+      <h1>LEAGUE TABLE</h1>
+      <p id="league-status" class="sub"></p>
+    </header>
+    <table class="league-table" aria-label="League table">
+      <thead><tr><th>#</th><th>Name</th><th>Best lap</th><th>Car · season</th><th>Advantage</th><th>When · finish</th></tr></thead>
+      <tbody id="league-body"></tbody>
+    </table>
+    <div class="row actions">
+      <button type="button" class="primary" data-action="again">RACE AGAIN</button>
+      <button type="button" class="secondary" data-action="pick">CHOOSE A CAR</button>
+      <a class="secondary" href="/">Back to the plan</a>
+    </div>
+  </section>
+
+</main>
+<script type="module" src="/js/arcade/main.js"></script>
+</body>
+</html>
