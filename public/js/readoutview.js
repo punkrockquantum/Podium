@@ -1,8 +1,9 @@
-/** One team's readout as a single, screenshot-friendly card (race page, projector, demo mode). */
+/** The customer's readout as a single, screenshot-friendly card (race page, projector, demo mode). */
 import { el, WORDS } from "./ui.js"
 import { boardThumb } from "./board.js"
 
 const ordinal = (n) => (n ? `P${n}` : "—")
+const signed = (gap) => `${gap > 0 ? "+" : gap < 0 ? "−" : ""}${Math.abs(gap).toFixed(1)} s`
 
 export function readoutCard(readout, { compact = false } = {}) {
   const { team, result } = readout
@@ -10,14 +11,13 @@ export function readoutCard(readout, { compact = false } = {}) {
   return el("div", { class: `readout${compact ? " compact" : ""}`, id: `readout-${team.id}`, "data-team": team.id, style: `--team:${team.color}` },
     el("header", { class: "readout-head" },
       el("i", { style: `background:${team.color}` }),
-      el("div", {}, el("h2", {}, team.name), el("span", { class: "muted small" }, `${readout.boards.filter((b) => b.raced === "approved").length} of ${readout.boards.length} boards approved`)),
+      el("div", {}, el("h2", {}, `${team.name} · readout`), el("span", { class: "muted small" }, `${result.approved} of ${result.tables} tables approved · ${WORDS.plan2027} against ${WORDS.todayHinwil.toLowerCase()}`)),
       el("div", { class: "readout-result" },
         el("div", { class: "readout-seconds" }, el("b", {}, `${result.seconds.toFixed(2)} s`), el("span", {}, "found per lap")),
-        el("div", {}, el("b", {}, ordinal(result.position)), el("span", {}, `race of ${result.of}`)),
-        el("div", {}, el("b", {}, ordinal(result.championship)), el("span", {}, "championship")),
-        el("div", {}, el("b", {}, result.points), el("span", {}, "points")))),
+        el("div", { class: `readout-gap${result.ahead ? " ahead" : ""}` }, el("b", {}, signed(result.gap)), el("span", {}, `vs today after ${result.laps} laps`)),
+        el("div", {}, el("b", {}, ordinal(result.position)), el("span", {}, `of ${result.of} cars`)))),
     el("p", { class: "readout-summary", id: `summary-${team.id}` }, readout.summary),
-    el("p", { class: "small muted readout-points" }, `${result.tablePoints} table points + ${result.racePoints} race points × 4${result.penaltyPoints ? ` − ${result.penaltyPoints} penalty points` : ""}.`),
+    readout.finale ? el("p", { class: "small muted readout-finale", id: `finale-${team.id}` }, readout.finale) : null,
     el("div", { class: "thumbs", id: `thumbs-${team.id}` }, readout.boards.map(boardThumb)),
     readout.boards.some((b) => b.raced === "today") ? el("p", { class: "small muted" }, `Grey boards were not approved, so they raced on ${WORDS.todaySetup.toLowerCase()}.`) : null,
     readout.path2028 ? el("p", { class: "small readout-2028", id: `path2028-${team.id}` }, readout.path2028) : null,

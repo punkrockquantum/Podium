@@ -1,19 +1,27 @@
-/** The podium graphic: 2nd left, 1st centre and highest, 3rd right, in team colours with points. */
+/**
+ * The finale graphic: the two cars after 56 laps, the customer's 2027 plan against today's Hinwil
+ * setup, with the gap in seconds and the one-line explanation of where it came from.
+ */
 import { el } from "./ui.js"
-import { podium } from "./report.js"
+import { finaleSummary } from "./report.js"
+import { FINALE } from "./catalog.js"
 
-const ORDINAL = { 1: "1st", 2: "2nd", 3: "3rd" }
-
-export function podiumGraphic(race) {
-  const steps = podium(race).map((s) => {
-    const res = race.results.find((r) => r.id === s.id)
-    return el("div", { class: `podium-step p${s.place}`, "data-team": s.id },
-      el("div", { class: "podium-name" }, el("i", { style: `background:${s.color}` }), s.name),
-      el("div", { class: "podium-points" }, `${s.score} pts`),
-      el("div", { class: "podium-block", style: `background:${s.color}` },
-        el("b", {}, ORDINAL[s.place]),
-        el("span", {}, `Finished P${res?.position ?? "–"}`)))
+export function finaleGraphic(race) {
+  const finale = finaleSummary(race)
+  const { plan, today } = finale
+  if (!plan || !today) return el("div", { class: "panel wide finale-panel", id: "finale" }, el("p", { class: "muted" }, finale.text))
+  const cars = [plan, today].sort((a, b) => a.position - b.position)
+  const steps = cars.map((car) => {
+    const winner = car.position === 1
+    return el("div", { class: `finale-car p${car.position}${car === plan ? " plan" : " today"}`, "data-car": car.id, style: `--c:${car.color}` },
+      el("div", { class: "finale-name" }, el("i", { style: `background:${car.color}` }), car.name),
+      el("div", { class: "finale-block", style: `background:${car.color}` },
+        el("b", {}, `P${car.position}`),
+        el("span", {}, winner ? `${finale.laps} laps` : `+${Math.abs(finale.gap).toFixed(1)} s`)),
+      el("div", { class: "finale-pace" }, `${(car.found || 0).toFixed(2)} s per lap found`))
   })
-  return el("div", { class: "panel wide podium-panel", id: "podium" }, el("h2", {}, "Podium 2027 champions"), el("div", { class: "podium" }, steps),
-    el("p", { class: "small muted", style: "text-align:center" }, "Championship points: approved table points + race points × 4 − penalties."))
+  return el("div", { class: "panel wide finale-panel", id: "finale" },
+    el("h2", {}, `${FINALE.race} · after ${finale.laps} laps`),
+    el("div", { class: "finale-cars" }, steps),
+    el("p", { class: "finale-line", id: "finaleLine" }, finale.text))
 }

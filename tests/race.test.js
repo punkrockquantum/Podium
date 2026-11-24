@@ -1,9 +1,9 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as C from "../public/js/catalog.js"
-import { evaluate, effectiveTeam } from "../public/js/model.js"
-import { runRace, systemScore, LAPS, RACE_SECONDS } from "../public/js/race.js"
-import { readoutFor, podium } from "../public/js/report.js"
+import { evaluate, effectiveTeam, raceSeconds } from "../public/js/model.js"
+import { runRace, systemScore, finaleEntries, LAPS, RACE_SECONDS } from "../public/js/race.js"
+import { readoutFor, finaleSummary, finaleCars } from "../public/js/report.js"
 import { GOOD, IDS, approvedAt } from "./routes.js"
 
 const entry = (team, budget = C.DEFAULT_BUDGET) => {
@@ -80,42 +80,118 @@ test("balance over 200 seeds per budget: four approved in-zone boards beat two u
   }
 })
 
-test("a 10-team race: every team gets a readout with boards, lessons and suggestions", () => {
-  const designs = [GOOD, {}, { ...GOOD, link: "single" }, { ...GOOD, cooling: "air" }, { ...GOOD, payment: "buy" }]
-  const teams = Array.from({ length: 10 }, (_, i) => ({
-    id: `t${i + 1}`, name: `Team ${i + 1}`, color: C.TEAM_COLORS[i],
-    choices: designs[i % designs.length], reviews: approvedAt(IDS.slice(0, i % 5)), plans: {}, pitch: Object.fromEntries(IDS.slice(0, i % 5).map((id) => [id, 22])),
-  }))
-  const race = runRace(teams.map((t) => entry(t)), "ten", IDS)
-  assert.equal(race.results.length, 10)
-  assert.equal(podium(race).length, 3)
-  for (const t of teams) {
+/** The customer as the server holds it: every table with all three dials set has a plan (locked); the given ones are approved. */
+const customer = (choices, approvedIds, extra = {}) => {
+  const locked = IDS.filter((id) => C.decisionsFor(id).every((d) => choices[d.id] !== undefined))
+  return { id: C.CUSTOMER_TEAM.id, name: C.CUSTOMER_TEAM.name, color: C.CUSTOMER_TEAM.color, choices, reviews: approvedAt(approvedIds), plans: Object.fromEntries(locked.map((id) => [id, { id: `P-${id}`, station: id, choices, fit: 90, status: "zone", inZone: true, board: { seconds: 0.3 } }])), attempts: Object.fromEntries(locked.map((id) => [id, 1])), pitch: Object.fromEntries(approvedIds.map((id) => [id, 22])), ...extra }
+}
+
+test("the finale: two entrants, the customer's 2027 plan (approved tables only) against today's Hinwil setup at 0.00 s", () => {
+  const team = customer(GOOD, ["network", "dc"])
+  const entries = finaleEntries(team, C.DEFAULT_BUDGET, IDS)
+  assert.equal(entries.length, 2)
+  const [plan, today] = entries
+  assert.equal(plan.id, C.CUSTOMER_TEAM.id, "the plan car carries the customer's id, so /race.html?team=t1 finds it")
+  assert.equal(plan.name, `${C.CUSTOMER_TEAM.name} · 2027 plan`)
+  assert.equal(plan.short, "2027 plan")
+  assert.equal(plan.color, C.CUSTOMER_TEAM.color)
+  assert.equal(plan.seconds, raceSeconds(team, C.DEFAULT_BUDGET, IDS), "the plan's pace is the seconds found at the approved tables")
+  assert.ok(plan.seconds > 0)
+  assert.deepEqual(plan.notApproved.sort(), ["compute", "oem"], "locked but unapproved tables race on today's setup")
+  assert.deepEqual(plan.pitch, { network: 22, dc: 22 })
+  assert.equal(today.id, "today")
+  assert.equal(today.name, `${C.CUSTOMER_TEAM.name} · today's Hinwil setup`)
+  assert.equal(today.seconds, 0)
+  assert.deepEqual(today.missed, IDS, "today's setup has no approved table")
+  assert.deepEqual(today.pitch, {})
+  const race = runRace(entries, "finale", IDS)
+  assert.equal(race.results.length, 2)
+  assert.deepEqual(race.results.map((r) => r.id).sort(), [C.CUSTOMER_TEAM.id, "today"].sort())
+  const rows = Object.fromEntries(race.results.map((r) => [r.id, r]))
+  assert.equal(rows.t1.found, plan.seconds)
+  assert.equal(rows.today.found, 0)
+  assert.equal(rows.t1.short, "2027 plan", "the track and the tower use the short label")
+  assert.equal(rows.today.short, "Hinwil today")
+  const { plan: p, today: t } = finaleCars(race)
+  assert.equal(p.id, "t1")
+  assert.equal(t.id, "today")
+  const summary = finaleSummary(race)
+  assert.equal(summary.laps, LAPS)
+  assert.equal(Math.round((t.total - p.total) * 10) / 10, summary.gap, "the gap is today's time minus the plan's, after 56 laps")
+  assert.equal(summary.ahead, summary.gap > 0)
+  assert.match(summary.text, /^After 56 laps (the 2027 plan finished \d+\.\d s ahead of today's Hinwil setup|today's Hinwil setup finished \d+\.\d s ahead of the 2027 plan) \(P[12] to P[12]\)/, "the result explains the gap in seconds and places")
+  assert.match(summary.text, /\d\.\d\d s per lap found at 2 approved tables/)
+  assert.equal(finaleSummary({ results: [] }).text, "The race has not run.")
+})
+
+test("over 200 seeds the 2027 plan with four approved in-zone tables beats today's Hinwil setup almost every time, and never when nothing is approved by design", () => {
+  const N = 200
+  let wins = 0
+  let gaps = 0
+  for (let s = 0; s < N; s++) {
+    const race = runRace(finaleEntries(customer(GOOD, IDS), C.DEFAULT_BUDGET, IDS), `finale-${s}`, IDS)
+    const f = finaleSummary(race)
+    if (f.ahead) wins += 1
+    gaps += f.gap
+  }
+  console.log(`[finale] plan beats today ${wins}/${N} (${(wins / N * 100).toFixed(1)}%), mean gap ${(gaps / N).toFixed(1)} s over ${LAPS} laps`)
+  assert.ok(wins / N >= 0.95, `the plan beats today's setup ${wins}/${N}`)
+  assert.ok(gaps / N > 5, `the gap after ${LAPS} laps is worth showing (${(gaps / N).toFixed(1)} s)`)
+  const nothing = runRace(finaleEntries(customer({}, []), C.DEFAULT_BUDGET, IDS), "nothing", IDS)
+  const f = finaleSummary(nothing)
+  assert.equal(f.perLap, 0)
+  assert.match(f.text, /Nothing was approved, so both cars ran today's setup at 0\.00 s per lap/)
+})
+
+test("the customer's readout: boards, lessons and suggestions for a full, a partial and an empty plan", () => {
+  const cases = [
+    ["full", customer(GOOD, IDS)],
+    ["partial", customer({ ...GOOD, link: "single" }, ["dc", "oem"])],
+    ["rejected", customer({ ...GOOD, cooling: "air" }, ["network"], { reviews: { ...approvedAt(["network"]), dc: { status: "rejected", by: "SA", reason: "No N+1" } }, attempts: { network: 1, dc: 1 } })],
+    ["none", customer({}, [])],
+  ]
+  /* A rejected table has no plan any more (the dials reopened) and is still adjusting. */
+  delete cases[2][1].plans.dc
+  for (const d of C.decisionsFor("dc")) delete cases[2][1].choices[d.id]
+  for (const [label, t] of cases) {
+    const race = runRace(finaleEntries(t, C.DEFAULT_BUDGET, IDS), `readout-${label}`, IDS)
     const r = readoutFor(t, race, IDS, C.DEFAULT_BUDGET)
-    assert.ok(r.result.position >= 1 && r.result.position <= 10, "finishing position")
-    assert.ok(r.result.championship >= 1 && r.result.championship <= 10, "championship position")
-    assert.ok(Number.isFinite(r.result.points), "points")
+    assert.equal(r.team.name, C.CUSTOMER_TEAM.name)
+    assert.ok(r.result.position >= 1 && r.result.position <= 2, `${label}: finishing position`)
+    assert.equal(r.result.of, 2)
+    assert.equal(r.result.championship, undefined, "no championship: one customer")
+    assert.equal(r.result.laps, LAPS)
+    assert.equal(typeof r.result.gap, "number")
+    assert.equal(r.result.ahead, r.result.gap > 0)
+    assert.equal(r.result.approved, Object.values(t.reviews).filter((x) => x.status === "approved").length)
+    assert.equal(r.result.tables, 4)
     assert.equal(r.boards.length, 4, "a board thumbnail per table")
     for (const b of r.boards) {
       assert.ok(["approved", "today"].includes(b.raced))
       assert.equal(b.raced === "approved", t.reviews[b.station]?.status === "approved")
       assert.ok(b.fit >= 0 && b.fit <= 100 && b.targets.length >= 2)
+      assert.ok(b.story.length > 10, "each table tells what happened")
     }
-    assert.ok(r.wentWell.length >= 2 && r.wentWell.length <= 3, `${t.name}: 2–3 positives (${r.wentWell.length})`)
-    assert.ok(r.couldDo.length >= 2 && r.couldDo.length <= 3, `${t.name}: 2–3 suggestions (${r.couldDo.length})`)
+    assert.ok(r.wentWell.length >= 2 && r.wentWell.length <= 3, `${label}: 2–3 positives (${r.wentWell.length})`)
+    assert.ok(r.couldDo.length >= 2 && r.couldDo.length <= 3, `${label}: 2–3 suggestions (${r.couldDo.length})`)
     for (const tip of r.couldDo.filter((x) => x.better)) {
       assert.match(tip.text, / instead of .+\(\d\.\d\d → \d\.\d\d s per lap, FIT \d+ → \d+\)/, "each suggestion names the dial, the better setting and the seconds and FIT gain")
       assert.match(tip.text, /How a provider helps: /)
     }
+    assert.match(r.summary, /^You found \d\.\d\d s per lap at \d approved tables?; after 56 laps the 2027 plan finished (\d+\.\d s (ahead of|behind)|level with) today's Hinwil setup \(P[12] of 2\)\.$/)
+    assert.equal(r.finale, finaleSummary(race).text)
+    assert.match(r.path2028, /^2028 path: /)
+    assert.equal(r.result.seconds, race.results.find((x) => x.id === "t1").found, "the readout quotes the seconds the race used")
   }
-  const all = readoutFor(teams[4], race, IDS)
-  assert.ok(all.wentWell.some((line) => /in the zone \(\d\.\d\d s per lap, FIT \d+\)/.test(line)), "approved in-zone tables are lessons achieved")
-  const none = readoutFor(teams[0], race, IDS)
+  const full = readoutFor(cases[0][1], runRace(finaleEntries(cases[0][1], C.DEFAULT_BUDGET, IDS), "readout-full", IDS), IDS)
+  assert.ok(full.wentWell.some((line) => /in the zone \(\d\.\d\d s per lap, FIT \d+\)/.test(line)), "approved in-zone tables are lessons achieved")
+  const none = readoutFor(cases[3][1], runRace(finaleEntries(cases[3][1], C.DEFAULT_BUDGET, IDS), "readout-none", IDS), IDS)
   assert.ok(none.boards.every((b) => b.raced === "today"))
-  assert.ok(none.couldDo.some((tip) => /customer's existing setup/.test(tip.text)), "an unapproved team is told it raced on the existing setup")
+  assert.ok(none.couldDo.some((tip) => /customer's existing setup/.test(tip.text)), "an unapproved table is told it raced on the existing setup")
   assert.equal(none.result.seconds, 0, "nothing approved: 0.00 s found")
-  assert.match(none.summary, /^You found 0\.00 s per lap; the race said P\d+ of 10/)
-  const best = readoutFor(teams[0 + 5], race, IDS)
-  assert.equal(best.result.seconds, race.results.find((x) => x.id === "t6").found, "the readout quotes the seconds the race used")
+  assert.match(none.summary, /^You found 0\.00 s per lap at 0 approved tables;/)
+  const rejected = readoutFor(cases[2][1], runRace(finaleEntries(cases[2][1], C.DEFAULT_BUDGET, IDS), "readout-rejected", IDS), IDS)
+  assert.match(rejected.boards.find((b) => b.station === "dc").story, /Rejected on the first attempt \("No N\+1"\)/)
 })
 
 test("the race runs on seconds found: pace is the base lap minus the team total", () => {

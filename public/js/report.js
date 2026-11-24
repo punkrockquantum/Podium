@@ -1,8 +1,8 @@
 /**
- * The per-team readout after the race: the result, the lessons the team achieved, what to do
- * differently (naming the dial, the better setting, why, and the provider's role), the race
- * incidents and a thumbnail of every board the race used. Pure: the race screen, the host and the
- * tests share it.
+ * The customer's readout after the race: the result of the 2027 plan against today's Hinwil setup,
+ * the lessons achieved, what to do differently (naming the dial, the better setting, why, and the
+ * provider's role), the race incidents and a thumbnail of every board the race used. Pure: the
+ * race screen, the host and the tests share it.
  */
 import * as C from "./catalog.js"
 import { boardFor, choicesOf, pickedOption } from "./model.js"
@@ -39,13 +39,45 @@ export function path2028For(team, stationIds = C.STATIONS.map((s) => s.id)) {
   return `2028 path: ${text.charAt(0).toUpperCase()}${text.slice(1)}.`
 }
 
-/** The top three of the championship, in podium order: 2nd (left), 1st (centre), 3rd (right). */
-export function podium(race) {
-  const top = (race?.standings || []).slice(0, 3).map((s, i) => ({ ...s, place: i + 1 }))
-  return [top[1], top[0], top[2]].filter(Boolean)
+const isApproved = (team, id) => team?.reviews?.[id]?.status === "approved"
+
+/** The two cars of the finale: the customer's 2027 plan and today's Hinwil setup (the ghost of the current site). */
+export function finaleCars(race) {
+  const results = race?.results || []
+  const today = results.find((r) => r.id === C.FINALE_ENTRANTS.today.id) || null
+  const plan = results.find((r) => r !== today) || null
+  return { plan, today }
 }
 
-const isApproved = (team, id) => team?.reviews?.[id]?.status === "approved"
+/** "12.3 s" with one decimal, never "-0.0 s". */
+const gapText = (s) => `${Math.abs(s) < 0.05 ? "0.0" : Math.abs(s).toFixed(1)} s`
+
+/**
+ * The finale in one line: after 56 laps, how far the 2027 plan finished ahead of (or behind)
+ * today's Hinwil setup, in seconds and in places, and where the gap came from: the seconds per lap
+ * found at the approved tables, the pit stop and the incidents.
+ */
+export function finaleSummary(race) {
+  const { plan, today } = finaleCars(race)
+  if (!plan || !today) return { plan, today, gap: 0, ahead: false, perLap: 0, laps: race?.laps || C.FINALE.laps, text: "The race has not run." }
+  const gap = Math.round((today.total - plan.total) * 10) / 10
+  const ahead = gap > 0
+  const perLap = Number.isFinite(plan.found) ? plan.found : 0
+  const laps = race.laps || C.FINALE.laps
+  const places = `P${plan.position} to P${today.position}`
+  const tables = Object.keys(plan.fit || {}).length || C.STATIONS.length
+  const approvedCount = Math.max(0, tables - (plan.missed?.length || 0) - (plan.notApproved?.length || 0))
+  const incidents = (plan.incidents || []).filter((i) => i.loss > 0).length
+  let text
+  if (perLap <= 0) {
+    text = `After ${laps} laps ${ahead ? `the ${C.FINALE_ENTRANTS.plan.short} finished ${gapText(gap)} ahead of today's Hinwil setup` : `today's Hinwil setup finished ${gapText(gap)} ahead of the ${C.FINALE_ENTRANTS.plan.short}`} (${places}). Nothing was approved, so both cars ran today's setup at 0.00 s per lap: the gap is the pit stop and the incidents, not the design.`
+  } else if (ahead) {
+    text = `After ${laps} laps the ${C.FINALE_ENTRANTS.plan.short} finished ${gapText(gap)} ahead of today's Hinwil setup (${places}): ${perLap.toFixed(2)} s per lap found at ${approvedCount} approved table${approvedCount === 1 ? "" : "s"}, over ${laps} laps, less the pit stop${incidents ? ` and ${incidents} incident${incidents === 1 ? "" : "s"}` : ""}.`
+  } else {
+    text = `After ${laps} laps today's Hinwil setup finished ${gapText(gap)} ahead of the ${C.FINALE_ENTRANTS.plan.short} (${places}), despite ${perLap.toFixed(2)} s per lap found at ${approvedCount} approved table${approvedCount === 1 ? "" : "s"}: the pit stop and ${incidents ? `${incidents} incident${incidents === 1 ? "" : "s"}` : "the incidents"} cost more than the design gained.`
+  }
+  return { plan, today, gap, ahead, perLap, laps, places, text }
+}
 
 /**
  * What happened at one table, for the readout: how many designs the team completed (attempts) and
@@ -108,7 +140,7 @@ export function suggestionsFor(team, stationIds = C.STATIONS.map((s) => s.id), b
   }
   tips.sort((a, b) => b.gain - a.gain)
   const out = tips.slice(0, 3)
-  if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Call the SA earlier: a rejection costs time, and the SA may be busy with another team." })
+  if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Call the SA earlier: a rejection costs time, and the SA may be busy at another table." })
   if (out.length < 2) out.push({ station: null, decision: null, better: null, gain: 0, text: "Every board was in the zone: next time, look for the setting that leaves the most budget spare." })
   return out
 }
@@ -135,11 +167,11 @@ export function positivesFor(team, row, race, stationIds = C.STATIONS.map((s) =>
   const approved = stationIds.filter((id) => isApproved(team, id))
   const recovered = approved.filter((id) => (Number(team?.attempts?.[id]) || 0) > 1)
   if (out.length < 3 && recovered.length) out.push(`${stationOf(recovered[0]).name}: rejected, adjusted and approved on the ${attemptWord(team.attempts[recovered[0]])}.`)
-  if (out.length < 2 && approved.length) out.push(`${approved.length} of ${stationIds.length} boards approved by their Solutions Architects.`)
+  if (out.length < 2 && approved.length) out.push(`${approved.length} of ${stationIds.length} boards approved by the Solutions Architects.`)
   if (out.length < 3 && row?.underSC) out.push("Your pit wall reacted to the Safety Car and pitted cheaply.")
   if (out.length < 3 && row && !row.caught.length) out.push("A clean audit: no FIA, finance or operations penalty points.")
-  if (out.length < 2 && row?.position && row.position < row.grid) out.push(`Gained ${row.grid - row.position} place${row.grid - row.position === 1 ? "" : "s"} from the grid.`)
-  if (out.length < 2 && row) out.push(`Finished the race in P${row.position} of ${race.results.length}.`)
+  const finale = finaleSummary(race)
+  if (out.length < 2 && finale.plan && finale.ahead) out.push(`The ${C.FINALE_ENTRANTS.plan.short} beat today's Hinwil setup by ${finale.gap.toFixed(1)} s over ${finale.laps} laps.`)
   if (out.length < 2) out.push("You took part in every phase of the session.")
   return out.slice(0, 3)
 }
@@ -160,17 +192,24 @@ export function racedBoards(team, stationIds = C.STATIONS.map((s) => s.id), budg
   })
 }
 
-/** The full readout for one team. */
+/**
+ * The customer's readout: what each table approved and found, how the 2027 plan fared against
+ * today's Hinwil setup over 56 laps, the lessons, and what to do differently.
+ */
 export function readoutFor(team, race, stationIds = C.STATIONS.map((s) => s.id), budget = C.DEFAULT_BUDGET) {
   const row = race.results.find((r) => r.id === team.id)
-  const champ = race.standings.findIndex((s) => s.id === team.id) + 1
+  const finale = finaleSummary(race)
   const boards = racedBoards(team, stationIds, budget)
   const seconds = Number.isFinite(row?.found) ? row.found : Math.round(boards.reduce((sum, b) => sum + b.seconds, 0) * 100) / 100
-  const said = row ? `P${row.position} of ${race.results.length}${row.position === 1 ? ", a win" : ""} and ${row.score} points` : "no result"
+  const approved = boards.filter((b) => b.raced === "approved").length
+  const said = row && finale.today
+    ? `after ${finale.laps} laps the ${C.FINALE_ENTRANTS.plan.short} finished ${finale.ahead ? `${Math.abs(finale.gap).toFixed(1)} s ahead of` : finale.gap === 0 ? "level with" : `${Math.abs(finale.gap).toFixed(1)} s behind`} today's Hinwil setup (P${row.position} of ${race.results.length})`
+    : row ? `the race said P${row.position} of ${race.results.length}` : "there was no result"
   return {
     team: { id: team.id, name: team.name, color: team.color },
-    summary: `You found ${seconds.toFixed(2)} s per lap; the race said ${said}.`,
-    result: { seconds, position: row?.position ?? null, of: race.results.length, championship: champ || null, points: row?.score ?? 0, racePoints: row?.racePoints ?? 0, tablePoints: row?.pitch ?? 0, penaltyPoints: row?.penaltyPoints ?? 0 },
+    summary: `You found ${seconds.toFixed(2)} s per lap at ${approved} approved table${approved === 1 ? "" : "s"}; ${said}.`,
+    finale: finale.text,
+    result: { seconds, position: row?.position ?? null, of: race.results.length, gap: finale.gap, ahead: finale.ahead, laps: finale.laps, approved, tables: boards.length, points: row?.score ?? 0, racePoints: row?.racePoints ?? 0, tablePoints: row?.pitch ?? 0, penaltyPoints: row?.penaltyPoints ?? 0 },
     boards,
     wentWell: positivesFor(team, row, race, stationIds, budget),
     couldDo: suggestionsFor(team, stationIds, budget),
