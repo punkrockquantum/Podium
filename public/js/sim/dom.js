@@ -23,6 +23,9 @@ function append(node, children) {
   }
 }
 
+/** Replace a node's children; null / undefined / false children are skipped (unlike the native append). */
+export const fill = (node, ...children) => { clear(node); append(node, children); return node }
+
 export function el(tag, attrs, ...children) {
   const node = document.createElement(tag)
   apply(node, attrs, false)

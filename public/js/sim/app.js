@@ -6,8 +6,13 @@ import { normalize } from "./model.js"
 import { PROVIDER } from "./assumptions.js"
 import { evaluatePlan, normalizePlan, presetPlan, PLAN_PRESETS, PLAN_PRESET_ORDER, SEASON_IDS, SHARED_IDS, matchingPreset, setControlClamped, fitPlanToEnvelope, controlDisplay, detach as planDetach, reattach as planReattach, setTimeline as planSetTimeline, renamePlan, NAME_MAX } from "./plan.js"
 import { CONTROLS } from "./model.js"
-import { el, clear, installErrorLogging } from "./dom.js"
-import { badge } from "./widgets.js"
+import { el, clear, installErrorLogging, fill } from "./dom.js"
+import { badge, plainToggle, setExplainHandler, setPlainEnglish } from "./widgets.js"
+import { createExplainPanel } from "./explainPanel.js"
+import { explainContext, EXPLAIN, explainText, labels as explainLabels } from "./explain.js"
+import { attribute } from "./attribution.js"
+import { seasonInputs, seasonAttributionFn } from "./plan.js"
+import { fmt } from "./dom.js"
 import { createRouter, ROUTES, routeMeta } from "./router.js"
 import * as store from "./planstore.js"
 import { decodeHash as decodeLegacyHash } from "./store.js"
@@ -24,10 +29,11 @@ import { solutionBrief } from "./sa.js"
 
 export function mountSim(root) {
   installErrorLogging()
-  const state = { plan: null, result: null, view: "team", route: "overview", slots: store.loadSlots(), drawerOpen: false }
+  const state = { plan: null, result: null, view: "team", route: "overview", slots: store.loadSlots(), drawerOpen: false, plainEnglish: true, plainSet: store.recallPlain() !== null, attribution: null }
   const views = {}
   let active = null
   let frame = 0
+  const planKey = (p) => JSON.stringify({ s: p.shared, y: p.seasons, t: p.timeline })
 
   // ------------------------------------------------------------------ initial plan and view
   const search = new URLSearchParams(location.search)
@@ -80,6 +86,7 @@ export function mountSim(root) {
       el("span", { class: "presets-label" }, "Presets"),
       ...PLAN_PRESET_ORDER.map((id) => el("button", { type: "button", class: "chip", id: `preset-${id}`, dataset: { preset: id }, "aria-pressed": "false", title: PLAN_PRESETS[id].summary, onclick: () => applyPreset(id) }, PLAN_PRESETS[id].label))),
     el("div", { class: "actions" },
+      plainToggle(true, (on) => setPlain(on, { remember: true })),
       el("button", { type: "button", class: "btn", id: "save-open", onclick: () => { state.drawerOpen = !state.drawerOpen; renderDrawer() } }, "Save / Load"),
       el("a", { class: "btn", id: "compare-link", href: "#/compare" }, "Compare"),
       el("button", { type: "button", class: "btn", id: "export-json", onclick: exportJson }, "Export"),
@@ -88,11 +95,87 @@ export function mountSim(root) {
       el("a", { class: "btn btn-link", href: "/case.html", id: "case-link" }, "Business case")))
   const drawer = el("section", { class: "drawer", id: "drawer", hidden: true, "aria-label": "Saved plans" })
   const main = el("main", { class: "plan-main", id: "main" })
+  const appendix = el("section", { class: "print-only explained-appendix", id: "explained-appendix", "aria-label": "Explained" })
   const footer = el("footer", { class: "sim-footer" },
     el("span", {}, `${PROVIDER.campus}. OEM dimension: ${PROVIDER.oem}.`),
     el("a", { href: "/case.html" }, "Business case"),
     el("span", {}, "Model notes: ", el("code", {}, "docs/audi-f1-model.md"), " · fact pack: ", el("code", {}, "docs/audi-f1-sources.md")))
-  clear(root).append(header, presetBar, drawer, main, footer)
+  fill(root, header, presetBar, drawer, main, appendix, footer)
+
+  // ------------------------------------------------------------------ explainers: the shared panel, Plain English, attribution
+  const panel = createExplainPanel({ getContext: explainCtx, onNavigate: (route, src) => { panel.close(); router.go(route); if (src) setTimeout(() => document.querySelector(`#sources-table [data-source="${CSS.escape(src)}"]`)?.scrollIntoView({ block: "center" }), 200) } })
+  setExplainHandler((id, btn) => panel.open(id, btn))
+  const attributionCache = new Map()
+  let attributionTimer = 0
+
+  function setPlain(on, { remember = false } = {}) {
+    state.plainEnglish = Boolean(on)
+    if (remember) { state.plainSet = true; store.rememberPlain(state.plainEnglish) }
+    setPlainEnglish(state.plainEnglish)
+    document.body.dataset.plain = state.plainEnglish ? "on" : "off"
+    presetBar.querySelector("#plain-english")?.sync(state.plainEnglish)
+    for (const v of Object.values(views)) v.invalidate?.()
+    render()
+  }
+
+  /** Default on for the Team view, off for the Solutions Architect view, unless the user has chosen (persisted) or the link says (`pe=`). */
+  function defaultPlain() {
+    const stored = store.recallPlain()
+    if (stored !== null) return stored
+    return state.view !== "sa"
+  }
+
+  /** Per-season explainer contexts for the panel: the season's own result, Today, the plan-level attribution and plan facts. */
+  function explainCtx() {
+    const r = state.result
+    const seasons = {}
+    for (const y of [2027, 2028]) {
+      const s = r.seasons[y]
+      seasons[y] = explainContext({ result: { scenario: s.sim, today: s.today, perf: s.perf }, attribution: state.attribution?.[y] || null, both: { 2027: { perf: r.seasons[2027].perf }, 2028: { perf: r.seasons[2028].perf } }, plan: r, fmt, plainEnglish: state.plainEnglish })
+    }
+    return { plainEnglish: state.plainEnglish, seasons, pruned: (id, year) => { const a = state.attribution?.[year]; if (!a || !id.startsWith("driver.")) return false; const d = a.drivers.find((row) => row.id === id.slice(7)); return Boolean(d && d.pruned) } }
+  }
+
+  /** The attribution ("where the seconds come from") runs after the main render so the sliders stay responsive. */
+  function scheduleAttribution() {
+    clearTimeout(attributionTimer)
+    attributionTimer = setTimeout(() => {
+      const key = planKey(state.plan)
+      let a = attributionCache.get(key)
+      if (!a) {
+        a = {}
+        for (const y of [2027, 2028]) a[y] = attribute(seasonInputs(state.plan, y), { evaluateFn: seasonAttributionFn(state.result, y), cache: false })
+        if (attributionCache.size > 48) attributionCache.clear()
+        attributionCache.set(key, a)
+      }
+      state.attribution = a
+      active?.updateAttribution?.(state)
+      panel.refresh()
+      renderAppendix()
+    }, 0)
+  }
+
+  /** The printable "Explained" appendix: every active driver bar and every flag shown, title + one-liner + the plan's own line. */
+  function renderAppendix() {
+    const r = state.result
+    const ctx = explainCtx()
+    const blocks = []
+    for (const y of [2027, 2028]) {
+      const a = state.attribution?.[y]
+      const c = ctx.seasons[y]
+      const items = []
+      for (const d of a ? a.drivers.filter((row) => !row.pruned) : []) {
+        const e = EXPLAIN[`driver.${d.id}`]
+        if (e) items.push(el("li", {}, el("b", {}, e.title), ` — ${e.one} `, el("span", { class: "muted" }, explainText(`driver.${d.id}`, c))))
+      }
+      for (const f of r.seasons[y].sim.flags || []) {
+        const e = EXPLAIN[`flag.${f.id}`]
+        if (e) items.push(el("li", {}, el("b", {}, e.title), ` — ${e.one} `, el("span", { class: "muted" }, explainText(`flag.${f.id}`, c))))
+      }
+      blocks.push(el("div", { class: "explained-season" }, el("h3", {}, `${y}`), items.length ? el("ul", {}, ...items) : el("p", { class: "muted" }, "Nothing changed from Today.")))
+    }
+    fill(appendix, el("h2", {}, "Explained"), el("p", { class: "muted small" }, "Where the seconds come from and every flag in this plan, in plain words. Shares are fair shares averaged over every order the changes could be made in."), ...blocks)
+  }
 
   // ------------------------------------------------------------------ actions shared with the views
   const ctx = {
@@ -153,16 +236,22 @@ export function mountSim(root) {
   // The Solutions Architect view is the `sa` route; the view switch is a shortcut to and from it.
   const router = createRouter(({ route, params }) => {
     state.route = params.get("view") === "sa" ? "sa" : route
+    const viewBefore = state.view
     state.view = state.route === "sa" ? "sa" : "team"
     store.rememberView(state.view)
-    if (params.has("p") || params.has("view") || state.route !== route) router.replace(state.route)
+    if (params.has("pe")) setPlain(params.get("pe") !== "0")
+    else if (!state.plainSet && (viewBefore !== state.view || !pePrimed)) setPlain(defaultPlain())
+    pePrimed = true
+    if (params.has("p") || params.has("view") || params.has("pe") || state.route !== route) router.replace(state.route)
+    if (panel.isOpen && viewBefore !== state.view) panel.close()
     showRoute()
   })
+  let pePrimed = false
 
   function showRoute() {
     const view = viewFor(state.route)
     if (active !== view) {
-      clear(main).append(view.node)
+      fill(main, view.node)
       active = view
       window.scrollTo(0, 0)
     }
@@ -200,6 +289,7 @@ export function mountSim(root) {
   function shareUrl() {
     const params = new URLSearchParams({ p: store.encodeParam(state.plan) })
     if (state.view === "sa") params.set("view", "sa")
+    params.set("pe", state.plainEnglish ? "1" : "0")
     return `${location.origin}${location.pathname}#/${state.route}?${params.toString()}`
   }
   async function shareLink() {
@@ -207,8 +297,6 @@ export function mountSim(root) {
     try { await navigator.clipboard.writeText(url); toast("Link copied") } catch { toast("Link is in the address bar") }
     history.replaceState(null, "", url.slice(location.origin.length))
   }
-
-  const planKey = (p) => JSON.stringify({ s: p.shared, y: p.seasons, t: p.timeline })
 
   function toast(text) {
     const t = el("div", { class: "toast", role: "status" }, text)
@@ -219,10 +307,12 @@ export function mountSim(root) {
   // ------------------------------------------------------------------ rendering
   function render() {
     state.result = evaluatePlan(state.plan)
+    state.attribution = attributionCache.get(planKey(state.plan)) || null
     store.rememberPlan(state.plan)
     syncBar()
     cancelAnimationFrame(frame)
-    frame = requestAnimationFrame(() => { active?.update(state); renderDrawer() })
+    frame = requestAnimationFrame(() => { active?.update(state); renderDrawer(); panel.refresh() })
+    scheduleAttribution()
   }
 
   function syncBar() {
@@ -248,7 +338,7 @@ export function mountSim(root) {
     if (!state.drawerOpen) return
     const list = store.listPlans()
     const saveName = el("input", { type: "text", class: "text", id: "save-name", placeholder: "Plan name", "aria-label": "Plan name", value: state.plan.meta.name })
-    clear(drawer).append(
+    fill(drawer, 
       el("div", { class: "drawer-row" },
         saveName,
         el("button", { type: "button", class: "btn", id: "save-plan", onclick: () => { const name = saveName.value.trim() || `Plan ${new Date().toLocaleString()}`; store.savePlan(name, renamePlan(state.plan, name)); state.plan = renamePlan(state.plan, name); toast(`Saved "${name}"`); render() } }, "Save current plan"),

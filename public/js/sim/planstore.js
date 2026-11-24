@@ -6,6 +6,7 @@ export const KEYS = Object.freeze({
   compare: "podium.plan.compare.v1",
   notes: "podium.plan.sa.checklist.v1",
   view: "podium.plan.view.v1",
+  plain: "podium.sim.plainEnglish",
 })
 
 const storage = () => {
@@ -47,6 +48,8 @@ export const saveSlots = (slots) => write(KEYS.compare, slots)
 export const loadNotes = () => { const n = read(KEYS.notes, {}); return n && typeof n === "object" ? n : {} }
 export const saveNotes = (notes) => write(KEYS.notes, notes)
 
+export const rememberPlain = (on) => write(KEYS.plain, on ? 1 : 0)
+export const recallPlain = () => { const v = read(KEYS.plain, null); return v === null ? null : Boolean(Number(v)) }
 export const rememberView = (view) => write(KEYS.view, view)
 export const recallView = () => read(KEYS.view, null)
 

@@ -1,5 +1,74 @@
 /** Controls, gauges, badges and bars for the simulator. All functions return DOM nodes. */
 import { el, svg, fmt } from "./dom.js"
+import { EXPLAIN, labels as explainLabels } from "./explain.js"
+import { DRIVER_ORDER, waterfallSteps } from "./attribution.js"
+
+// ---------------------------------------------------------------------------------------------
+// The `?` affordance: one shared handler (the app wires the explainer panel), one button per explainable thing
+// ---------------------------------------------------------------------------------------------
+
+let explainHandler = null
+let plainMode = true
+/** The app registers `(id, buttonEl) => panel.open(id, buttonEl)` once. */
+export function setExplainHandler(fn) { explainHandler = fn }
+/** Plain English on: labels show the explainer titles (plain words) with the model term as a tooltip; off: the model's own labels. */
+export function setPlainEnglish(on) { plainMode = Boolean(on) }
+export const isPlainEnglish = () => plainMode
+
+/** Labels that are already plain, or that the team asked to keep verbatim (the 500 kW rule, the FIA position input). */
+const KEEP_LABEL = new Set(["kW at Digital Realty of 500", "Constructors' position used for the sliding scale", "Seconds per lap vs Today", "Availability", "Season", "Cooling", "Heat reuse", "Model confidence", "Electricity price"])
+
+/** The label to show for a tile or control: the plain title when Plain English is on and an entry exists. */
+function shownLabel(label, explainId) {
+  if (!plainMode || typeof label !== "string" || !explainId || KEEP_LABEL.has(label.replace(/ · .*$/, ""))) return label
+  const e = EXPLAIN[explainId]
+  if (!e || !e.title) return label
+  const suffix = / · (.+)$/.exec(label)
+  // keep a dynamic suffix such as "· allowance 6.3" that the view appended to the model term
+  return suffix && !e.title.includes(" · ") && !TILE_BY_LABEL[label] ? `${e.title} · ${suffix[1]}` : e.title
+}
+
+/** A `?` button for an EXPLAIN entry; null when the entry does not exist (the coverage test guards the ids that must). */
+export function explainButton(id, titleText) {
+  const entry = EXPLAIN[id]
+  if (!entry) return null
+  return el("button", {
+    type: "button", class: "explain-btn", "aria-label": `Explain: ${titleText || entry.title}`, "aria-haspopup": "dialog", "aria-expanded": "false",
+    dataset: { explain: id }, title: entry.one,
+    onclick: (e) => { e.stopPropagation(); if (explainHandler) explainHandler(id, e.currentTarget) },
+  }, "?")
+}
+
+/** Tile ids by the label the views pass, so stats, gauges and bars get their `?` without touching every call site. */
+const TILE_BY_LABEL = {
+  "Seconds per lap vs Today": "headline-sec", "Seconds a lap found": "headline-sec", "From more useful computing": "stat-aero", "From money kept inside the cap": "stat-reinvest",
+  "Turnaround per run": "stat-turnaround", "Design iterations": "stat-runs", "Availability": "stat-availability", "Work per metered AUh": "stat-work",
+  "PUE": "stat-pue", "PUE · CO₂": "stat-pue", "Run-rate": "stat-yearly", "Inside the cap": "stat-cap", "Inside the cost cap": "stat-cap", "Cap per effective MAUh": "stat-tco",
+  "CO₂ market-based": "stat-co2", "Heat reused": "stat-heat", "Data-to-decision": "stat-decision", "Race weekends at risk": "stat-weekends", "Link availability": "stat-link",
+  "Bandwidth headroom": "stat-headroom", "Cost-cap charge": "gauge-cap", "Allowance turned into work": "gauge-eff", "Effective MAUh": "gauge-eff", "Effective MAUh (season)": "gauge-eff",
+  "Cash 2027 + 2028": "stat-cash-total", "3-year TCO (2028 estate)": "stat-tco3", "Lap time, both seasons": "stat-sec-total", "kW at Digital Realty of 500": "envelope",
+  "Go-live": "stat-golive", "Allowance lost at the switch": "stat-loss", "Critical path": "stat-critical", "2028 step-up": "stat-stepup", "Where the seconds come from": "waterfall",
+  "Interconnect": "eff-bars", "Storage I/O": "eff-bars", "Cooling": "eff-bars", "Schedule": "eff-bars", "Power": "eff-bars", "Cost lines": "money-lines", "Cost lines and one-offs": "money-lines",
+}
+export function tileIdFor(label) {
+  if (typeof label !== "string") return null
+  if (TILE_BY_LABEL[label]) return TILE_BY_LABEL[label]
+  if (/^MAUh used/.test(label)) return "gauge-mauh"
+  if (/IT load vs/.test(label)) return "bar-power"
+  if (/^kW at Digital Realty of/.test(label)) return "envelope"
+  if (/^Cash in 20/.test(label)) return "stat-cash-total"
+  return null
+}
+const tileExplainId = (label, explicit) => {
+  const id = explicit === false ? null : explicit || tileIdFor(label)
+  return id ? (id.includes(".") ? id : `tile.${id}`) : null
+}
+/** Label node for a tile: plain title (when on) with the model term as a tooltip, plus the `?`. */
+const tileLabel = (label, explicit) => {
+  const id = tileExplainId(label, explicit)
+  const shown = shownLabel(label, id)
+  return [shown !== label ? el("span", { class: "label-text", title: label }, shown) : label, id ? explainButton(id, typeof label === "string" ? label : undefined) : null]
+}
 
 // ---------------------------------------------------------------------------------------------
 // Controls
@@ -107,8 +176,16 @@ export function planControl(control, view, handlers) {
   const row = el("div", { class: `control plan-control control-${control.type} ${view.shared ? "is-shared" : ""}`, dataset: { control: control.id, detached: view.detached ? "true" : "false" } })
   const out27 = el("output", { class: "control-readout", id: `${base}-out-2027`, dataset: { season: "2027" } }, readout(control, view.v27))
   const out28 = el("output", { class: "control-readout", id: `${base}-out-2028`, dataset: { season: "2028" } }, readout(control, view.v28))
+  const labelEl = el("span", { class: "control-label", id: `${base}-label` })
+  const syncLabel = () => {
+    const shown = shownLabel(control.label, `control.${control.id}`)
+    labelEl.textContent = shown
+    if (shown !== control.label) labelEl.title = control.label; else labelEl.removeAttribute("title")
+  }
+  syncLabel()
   const head = el("div", { class: "control-head" },
-    el("span", { class: "control-label", id: `${base}-label` }, control.label),
+    labelEl,
+    explainButton(`control.${control.id}`, control.label),
     control.fia ? el("span", { class: "fia-badge", title: "FIA rule this control touches" }, control.fia) : null,
     view.shared ? el("span", { class: "season-tag both" }, "Both seasons") : null,
     el("span", { class: "readouts" }, view.shared ? out27 : [el("span", { class: "readout-pair" }, el("span", { class: "season-tag" }, "27"), out27), el("span", { class: "readout-pair" }, el("span", { class: "season-tag" }, "28"), out28)]),
@@ -119,7 +196,7 @@ export function planControl(control, view, handlers) {
   const inherit = el("button", { type: "button", class: "inherit-pill", "aria-pressed": "true", title: "2028 follows 2027. Click to set a different value for 2028.", onclick: () => handlers.onDetach(control.id) }, el("span", { class: "inherit-check", "aria-hidden": "true" }, "✓"), "Same as 2027 · ", el("u", {}, "change for 2028"))
   const reattach = el("button", { type: "button", class: "btn btn-tiny reattach", title: "Back to the 2027 value", onclick: () => handlers.onReattach(control.id) }, "Same as 2027")
   const row28 = el("div", { class: "season-row s2028" }, el("span", { class: "season-label" }, "2028"), inherit, in28, reattach)
-  row.append(head, row27, view.shared ? null : row28, el("p", { class: "why", id: `${base}-why` }, control.why))
+  row.append(head, row27, ...(view.shared ? [] : [row28]), el("p", { class: "why", id: `${base}-why` }, control.why))
   const apply = (v) => {
     out27.textContent = readout(control, v.v27)
     out28.textContent = readout(control, v.v28)
@@ -135,6 +212,7 @@ export function planControl(control, view, handlers) {
     row27.classList.toggle("na", v.na27 === true)
     row28.classList.toggle("na", v.na28 === true)
     row.classList.toggle("at-ceiling", Boolean(v.atCeiling))
+    syncLabel()
   }
   apply(view)
   row.sync = apply
@@ -150,6 +228,7 @@ export function controlRow(control, value, onChange) {
   const row = el("div", { class: `control control-${control.type}`, dataset: { control: control.id } })
   const head = el("div", { class: "control-head" },
     el("label", { for: id, class: "control-label" }, control.label),
+    explainButton(`control.${control.id}`, control.label),
     control.fia ? el("span", { class: "fia-badge", title: "FIA rule this control touches" }, control.fia) : null,
     el("output", { class: "control-readout", id: `${id}-out`, for: id }, readout(control, value)),
   )
@@ -248,7 +327,7 @@ const arc = (cx, cy, r, from, to) => {
 /**
  * A 240° arc gauge. `value` in [0, max]; `marks` are optional {at, label} ticks; `tone` colours the arc.
  */
-export function gauge({ label, value, max = 1, display, sub, tone = "ok", marks = [], size = 128, id }) {
+export function gauge({ label, value, max = 1, display, sub, tone = "ok", marks = [], size = 128, id, explain }) {
   const frac = Math.max(0, Math.min(1, max > 0 ? value / max : 0))
   const start = -120
   const sweep = 240
@@ -269,14 +348,14 @@ export function gauge({ label, value, max = 1, display, sub, tone = "ok", marks 
     svg("text", { x: cx, y: cy + 4, class: `gauge-display ${String(display).length > 8 ? "long" : ""}`, "text-anchor": "middle" }, display),
     sub ? svg("text", { x: cx, y: cy + 20, class: "gauge-sub", "text-anchor": "middle" }, sub) : null,
   )
-  return el("div", { class: "gauge", id }, svgNode, el("div", { class: "gauge-label" }, label))
+  return el("div", { class: "gauge", id }, svgNode, el("div", { class: "gauge-label" }, ...tileLabel(label, explain)))
 }
 
 /** A horizontal capacity bar: `value` against `max`, with an optional `limit` marker. */
-export function bar({ label, value, max, display, limit, tone = "ok", id }) {
+export function bar({ label, value, max, display, limit, tone = "ok", id, explain }) {
   const frac = Math.max(0, Math.min(1, max > 0 ? value / max : 0))
-  return el("div", { class: `bar tone-${tone}`, id, role: "img", "aria-label": `${label}: ${display}` },
-    el("div", { class: "bar-head" }, el("span", {}, label), el("b", {}, display)),
+  return el("div", { class: `bar tone-${tone}`, id },
+    el("div", { class: "bar-head" }, el("span", {}, ...tileLabel(label, explain)), el("b", {}, display)),
     el("div", { class: "bar-track" },
       el("div", { class: "bar-fill", style: { width: `${(frac * 100).toFixed(1)}%` } }),
       limit !== undefined && max > 0 ? el("div", { class: "bar-limit", style: { left: `${(Math.min(1, limit / max) * 100).toFixed(1)}%` } }) : null),
@@ -286,18 +365,108 @@ export function bar({ label, value, max, display, limit, tone = "ok", id }) {
 export const badge = (level, text) => el("span", { class: `badge level-${level}` }, text)
 
 /** A compliance flag row. */
-export function flagRow(f) {
+export function flagRow(f, opts) {
+  const plainEnglish = opts && typeof opts === "object" && "plainEnglish" in opts ? opts.plainEnglish : plainMode
+  const explainId = EXPLAIN[`flag.${f.id}`] ? `flag.${f.id}` : null
   return el("li", { class: `flag level-${f.level}`, dataset: { flag: f.id, level: f.level } },
     el("span", { class: "flag-dot", "aria-hidden": "true" }),
     el("div", { class: "flag-body" },
-      el("div", { class: "flag-title" }, f.title, f.rule ? el("span", { class: "fia-badge" }, f.rule) : null),
-      f.detail ? el("div", { class: "flag-detail" }, f.detail) : null),
+      el("div", { class: "flag-title" }, f.title, f.rule ? el("span", { class: "fia-badge" }, f.rule) : null, explainId ? explainButton(explainId, f.title) : null),
+      f.detail ? el("div", { class: "flag-detail" }, f.detail) : null,
+      plainEnglish && explainId ? el("div", { class: "flag-plain muted small" }, EXPLAIN[explainId].one) : null),
   )
 }
 
 /** Key/value stat tile. */
 export const stat = (label, value, sub, extra = {}) => el("div", { class: `stat ${extra.class || ""}`, id: extra.id },
-  el("div", { class: "stat-label" }, label), el("div", { class: "stat-value" }, value), sub ? el("div", { class: "stat-sub" }, sub) : null)
+  el("div", { class: "stat-label" }, ...tileLabel(label, extra.explain ?? (extra.id && EXPLAIN[`tile.${extra.id}`] ? extra.id : undefined))), el("div", { class: "stat-value" }, value), sub ? el("div", { class: "stat-sub" }, sub) : null)
+
+// ---------------------------------------------------------------------------------------------
+// Plain English switch and the "Where the seconds come from" waterfall
+// ---------------------------------------------------------------------------------------------
+
+export function plainToggle(value, onChange) {
+  const btn = el("button", { type: "button", class: "plain-toggle", id: "plain-english", role: "switch", "aria-checked": String(Boolean(value)), title: "Plain words on every label, the model's own terms when off", onclick: () => onChange(btn.getAttribute("aria-checked") !== "true") },
+    el("span", { class: "plain-track", "aria-hidden": "true" }, el("span", { class: "plain-knob" })), el("span", { class: "plain-text" }, "Plain English"))
+  btn.sync = (v) => btn.setAttribute("aria-checked", String(Boolean(v)))
+  return btn
+}
+
+const MODES = { sec: { label: "seconds per lap", fmt: (v) => fmt.sec(v), unit: "s" }, savedCHF: { label: "CHF saved inside the cap a year", fmt: (v) => fmt.chfDelta(v), unit: "CHF" }, effMauhDelta: { label: "effective million unit-hours per period", fmt: (v) => fmt.signed(v, 2, " MAUh"), unit: "MAUh" } }
+
+/**
+ * Floating horizontal waterfall of the attribution for one season: one bar per active driver in the fixed order,
+ * a baseline step when the season carries months on another estate, then the total in the headline colour.
+ * `attribution` is attribute()'s result; `onBar(driverId, buttonEl)` opens the driver's explainer. A visually hidden
+ * table repeats the numbers for screen readers. `compact` draws bars only (strategy cards).
+ */
+export function waterfall({ attribution, season, plainEnglish = true, cpuArch = "today", mode = "sec", compact = false, id, onBar, status = "ok" }) {
+  const L = explainLabels(plainEnglish)
+  const M = MODES[mode] || MODES.sec
+  const steps = attribution ? waterfallSteps(attribution, DRIVER_ORDER, { outcome: mode }) : []
+  const rows = steps.filter((st) => st.kind === "driver" || (st.kind === "baseline" && Math.abs(st.value) > 1e-6))
+  const total = steps.find((st) => st.kind === "total") || { value: 0 }
+  const labelOf = (st) => (st.kind === "baseline" ? (season === 2028 ? "2027 estate until the step-up" : "Carried over") : L.barLabel(st.id, cpuArch))
+  const W = compact ? 320 : 640
+  const labelW = compact ? 118 : 236
+  const rowH = compact ? 16 : 26
+  const gap = compact ? 4 : 8
+  const top = compact ? 4 : 10
+  const H = top + (rows.length + 1) * (rowH + gap) + (compact ? 6 : 24)
+  const values = [0, ...steps.map((st) => st.from), ...steps.map((st) => st.to)]
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = Math.max(1e-6, max - min)
+  const x = (v) => labelW + 8 + ((v - min) / span) * (W - labelW - (compact ? 56 : 96))
+  const y = (i) => top + i * (rowH + gap)
+  const title = `${L.title("tile.waterfall")}, ${season}`
+  const aria = rows.length ? `${title}: ${rows.map((st) => `${labelOf(st)} ${M.fmt(st.value)}`).join("; ")}; total ${M.fmt(total.value)}` : `${title}: nothing changed yet`
+  const node = el("div", { class: `waterfall ${compact ? "compact" : ""} status-${status} ${total.value < -1e-9 ? "tone-neg" : "tone-pos"}`, id, dataset: { season: String(season), mode } })
+  if (!attribution) { node.append(el("p", { class: "muted small waterfall-empty" }, "Working out where the seconds come from…")); return node }
+  if (!rows.length) { node.append(el("p", { class: "muted small waterfall-empty" }, "Nothing changed yet — move a slider to see where the seconds come from.")); return node }
+  const chart = svg("svg", { class: "waterfall-svg", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": aria },
+    svg("line", { x1: x(0), x2: x(0), y1: top - 4, y2: y(rows.length) + rowH + 4, class: "wf-zero" }),
+    ...rows.map((st, i) => {
+      const x0 = x(Math.min(st.from, st.to))
+      const x1 = x(Math.max(st.from, st.to))
+      const label = labelOf(st)
+      const shown = !compact && label.length > 36 ? `${label.slice(0, 35).trimEnd()}…` : compact && label.length > 20 ? `${label.slice(0, 19).trimEnd()}…` : label
+      const positive = st.value >= 0
+      const next = rows[i + 1] || total
+      const g = svg("g", { class: `wf-row kind-${st.kind} ${positive ? "pos" : "neg"} ${st.id === "cpuArch" ? "arch" : ""}`, dataset: { driver: st.id } },
+        svg("title", {}, `${label}: ${M.fmt(st.value)}${st.share !== undefined ? ` (${fmt.pct(st.share)})` : ""}`),
+        svg("text", { x: labelW, y: y(i) + rowH * 0.68, "text-anchor": "end", class: "wf-label" }, shown),
+        svg("rect", { x: x0, y: y(i), width: Math.max(2, x1 - x0), height: rowH, rx: 3, class: "wf-bar" }),
+        Math.abs(st.value) < 1e-9 ? svg("circle", { cx: x(st.to), cy: y(i) + rowH / 2, r: 3, class: "wf-dot" }) : null,
+        svg("line", { x1: x(st.to), x2: x(st.to), y1: y(i) + rowH, y2: y(i + 1), class: "wf-connector" }),
+        compact ? null : svg("text", { x: (positive ? x1 : x0) + (positive ? 6 : -6), y: y(i) + rowH * 0.68, "text-anchor": positive ? "start" : "end", class: "wf-value" }, `${M.fmt(st.value)}${st.share !== undefined && mode === "sec" ? ` · ${fmt.pct(st.share)}` : ""}`),
+        next ? null : null)
+      if (st.kind === "driver") {
+        g.setAttribute("role", "button")
+        g.setAttribute("tabindex", "0")
+        g.setAttribute("aria-label", `Explain: ${label}, ${M.fmt(st.value)}`)
+        g.dataset.explain = `driver.${st.id}`
+        const act = (e) => { e.stopPropagation(); if (onBar) onBar(st.id, g); else if (explainHandler) explainHandler(`driver.${st.id}`, g) }
+        g.addEventListener("click", act)
+        g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(e) } })
+      }
+      return g
+    }),
+    svg("g", { class: "wf-row kind-total" },
+      svg("text", { x: labelW, y: y(rows.length) + rowH * 0.68, "text-anchor": "end", class: "wf-label total" }, compact ? "Total" : "This plan"),
+      svg("rect", { x: x(Math.min(0, total.value)), y: y(rows.length), width: Math.max(2, Math.abs(x(total.value) - x(0))), height: rowH, rx: 3, class: "wf-bar total" }),
+      compact ? null : svg("text", { x: x(Math.max(0, total.value)) + 6, y: y(rows.length) + rowH * 0.68, class: "wf-value total" }, M.fmt(total.value))))
+  const table = el("table", { class: "waterfall-table" },
+    el("caption", {}, aria),
+    el("thead", {}, el("tr", {}, el("th", {}, "Part of the plan"), el("th", {}, M.label))),
+    el("tbody", {}, ...rows.map((st) => el("tr", {}, el("td", {}, labelOf(st)), el("td", {}, M.fmt(st.value)))), el("tr", { class: "total" }, el("td", {}, "Total"), el("td", {}, M.fmt(total.value)))))
+  node.append(chart, el("div", { class: "visually-hidden" }, table))
+  if (!compact) {
+    const pruned = attribution.drivers.filter((d) => d.pruned)
+    if (pruned.length) node.append(el("p", { class: "muted small wf-pruned" }, `Unchanged from Today: ${pruned.map((d) => L.barLabel(d.id, cpuArch)).join(", ")}.`))
+  }
+  return node
+}
 
 /**
  * The envelope gauge: kW at Digital Realty against the 500 kW offer for one season. `env` is a model envelope;
