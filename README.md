@@ -2,13 +2,18 @@
 
 **The product for the demo is the planning tool at `http://localhost:8090/`.** It lets the Audi F1
 Team tune its plan, deployment and architecture for the **2027 and 2028 seasons** inside the FIA
-envelope — the Restricted CFD cluster (HPE via HPE GreenLake as the working assumption for the OEM),
-where it lives (the Hinwil room, Digital Realty's Zurich campus, or a hybrid), how it is paid for,
-when it moves and how the paddock is connected — and reads the impact live for both seasons: FIA
-compliance (MAUh, GPU legality from 1 January 2028, cost-cap charge), effective compute and
-turnaround, trackside latency, money and sustainability, the deployment timeline against the six
-Aerodynamic Testing Periods, and the headline **seconds per lap found over each season against
-Today's setup**. The same plan opens as a **Solutions Architect view** for Digital Realty.
+envelope and **Digital Realty's 500 kW offer** — the Restricted CFD cluster (processor family, clock,
+accelerators), where it lives (the Hinwil room, Digital Realty's Zurich campus, or a hybrid), how it
+is paid for, when it moves and how the paddock is connected — and reads the impact live for both
+seasons: FIA compliance (MAUh, GPU legality from 1 January 2028, cost-cap charge), effective compute
+and turnaround, trackside value (data-to-decision seconds, link availability, race weekends at
+risk), money and sustainability, the deployment timeline against the six Aerodynamic Testing
+Periods, and the headline **seconds per lap found over each season against Today's setup**, with a
+**"Where the seconds come from"** waterfall and a **?** on every figure. Three ready-made
+**strategies** and an **optimiser** ("Find the best use of 500 kW") sit on the Strategies tab, and
+every car can be raced in the arcade with **Race now**. The same plan opens as a **Solutions
+Architect view** for Digital Realty. HPE GreenLake and AMD EPYC are the team's publicly announced 2023
+CFD platform (A15); the 2027/2028 configuration in this tool is our proposal (A-f).
 
 ```bash
 sh start.command          # Mac: finds Node, starts the server on port 8090, opens the browser
@@ -21,13 +26,47 @@ npm start                 # http://localhost:8090/
   *Digital Realty Zurich from 2027* · *Digital Realty Zurich 2027 + HPE GreenLake GPU step-up 2028*.
   Save / Load (this browser), Compare (A/B), Export JSON, Print, Copy link (route + plan in the URL),
   and the business case one tap away (`/case.html`, with the plan's figures in the query string).
-- **Overview first, then the parts.** Routes: `#/overview` · `#/fia` · `#/compute` · `#/facility` ·
-  `#/connectivity` · `#/deployment` · `#/commercials` · `#/compare` · `#/sa` · `#/model`. The Overview has
-  the plan header with a Swiss schematic map, decision cards ("Tune the details →"), the outcome ribbon
-  for both seasons, the plan health strip, the compact timeline and the lap-time ladder. Each component
-  view has per-season controls (with the FIA article and a "why it matters" line), outputs for both
-  seasons and a *team decides · Digital Realty provides · HPE GreenLake provides* strip; Compute draws the
-  architecture, Facility the rack layout, Deployment the Gantt against ATPs, shutdowns, tests and races.
+- **The 500 kW rule.** Digital Realty's offer is 500 kW of critical IT at the rack (2N A+B) in 60 rack
+  positions, in both seasons — there is no expansion right. Every season shows *kW at Digital Realty of
+  500* as a gauge and a plan-health line (*Fits the 500 kW envelope: 399 / 500 kW (2027)*); controls
+  are clamped at the largest value that still fits (the readout says why), options that cannot fit are
+  marked *won't fit*, and *Fit to the envelope* trims the ML partition, GPUs, nodes and rack density
+  until a season fits. Cooling ceilings at the campus are hard limits: air 20, rear-door 70, direct
+  liquid 150 kW per rack. The declared clock never falls below the part's base clock (CCF floor).
+- **Overview first, then the parts.** Routes: `#/overview` · `#/strategies` · `#/fia` · `#/compute` ·
+  `#/facility` · `#/connectivity` · `#/deployment` · `#/commercials` · `#/compare` · `#/sa` · `#/model`.
+  The Overview has the plan header with a Swiss schematic map, the outcome ribbon for both seasons, the
+  envelope gauges, **Race now** for the 2027 and 2028 car, *Where the seconds come from* (one waterfall
+  per season), the plan health strip, decision cards ("Tune the details →") and the compact timeline.
+  Each component view has per-season controls (with the FIA article and a "why it matters" line),
+  outputs for both seasons and a *team decides · Digital Realty provides · HPE GreenLake provides*
+  strip; Compute draws the architecture, Facility the rack layout, Deployment the Gantt against ATPs,
+  shutdowns, tests and races.
+- **Strategies tab.** Three fixed plans — **A · Consolidate and de-risk**, **B · Density and the 2028
+  GPU step-up**, **C · Cost-cap-optimised hybrid cloud** — as cards with their decisions, envelope
+  gauges, outcome tiles, *How this strategy finds its advantage*, a timeline strip and risks, plus a
+  side-by-side table with Today and a chart. *Load this strategy* puts it in the planner (the plan bar
+  reads *Strategy B*; any edit turns it into *Custom (from B)* with *Reload the strategy* / *Keep my
+  edit*), *Compare* sends it to an A/B slot, *Race now* races it. Figures are **plan-level**: the
+  8 March 2027 target slips to the first boundary the lead times allow and 2027 is blended by the
+  go-live date, so they sit below the briefs' steady-state numbers (A +0.10 / +0.37 s, B +0.15 / +0.47 s,
+  C +0.14 / +0.46 s at P8 and 60 %).
+- **Optimiser — "Find the best use of 500 kW".** Pick an objective (*Fastest 2028 car*, *Most cost-cap
+  headroom*, *Balanced*), unlock what the search may touch (processor family, GPU model, support, fibre,
+  trackside, edge, cloud on-ramps, committed kW, ML partition and delivery are locked by default, each
+  with a reason), start from the current plan or a strategy, and run: coordinate descent over ≈ 1,500
+  plans in ≈ 0.2 s in a web worker (progress, *Stop* keeps the best so far; *Thorough* searches 24
+  starts), every candidate inside the 500 kW envelope and the allowance. The proposal is evaluated
+  plan-level, shown as tiles and a diff table against the start, and loaded with one tap.
+- **? and Plain English.** Every control label, tile, flag, waterfall bar, strategy and milestone has a
+  **?** that opens one explainer panel (side panel on wide screens, popover below): what it is, what it
+  means *in this plan* (live, per season), *More*, an analogy, source chips to the fact pack and a
+  glossary. The **Plain English** switch (default on for the Team view, off for the Solutions Architect
+  view; persisted; `pe=0/1` in share links) swaps the labels for plain words, with the model term as a
+  tooltip. Printing adds an *Explained* appendix with every active bar and flag.
+- **Race now.** The Overview and every strategy card open the arcade (`/arcade.html`) with that
+  season's car: seconds per lap vs Today, effective MAUh, allowance used, availability and
+  data-to-decision are passed to the race; the plan is saved first so the back button returns to it.
 - **Deployment timeline** Nov 2026 → end 2028: contract date, cutover target, parallel-running weeks and
   the 2028 step-up date, with modelled consequences (downtime inside an ATP wastes allowance; a cutover
   at an ATP boundary or in a shutdown loses nothing; late lead times flag and cost early-season
@@ -35,16 +74,29 @@ npm start                 # http://localhost:8090/
 - **Solutions Architect view** (`?view=sa` or the view switch): requirements per season, service mapping
   to public Digital Realty names, owner roles, a discovery checklist whose notes persist in this browser,
   a live risk register and a printable solution brief with a JSON hand-over.
-- **The model** is pure functions: `public/js/sim/model.js` (one season), `plan.js` (two seasons,
-  inheritance, presets, health), `timeline.js` (ATP calendar, lead times, losses), `sa.js` (requirements,
-  services, risks). The formulae are in [`docs/audi-f1-model.md`](docs/audi-f1-model.md) and every
-  constant is tagged VERIFIED (with its row in [`docs/audi-f1-sources.md`](docs/audi-f1-sources.md)) or
-  ASSUMPTION, on the page under *Model & sources*. HPE GreenLake is the sales lead's working assumption,
-  not a claim about the team's suppliers.
-- Files: `public/sim.html`, `public/js/sim/` (`model.js`, `plan.js`, `timeline.js`, `sa.js`,
-  `assumptions.js`, `app.js`, `router.js`, `planstore.js`, `visuals.js`, `diagrams.js`, `widgets.js`,
-  `scenes.js`, `dom.js`, `views/`), `public/css/sim.css`; tests `tests/sim.model.test.js`,
-  `tests/sim.plan.test.js` and `tests/sim.browser.test.js` (headless Chrome at 1440×900 and 1024×768).
+- **The model** is pure functions: `public/js/sim/model.js` (one season, the 500 kW envelope, the
+  processor families), `plan.js` (two seasons, inheritance, presets, health, plan-level attribution),
+  `timeline.js` (ATP calendar, lead times, losses), `strategies.js` (the three strategies as plans),
+  `optimiser.js` (the search; `optimiser.worker.js` + `optimiserRunner.js` run it off the main thread),
+  `attribution.js` (Shapley attribution over twelve drivers), `explain.js` (every explainer as data),
+  `sa.js` (requirements, services, risks). The formulae are in
+  [`docs/audi-f1-model.md`](docs/audi-f1-model.md) and every constant is tagged VERIFIED (with its row in
+  [`docs/audi-f1-sources.md`](docs/audi-f1-sources.md), sections A–K) or ASSUMPTION, on the page under
+  *Model & sources*. Championship positions and points are not outcomes of the tool; the FIA input
+  *Constructors' position used for the sliding scale* stays because it sets the allowance.
+- **Headline figures** (plan-level, P8, 60 % confidence): *Today* 0 s in both seasons (Hinwil room 94 kW
+  short in 2027, 479 kW short in 2028); *Digital Realty Zurich from 2027* +0.08 s / +0.37 s at 399 kW of
+  500, CHF 2.20 M inside the cap each season; *… + HPE GreenLake GPU step-up 2028* +0.08 s / +0.42 s at
+  399 / 405 kW, CHF 2.13 M / 2.56 M. Where the 2028 GreenLake seconds come from: power at the campus
+  +0.32 s, graphics processors +0.07 s, data +0.05 s, processor generation and cooling +0.04 s each,
+  less the lower declared clock −0.06 s and the connectivity spend −0.03 s.
+- Files: `public/sim.html`, `public/js/sim/` (`model.js`, `plan.js`, `timeline.js`, `strategies.js`,
+  `optimiser.js`, `optimiser.worker.js`, `optimiserRunner.js`, `attribution.js`, `explain.js`,
+  `explainPanel.js`, `sa.js`, `assumptions.js`, `app.js`, `router.js`, `planstore.js`, `visuals.js`,
+  `diagrams.js`, `widgets.js`, `scenes.js`, `dom.js`, `views/`), `public/css/sim.css`, the arcade at
+  `public/arcade.html` + `public/js/arcade/`; tests `tests/sim.*.test.js` (model, plan, strategies,
+  optimiser, attribution, explain) and `tests/sim.browser.test.js` (headless Chrome at 1440×900 and
+  1024×768). `npm test` runs everything (0 skipped when Chrome is installed).
 
 ### Legacy game pages
 
