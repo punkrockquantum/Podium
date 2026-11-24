@@ -118,7 +118,7 @@ export function healthList(health, navigate, { limit = 8, season = null } = {}) 
     el("span", { class: "health-season" }, i.season ? String(i.season) : "Plan"),
     el("button", { type: "button", class: "linkish health-title", onclick: () => navigate(i.route) }, i.title),
     i.rule ? el("span", { class: "fia-badge" }, i.rule) : null,
-    explainButton(`flag.${String(i.id).replace(/^(\d{4}|tl)-/, "")}`, i.title))))
+    explainButton(`flag.${String(i.id).replace(/^(\d{4}|tl)-/, "").replace(/-\d{4}$/, "")}`, i.title))))
 }
 
 /** A row of stats for the ribbon: label + 2027 + 2028 values. */
